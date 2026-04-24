@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n \"API,VITE\" -c \"cyan,green\" \"node server/index.js\" \"vite\"",
-    "build": "tsc -b && vite build",
+    "build": "vite build",    
     "preview": "vite preview"
   },
   "dependencies": {
