@@ -83,7 +83,7 @@ export default function App() {
       if (cancelled) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
       fresh.forEach((c) => seenIds.current.add(c.id));
-      ebayOffset.current = 50;
+      ebayOffset.current = 200; // matches server PAGE_SIZE
       setCards(fresh);
       setDeckResetKey((k) => k + 1);
       setLoading(false);
@@ -100,7 +100,7 @@ export default function App() {
       const fresh = more.filter((c) => !seenIds.current.has(c.id));
       if (fresh.length > 0) {
         fresh.forEach((c) => seenIds.current.add(c.id));
-        ebayOffset.current += 50;
+        ebayOffset.current += 200;
         setCards((prev) => [...prev, ...fresh]);
       }
     } catch (err) {

@@ -175,16 +175,10 @@ const SORT_MAP = {
 };
 
 // ─── Negative keywords (appended to q when showBulk is false) ────────────────
-const BULK_EXCLUSION = [
-  "-lot", "-bundle", "-collection", "-joblot", "-bulk",
-  '-"wholesale"', '-"set of"',
-  "-display", "-case", "-holder", "-stand", "-sleeves",
-  '-"top loaders"', '-"toploader"',
-  "-pack", "-box", "-storage", "-protector",
-  '-"pick your card"', '-"choose your card"', '-"complete your set"',
-  '-"multi-listing"', '-"pick your team"',
-  "-break", '-"personal break"', '-"box break"', '-"case break"',
-].join(" ");
+// Kept intentionally minimal — only the most obvious bulk-only terms.
+// Over-excluding with more keywords causes real individual listings to disappear,
+// making our results diverge from what eBay actually shows for the same search.
+const BULK_EXCLUSION = ["-lot", "-bundle"].join(" ");
 
 // ─── Dynamic condition + grade aspect filters ─────────────────────────────────
 // Conditions: "Raw" → conditionIds:{3000}, any Grade → conditionIds:{2750}
@@ -325,12 +319,14 @@ app.get("/api/ebay/search", async (req, res) => {
     // We do NOT oversample — results mirror eBay's sort order page-for-page.
     const gradeFilter = buildGradeFilter(conds); // null = no grade selected
 
-    // Direct 1-to-1 eBay offset — client offset 0 → eBay 0–49,
-    // offset 50 → eBay 50–99, etc. Sort order is never disturbed.
+    // Direct 1-to-1 eBay offset — client offset 0 → eBay 0–199,
+    // offset 200 → eBay 200–399, etc. Sort order is never disturbed.
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    // Per-request fetch limit: 50 for single category, proportionally split for multi.
-    const PAGE_SIZE = 50;
+    // Per-request fetch limit: 200 (eBay Browse API maximum).
+    // Larger pages mean our sorted results match eBay's actual sorted order
+    // for that window — fewer gaps caused by fetching too few items.
+    const PAGE_SIZE = 200;
 
     let allItems = [];
 
