@@ -1,0 +1,37 @@
+MASTER REPAIR: SEARCH PRECISION, TIMER SYNC, & UI CLEANUP
+Role: Lead Full-Stack Developer & API Specialist.
+Task: Eliminate search leakage, synchronize live auction data across devices, and remove redundant UI clutter.
+
+1. CRITICAL: Search Precision & Metadata (The "Bouncer" Logic)
+Stop Keyword Grading: Do NOT append "Grade 10" or "PSA 10" to the search query q. This is causing inaccurate results (e.g., Grade 3s showing up).
+
+Implement Strict Aspect Filters: You must use the eBay Browse API aspect_filter parameter to ensure metadata accuracy.
+
+If Grade 10 is selected: Use aspect_filter=fieldGroups(ITEM_ASPECTS),itemFilter(name:Grade,value:10).
+
+If Raw is selected: Use itemFilter(name:Condition,value:3000).
+
+Enforce Negative Keywords: Ensure every search includes: -break -'pick your card' -'choose your card' -'pick your team' -'complete your set'.
+
+Dynamic UI Labels: The card must display the actual category and grade returned by the API metadata (e.g., "WWE / 10"). Do not use hard-coded labels.
+
+2. UI CLEANUP: Remove Clutter
+Remove "View on eBay" Button: Completely delete the blue "View on eBay" button from the cards.
+
+Remove Flip Logic: Ensure all "Card Flip" buttons and animations are gone. The card must remain face-up.
+
+Interaction: Tapping the Right 50% of the card cycles to the next image; Left 50% cycles back. Swipe Up triggers the eBay Affiliate Link.
+
+3. LIVE DATA: Mobile & Desktop Sync
+Universal Countdown: The "Time Until Auction Ends" must be visible on both mobile and desktop versions.
+
+Placements:
+
+Main Card: Display the live ticking timer (DDd HHh MMm SSs) clearly next to the price.
+
+Watchlist: Every card in the watchlist must show the live countdown and the current price.
+
+Live Heartbeat: Ensure a setInterval updates these timers every 1 second so they never "freeze" on mobile browsers.
+
+4. LINK INTEGRITY
+Affiliate Redirect: All "Swipe Up" actions and Watchlist clicks must open the itemWebUrl with the affiliate ID: mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5339150952.

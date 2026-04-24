@@ -1,0 +1,159 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-sans: var(--app-font-sans);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ================================================================
+   LIGHT AESTHETIC — clean white surfaces with red primary accent.
+   This is the *only* theme block; there is no .dark override, so
+   the app is locked to light mode by design.
+   ================================================================ */
+:root {
+  --elevate-1: rgba(0, 0, 0, 0.03);
+  --elevate-2: rgba(0, 0, 0, 0.06);
+
+  /* Surfaces */
+  --background: 0 0% 100%;        /* pure white app background */
+  --foreground: 0 0% 9%;          /* near-black text */
+  --border: 0 0% 90%;             /* subtle gray hairlines */
+
+  --card: 0 0% 100%;              /* white cards */
+  --card-foreground: 0 0% 9%;
+  --card-border: 0 0% 90%;
+
+  --sidebar: 0 0% 98%;            /* off-white watchlist panel */
+  --sidebar-foreground: 0 0% 9%;
+  --sidebar-border: 0 0% 90%;
+  --sidebar-primary: 0 75% 50%;   /* red accent inside sidebar */
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 0 0% 95%;
+  --sidebar-accent-foreground: 0 0% 9%;
+  --sidebar-ring: 0 75% 50%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --popover-border: 0 0% 90%;
+
+  /* Brand */
+  --primary: 0 75% 50%;           /* The Card Match red (#dc2626-ish) */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 45 90% 55%;        /* gold (used for swipe-up BUY accent) */
+  --secondary-foreground: 0 0% 9%;
+
+  --muted: 0 0% 96%;              /* very light gray fills */
+  --muted-foreground: 0 0% 40%;   /* slate gray for secondary text */
+
+  --accent: 0 0% 95%;
+  --accent-foreground: 0 0% 9%;
+
+  --destructive: 0 75% 50%;
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 0 0% 90%;
+  --ring: 0 75% 50%;
+
+  --app-font-sans: "Inter", system-ui, sans-serif;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  /* 3D card flip helpers (used by SwipeCard for the tap-flip back side) */
+  .perspective-1000 {
+    perspective: 1000px;
+  }
+  .preserve-3d {
+    transform-style: preserve-3d;
+  }
+  .backface-hidden {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .rotate-y-180 {
+    transform: rotateY(180deg);
+  }
+
+  /* Hover/active elevation overlays — paint a translucent layer on top
+     of any element so buttons feel tactile without changing colors. */
+  .hover-elevate,
+  .active-elevate,
+  .hover-elevate-2,
+  .active-elevate-2 {
+    position: relative;
+    z-index: 0;
+  }
+  .hover-elevate::after,
+  .active-elevate::after,
+  .hover-elevate-2::after,
+  .active-elevate-2::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 999;
+  }
+  .hover-elevate:hover::after,
+  .active-elevate:active::after {
+    background-color: var(--elevate-1);
+  }
+  .hover-elevate-2:hover::after,
+  .active-elevate-2:active::after {
+    background-color: var(--elevate-2);
+  }
+}

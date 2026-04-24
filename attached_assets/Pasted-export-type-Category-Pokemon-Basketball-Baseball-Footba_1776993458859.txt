@@ -1,0 +1,112 @@
+export type Category =
+  | "Pokemon"
+  | "Basketball"
+  | "Baseball"
+  | "Football"
+  | "Hockey"
+  | "Soccer";
+
+export type Grade = "Raw" | "PSA 8" | "PSA 9" | "PSA 10";
+
+export type TradingCard = {
+  id: string;
+  name: string;
+  category: Category;
+  image: string;
+  currentBid: number;
+  grade: Grade;
+  /** Affiliate-wrapped at fetch time by services/ebay.ts (campid 5339150952). */
+  ebayUrl: string;
+};
+
+export const allCards: TradingCard[] = [
+  // ---- Pokémon ----------------------------------------------------------
+  { id: "p1",  name: "Charizard - Base Set Holo",       category: "Pokemon", image: "https://images.pokemontcg.io/base1/4_hires.png",  currentBid: 1250.0,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p2",  name: "Pikachu - Base Set",              category: "Pokemon", image: "https://images.pokemontcg.io/base1/58_hires.png", currentBid: 5400.0,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p3",  name: "Blastoise - Base Set Holo",       category: "Pokemon", image: "https://images.pokemontcg.io/base1/2_hires.png",  currentBid: 480.5,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p4",  name: "Venusaur - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/15_hires.png", currentBid: 320.0,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p5",  name: "Mewtwo - Base Set Holo",          category: "Pokemon", image: "https://images.pokemontcg.io/base1/10_hires.png", currentBid: 875.25,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p6",  name: "Gyarados - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/6_hires.png",  currentBid: 210.0,   grade: "Raw",    ebayUrl: "" },
+  { id: "p7",  name: "Alakazam - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/1_hires.png",  currentBid: 145.99,  grade: "PSA 9",  ebayUrl: "" },
+  { id: "p8",  name: "Machamp - Base Set Holo",         category: "Pokemon", image: "https://images.pokemontcg.io/base1/8_hires.png",  currentBid: 95.0,    grade: "Raw",    ebayUrl: "" },
+  { id: "p9",  name: "Gengar - Fossil Holo",            category: "Pokemon", image: "https://images.pokemontcg.io/fossil/5_hires.png", currentBid: 175.5,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p10", name: "Dragonite - Fossil Holo",         category: "Pokemon", image: "https://images.pokemontcg.io/fossil/4_hires.png", currentBid: 225.75,  grade: "PSA 10", ebayUrl: "" },
+
+  // ---- Basketball -------------------------------------------------------
+  { id: "b1",  name: "LeBron James - 2003 Topps Rookie",        category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/Lebron_James_Lakers.jpg/800px-Lebron_James_Lakers.jpg", currentBid: 12500.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "b2",  name: "LeBron James - Upper Deck SP",            category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/LeBron_James_%2851959977144%29_%28cropped2%29.jpg/600px-LeBron_James_%2851959977144%29_%28cropped2%29.jpg", currentBid: 4200.0, grade: "PSA 9",  ebayUrl: "" },
+  { id: "b3",  name: "Michael Jordan - 1986 Fleer",             category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ae/Michael_Jordan_in_2014.jpg/600px-Michael_Jordan_in_2014.jpg", currentBid: 18900.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "b4",  name: "Stephen Curry - Topps Chrome RC",         category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Stephen_Curry_shooting_in_2024.jpg/600px-Stephen_Curry_shooting_in_2024.jpg", currentBid: 1800.0, grade: "Raw",    ebayUrl: "" },
+  { id: "b5",  name: "Kobe Bryant - Topps Chrome RC",           category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Kobe_Bryant_2014.jpg/600px-Kobe_Bryant_2014.jpg", currentBid: 9500.0, grade: "PSA 9", ebayUrl: "" },
+
+  // ---- Baseball ---------------------------------------------------------
+  { id: "bb1", name: "Mike Trout - 2011 Topps Update",          category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Mike_Trout_2018.jpg/600px-Mike_Trout_2018.jpg", currentBid: 3400.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "bb2", name: "Shohei Ohtani - Bowman Chrome",           category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Shohei_Ohtani_in_2023.jpg/600px-Shohei_Ohtani_in_2023.jpg", currentBid: 2100.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "bb3", name: "Mickey Mantle - 1952 Topps",              category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/Mickey_Mantle_1953.jpg/600px-Mickey_Mantle_1953.jpg", currentBid: 27500.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "bb4", name: "Ronald Acuña Jr. - Bowman Chrome RC",     category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Ronald_Acuna_Jr._on_July_1%2C_2021_%28cropped%29.jpg/600px-Ronald_Acuna_Jr._on_July_1%2C_2021_%28cropped%29.jpg", currentBid: 650.0, grade: "Raw", ebayUrl: "" },
+
+  // ---- Football ---------------------------------------------------------
+  { id: "f1",  name: "Patrick Mahomes - Prizm Rookie",          category: "Football",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/Patrick_Mahomes_%28cropped%29.jpg/600px-Patrick_Mahomes_%28cropped%29.jpg", currentBid: 5800.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "f2",  name: "Tom Brady - 2000 Bowman Chrome",          category: "Football",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Tom_Brady_2019.jpg/600px-Tom_Brady_2019.jpg", currentBid: 14200.0, grade: "PSA 9", ebayUrl: "" },
+
+  // ---- Hockey -----------------------------------------------------------
+  { id: "h1",  name: "Wayne Gretzky - 1979 O-Pee-Chee Rookie",         category: "Hockey", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Wayne_Gretzky_2006.jpg/600px-Wayne_Gretzky_2006.jpg", currentBid: 22000.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "h2",  name: "Connor McDavid - 2015 Upper Deck Young Guns",    category: "Hockey", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Connor_McDavid_2016.jpg/600px-Connor_McDavid_2016.jpg", currentBid: 3400.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "h3",  name: "Sidney Crosby - 2005 Upper Deck Young Guns",     category: "Hockey", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Sidney_Crosby_2017-04-29.jpg/600px-Sidney_Crosby_2017-04-29.jpg", currentBid: 2800.0, grade: "PSA 8", ebayUrl: "" },
+
+  // ---- Soccer -----------------------------------------------------------
+  { id: "s1",  name: "Lionel Messi - 2004 Panini Megacracks Rookie",         category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Lionel_Messi_20180626.jpg/600px-Lionel_Messi_20180626.jpg", currentBid: 8900.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "s2",  name: "Cristiano Ronaldo - 2003 Panini Sports Mega Craques",  category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Cristiano_Ronaldo_2018.jpg/600px-Cristiano_Ronaldo_2018.jpg", currentBid: 6200.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "s3",  name: "Erling Haaland - 2021 Topps Chrome",                   category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Erling_Haaland_2023_%28cropped%29.jpg/600px-Erling_Haaland_2023_%28cropped%29.jpg", currentBid: 950.0, grade: "PSA 8", ebayUrl: "" },
+];
+
+export const CATEGORIES: Category[] = [
+  "Pokemon",
+  "Basketball",
+  "Baseball",
+  "Football",
+  "Hockey",
+  "Soccer",
+];
+
+export const GRADES: Grade[] = ["Raw", "PSA 8", "PSA 9", "PSA 10"];
+
+export type Preferences = {
+  category: Category;
+  query: string;
+  minGrade: Grade;
+};
+
+export const DEFAULT_PREFS: Preferences = {
+  category: "Pokemon",
+  query: "",
+  minGrade: "Raw",
+};
+
+const GRADE_RANK: Record<Grade, number> = {
+  Raw: 0,
+  "PSA 8": 1,
+  "PSA 9": 2,
+  "PSA 10": 3,
+};
+
+/** Combine category + free-text query into a single eBay search string. */
+export function buildSearchQuery(prefs: Preferences): string {
+  return [prefs.category, prefs.query.trim()].filter(Boolean).join(" ");
+}
+
+/** Filter the master catalog by category, grade floor, and free-text tokens. */
+export function fetchCards(prefs: Preferences): TradingCard[] {
+  const minRank = GRADE_RANK[prefs.minGrade];
+  const tokens = prefs.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  return allCards.filter((card) => {
+    if (card.category !== prefs.category) return false;
+    if (GRADE_RANK[card.grade] < minRank) return false;
+    if (tokens.length > 0) {
+      const haystack = card.name.toLowerCase();
+      if (!tokens.every((t) => haystack.includes(t))) return false;
+    }
+    return true;
+  });
+}

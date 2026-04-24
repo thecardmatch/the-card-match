@@ -1,0 +1,137 @@
+import { useEffect, useState } from "react";
+import { Settings as SettingsIcon, Heart } from "lucide-react";
+import { Sidebar } from "@/components/Sidebar";
+import { SwipeDeck } from "@/components/SwipeDeck";
+import { SettingsDialog } from "@/components/SettingsDialog";
+import { usePreferences } from "@/hooks/usePreferences";
+import type { TradingCard } from "@/data/pokemon";
+import { searchCards, buildEbayQuery, getAffiliateUrl } from "@/services/ebay";
+
+const WATCHLIST_KEY = "cardmatch:watchlist";
+
+function loadWatchlist(): TradingCard[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(WATCHLIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TradingCard[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function App() {
+  const [liked, setLiked] = useState<TradingCard[]>(() => loadWatchlist());
+  const [cards, setCards] = useState<TradingCard[]>([]);
+  const { prefs, setPrefs, hasOnboarded } = usePreferences();
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+
+  // Persist watchlist to localStorage so saved cards survive reloads.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked));
+    } catch {}
+  }, [liked]);
+
+  // Refetch cards whenever preferences change.
+  useEffect(() => {
+    let cancelled = false;
+    searchCards(prefs).then((results) => {
+      if (!cancelled) setCards(results);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [prefs]);
+
+  const searchQuery = buildEbayQuery(prefs);
+  const showOnboarding = !hasOnboarded;
+
+  // Swipe-up = open eBay search for this card, wrapped with EPN affiliate
+  // campaign id 5339150952 (see services/ebay.ts -> EPN_CAMP_ID).
+  function handleBuy(card: TradingCard) {
+    if (typeof window === "undefined") return;
+    const url = getAffiliateUrl(card.name);
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  return (
+    // Light aesthetic: white bg-background + slate text comes from :root in index.css
+    <div className="min-h-screen w-full bg-background flex flex-col md:flex-row">
+      <main className="flex-1 flex flex-col order-1 min-h-screen md:min-h-0">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src="/logo.png"
+              alt="The Card Match"
+              className="w-11 h-11 rounded-lg object-cover ring-1 ring-primary/30 shadow-md flex-shrink-0"
+            />
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-xl font-black tracking-tight text-foreground leading-tight">
+                The Card Match
+              </h1>
+              <p className="text-xs text-muted-foreground truncate">
+                Showing results for{" "}
+                <span className="font-mono font-semibold text-foreground">
+                  "{searchQuery || "—"}"
+                </span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Mobile-only: red heart button opens the watchlist as a full-screen overlay */}
+            <button
+              onClick={() => setWatchlistOpen(true)}
+              className="md:hidden relative w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2"
+              aria-label="Open watchlist"
+            >
+              <Heart className="w-5 h-5 text-red-500 fill-red-500" />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-background">
+                  {liked.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2"
+              aria-label="Settings"
+            >
+              <SettingsIcon className="w-5 h-5 text-foreground" />
+            </button>
+          </div>
+        </header>
+
+        <SwipeDeck
+          cards={cards}
+          onLike={(card) => setLiked((prev) => [card, ...prev])}
+          onBuy={handleBuy}
+        />
+      </main>
+
+      {/* Desktop: sidebar pinned on the right */}
+      <Sidebar liked={liked} className="hidden md:flex" />
+
+      {/* Mobile: same sidebar component, but as a full-screen slide-in overlay */}
+      <Sidebar
+        liked={liked}
+        open={watchlistOpen}
+        onClose={() => setWatchlistOpen(false)}
+      />
+
+      <SettingsDialog
+        open={settingsOpen || showOnboarding}
+        prefs={prefs}
+        isOnboarding={showOnboarding}
+        onClose={() => setSettingsOpen(false)}
+        onSave={setPrefs}
+      />
+    </div>
+  );
+}
+
+export default App;

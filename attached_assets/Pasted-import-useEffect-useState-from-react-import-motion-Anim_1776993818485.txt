@@ -1,0 +1,173 @@
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Sparkles } from "lucide-react";
+import {
+  CATEGORIES,
+  GRADES,
+  buildSearchQuery,
+  type Category,
+  type Grade,
+  type Preferences,
+} from "@/data/pokemon";
+
+type Props = {
+  open: boolean;
+  prefs: Preferences;
+  onClose: () => void;
+  onSave: (next: Preferences) => void;
+  /** When true: act as the welcome modal (no Cancel, no backdrop dismiss). */
+  isOnboarding?: boolean;
+};
+
+export function SettingsDialog({
+  open,
+  prefs,
+  onClose,
+  onSave,
+  isOnboarding = false,
+}: Props) {
+  const [draft, setDraft] = useState<Preferences>(prefs);
+
+  // Reset draft to the current prefs each time the dialog opens.
+  useEffect(() => {
+    if (open) setDraft(prefs);
+  }, [open, prefs]);
+
+  function handleSave() {
+    onSave(draft);
+    onClose();
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop — onboarding mode is non-dismissible to force a choice. */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={isOnboarding ? undefined : onClose}
+            className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
+          />
+
+          {/* Dialog card */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: "spring", stiffness: 300, damping: 28 }}
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-md bg-card border border-card-border rounded-2xl shadow-2xl overflow-hidden"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                {isOnboarding && <Sparkles className="w-4 h-4 text-primary" />}
+                <h2 className="text-lg font-bold text-card-foreground">
+                  {isOnboarding ? "Welcome to The Card Match" : "Preferences"}
+                </h2>
+              </div>
+              {!isOnboarding && (
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full flex items-center justify-center hover-elevate"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {isOnboarding && (
+              <div className="px-5 pt-4 -mb-1">
+                <p className="text-sm text-muted-foreground">
+                  Tell us what you collect so we can show you the right cards.
+                </p>
+              </div>
+            )}
+
+            {/* Form */}
+            <div className="p-5 space-y-5">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Favorite Category
+                </label>
+                <select
+                  value={draft.category}
+                  onChange={(e) =>
+                    setDraft({ ...draft, category: e.target.value as Category })
+                  }
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Specific Players / Cards
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. LeBron James, Charizard"
+                  value={draft.query}
+                  onChange={(e) => setDraft({ ...draft, query: e.target.value })}
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Minimum Grade
+                </label>
+                <select
+                  value={draft.minGrade}
+                  onChange={(e) =>
+                    setDraft({ ...draft, minGrade: e.target.value as Grade })
+                  }
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {GRADES.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Live preview of the eBay query that will be built from the draft */}
+              <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs">
+                <span className="text-muted-foreground">Search query: </span>
+                <span className="font-mono font-semibold text-foreground">
+                  "{buildSearchQuery(draft) || "—"}"
+                </span>
+              </div>
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              {!isOnboarding && (
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold text-foreground hover-elevate"
+                >
+                  Cancel
+                </button>
+              )}
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover-elevate active-elevate-2"
+              >
+                {isOnboarding ? "Start Swiping" : "Save"}
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}

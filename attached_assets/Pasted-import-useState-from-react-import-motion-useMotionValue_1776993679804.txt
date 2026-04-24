@@ -1,0 +1,218 @@
+import { useState } from "react";
+import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
+import { ExternalLink, RotateCw } from "lucide-react";
+import type { TradingCard } from "@/data/pokemon";
+import { getAffiliateUrl } from "@/services/ebay";
+
+type Props = {
+  card: TradingCard;
+  isTop: boolean;
+  zIndex: number;
+  offset: number;
+  onSwipe: (direction: "left" | "right" | "up") => void;
+};
+
+export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
+  // Motion values track the card's drag position; we derive rotation
+  // and the opacity of each stamp (SAVE / PASS / BUY) from them.
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const rotate = useTransform(x, [-300, 0, 300], [-20, 0, 20]);
+  const saveOpacity = useTransform(x, [0, 120], [0, 1]);
+  const passOpacity = useTransform(x, [-120, 0], [1, 0]);
+  const buyOpacity = useTransform(y, [-120, 0], [1, 0]);
+
+  const [flipped, setFlipped] = useState(false);
+
+  function handleDragEnd(_: unknown, info: PanInfo) {
+    const SWIPE = 110;
+    const VEL = 500;
+    const ax = info.offset.x;
+    const ay = info.offset.y;
+    const vx = info.velocity.x;
+    const vy = info.velocity.y;
+
+    // Up gesture takes priority when vertical motion dominates.
+    if ((-ay > SWIPE && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) {
+      onSwipe("up");
+      return;
+    }
+    if (ax > SWIPE || vx > VEL) {
+      onSwipe("right");
+      return;
+    }
+    if (ax < -SWIPE || vx < -VEL) {
+      onSwipe("left");
+      return;
+    }
+  }
+
+  function getExitAnimation() {
+    const cx = x.get();
+    const cy = y.get();
+    if (cy < -80 && Math.abs(cy) > Math.abs(cx)) {
+      return { y: -1000, opacity: 0, transition: { duration: 0.3 } };
+    }
+    if (cx > 80) {
+      return { x: 1000, rotate: 30, opacity: 0, transition: { duration: 0.3 } };
+    }
+    if (cx < -80) {
+      return { x: -1000, rotate: -30, opacity: 0, transition: { duration: 0.3 } };
+    }
+    return { opacity: 0, transition: { duration: 0.2 } };
+  }
+
+  return (
+    <motion.div
+      className="absolute inset-0 select-none perspective-1000"
+      style={{
+        zIndex,
+        x: isTop ? x : 0,
+        y: isTop ? y : 0,
+        rotate: isTop ? rotate : 0,
+      }}
+      initial={false}
+      animate={{ scale: 1 - offset * 0.04, y: offset * 12 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      drag={isTop}
+      dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+      dragElastic={0.9}
+      onDragEnd={handleDragEnd}
+      exit={getExitAnimation()}
+    >
+      <motion.div
+        className="relative w-full h-full preserve-3d"
+        animate={{ rotateY: flipped ? 180 : 0 }}
+        transition={{ duration: 0.6, type: "spring", stiffness: 120, damping: 18 }}
+        onClick={(e) => {
+          // Suppress the flip if the user was actually mid-drag.
+          if (Math.abs(x.get()) > 5 || Math.abs(y.get()) > 5) return;
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-no-flip]")) return;
+          setFlipped((f) => !f);
+        }}
+      >
+        {/* ===================== FRONT ===================== */}
+        <div className="absolute inset-0 backface-hidden">
+          <div className="h-full w-full rounded-3xl bg-card border border-card-border shadow-2xl overflow-hidden flex flex-col">
+            <div className="relative flex-1 bg-muted overflow-hidden flex items-center justify-center p-4">
+              <img
+                src={card.image}
+                alt={card.name}
+                className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-lg"
+                draggable={false}
+              />
+
+              {isTop && (
+                <>
+                  {/* Drag-direction stamps */}
+                  <motion.div
+                    style={{ opacity: saveOpacity }}
+                    className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-15deg] bg-black/70 backdrop-blur"
+                  >
+                    SAVE
+                  </motion.div>
+                  <motion.div
+                    style={{ opacity: passOpacity }}
+                    className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[15deg] bg-black/70 backdrop-blur"
+                  >
+                    PASS
+                  </motion.div>
+                  <motion.div
+                    style={{
+                      opacity: buyOpacity,
+                      borderColor: "#FFD700",
+                      color: "#FFD700",
+                      textShadow: "0 0 20px rgba(255, 215, 0, 0.6)",
+                    }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 text-3xl font-black rounded-xl bg-black/70 backdrop-blur"
+                  >
+                    BUY
+                  </motion.div>
+
+                  {/* Manual flip button (also works for users who don't tap the face) */}
+                  <button
+                    data-no-flip
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFlipped(true);
+                    }}
+                    className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white/90 flex items-center justify-center backdrop-blur hover:bg-black/80"
+                    aria-label="Flip card"
+                  >
+                    <RotateCw className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="p-5 bg-card">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">
+                  {card.category}
+                </span>
+                <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                  {card.grade}
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-card-foreground leading-tight">
+                {card.name}
+              </h2>
+              <div className="mt-3 flex items-baseline justify-between">
+                <span className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">
+                  Current Bid
+                </span>
+                <span className="text-2xl font-black text-primary">
+                  ${card.currentBid.toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===================== BACK ===================== */}
+        <div className="absolute inset-0 backface-hidden rotate-y-180">
+          <div
+            className="h-full w-full rounded-3xl border border-card-border shadow-2xl overflow-hidden flex flex-col items-center justify-center text-white relative"
+            style={{
+              background:
+                "radial-gradient(circle at 50% 30%, #2a2a2a 0%, #121212 70%), repeating-linear-gradient(45deg, rgba(192,192,192,0.05) 0 2px, transparent 2px 8px)",
+            }}
+          >
+            <div className="absolute inset-4 rounded-2xl border-2 border-[#C0C0C0]/40 pointer-events-none" />
+            <div className="absolute inset-8 rounded-xl border border-[#C0C0C0]/20 pointer-events-none" />
+
+            <img
+              src="/logo.png"
+              alt="The Card Match"
+              className="w-32 h-32 object-contain opacity-90 drop-shadow-[0_0_20px_rgba(192,192,192,0.3)]"
+              draggable={false}
+            />
+
+            <div className="mt-6 text-center px-6">
+              <p className="text-xs uppercase tracking-[0.3em] text-[#C0C0C0]/70 font-semibold">
+                The Card Match
+              </p>
+              <p className="text-[10px] uppercase tracking-wider text-white/40 mt-1">
+                Tap to flip back
+              </p>
+            </div>
+
+            {/* Affiliate-wrapped Buy Now button (uses EPN campid 5339150952) */}
+            <a
+              data-no-flip
+              href={getAffiliateUrl(card.name)}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="absolute bottom-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[#C0C0C0] text-[#121212] text-sm font-bold hover:bg-white"
+            >
+              Buy Now on eBay
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}

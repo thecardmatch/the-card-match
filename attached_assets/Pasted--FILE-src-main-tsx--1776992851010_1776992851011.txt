@@ -1,0 +1,784 @@
+============================================================
+FILE: src/main.tsx
+============================================================
+import { createRoot } from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+createRoot(document.getElementById("root")!).render(<App />);
+
+============================================================
+FILE: src/index.css
+============================================================
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-sans: var(--app-font-sans);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Light theme — clean white surfaces with red accent */
+:root {
+  --elevate-1: rgba(0, 0, 0, 0.03);
+  --elevate-2: rgba(0, 0, 0, 0.06);
+
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --border: 0 0% 90%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --card-border: 0 0% 90%;
+
+  --sidebar: 0 0% 98%;
+  --sidebar-foreground: 0 0% 9%;
+  --sidebar-border: 0 0% 90%;
+  --sidebar-primary: 0 75% 50%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 0 0% 95%;
+  --sidebar-accent-foreground: 0 0% 9%;
+  --sidebar-ring: 0 75% 50%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --popover-border: 0 0% 90%;
+
+  --primary: 0 75% 50%;
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 45 90% 55%;
+  --secondary-foreground: 0 0% 9%;
+
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+
+  --accent: 0 0% 95%;
+  --accent-foreground: 0 0% 9%;
+
+  --destructive: 0 75% 50%;
+  --destructive-foreground: 0 0% 100%;
+
+  --input: 0 0% 90%;
+  --ring: 0 75% 50%;
+
+  --app-font-sans: "Inter", system-ui, sans-serif;
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .perspective-1000 { perspective: 1000px; }
+  .preserve-3d { transform-style: preserve-3d; }
+  .backface-hidden {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .rotate-y-180 { transform: rotateY(180deg); }
+
+  .hover-elevate, .active-elevate, .hover-elevate-2, .active-elevate-2 {
+    position: relative;
+    z-index: 0;
+  }
+  .hover-elevate::after, .active-elevate::after,
+  .hover-elevate-2::after, .active-elevate-2::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 999;
+  }
+  .hover-elevate:hover::after, .active-elevate:active::after {
+    background-color: var(--elevate-1);
+  }
+  .hover-elevate-2:hover::after, .active-elevate-2:active::after {
+    background-color: var(--elevate-2);
+  }
+}
+
+============================================================
+FILE: src/services/ebay.ts
+============================================================
+/**
+ * eBay Browse API service layer.
+ *
+ * `searchCards()` returns curated mock data today. To go live:
+ *   1. Add eBay credentials to your hosting environment as secrets.
+ *   2. Implement `searchCardsLive()` to call the eBay Browse API
+ *      (https://api.ebay.com/buy/browse/v1/item_summary/search) via a
+ *      server-side proxy and map results into TradingCard.
+ *   3. Set VITE_EBAY_LIVE=true to enable the live path.
+ */
+
+import type { TradingCard, Preferences } from "@/data/pokemon";
+import { fetchCards, buildSearchQuery } from "@/data/pokemon";
+
+// ---- Affiliate (eBay Partner Network "Rover") ---------------------------
+
+/** Live eBay Partner Network campaign id. */
+export const EPN_CAMP_ID = "5339150952";
+
+const EPN_TOOL_ID = "10001";
+const EPN_CUSTOM_ID = "thecardmatch";
+
+function ebaySearchUrl(name: string): string {
+  const q = encodeURIComponent(`${name} card`);
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}`;
+}
+
+/** Wrap any eBay listing URL in the Rover affiliate format. */
+export function wrapAffiliateUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  if (!/ebay\.[a-z.]+/i.test(rawUrl)) return rawUrl;
+  if (!EPN_CAMP_ID || EPN_CAMP_ID === "REPLACE_ME") return rawUrl;
+
+  const params = new URLSearchParams({
+    mpre: rawUrl,
+    campid: EPN_CAMP_ID,
+    toolid: EPN_TOOL_ID,
+    customid: EPN_CUSTOM_ID,
+  });
+  return `https://rover.ebay.com/rover/1/711-53200-19255-0/1?${params.toString()}`;
+}
+
+/**
+ * Universal helper: given a card name (or any search term), produce a
+ * fully-formed, affiliate-wrapped eBay URL. Used everywhere a user can
+ * click out to eBay (swipe-up Buy, back-of-card, watchlist).
+ */
+export function getAffiliateUrl(name: string): string {
+  return wrapAffiliateUrl(ebaySearchUrl(name));
+}
+
+// ---- Search -------------------------------------------------------------
+
+function isLiveEbayConfigured(): boolean {
+  return import.meta.env.VITE_EBAY_LIVE === "true";
+}
+
+export async function searchCards(prefs: Preferences): Promise<TradingCard[]> {
+  if (isLiveEbayConfigured()) {
+    try {
+      return await searchCardsLive(prefs);
+    } catch (err) {
+      console.warn("[ebay] live search failed, falling back to mock", err);
+    }
+  }
+  return searchCardsMock(prefs);
+}
+
+export function buildEbayQuery(prefs: Preferences): string {
+  return buildSearchQuery(prefs);
+}
+
+function searchCardsMock(prefs: Preferences): TradingCard[] {
+  return fetchCards(prefs).map((card) => ({
+    ...card,
+    ebayUrl: getAffiliateUrl(card.name),
+  }));
+}
+
+async function searchCardsLive(_prefs: Preferences): Promise<TradingCard[]> {
+  throw new Error(
+    "Live eBay search not yet implemented. Set VITE_EBAY_LIVE=true and " +
+      "implement /api/ebay/search proxy once eBay keys are added.",
+  );
+}
+
+// ---- Price history -----------------------------------------------------
+
+const HISTORY_CACHE = new Map<string, number[]>();
+
+export async function getPriceHistory(card: TradingCard): Promise<number[]> {
+  if (HISTORY_CACHE.has(card.id)) return HISTORY_CACHE.get(card.id)!;
+  const series = mockPriceHistory(card);
+  HISTORY_CACHE.set(card.id, series);
+  return series;
+}
+
+function mockPriceHistory(card: TradingCard): number[] {
+  let seed = 0;
+  for (let i = 0; i < card.id.length; i++) {
+    seed = (seed * 31 + card.id.charCodeAt(i)) >>> 0;
+  }
+  function rand() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  }
+
+  const points = 12;
+  const trend = (rand() - 0.45) * 0.4;
+  const volatility = 0.06 + rand() * 0.06;
+
+  const series: number[] = [];
+  let value = card.currentBid * (0.85 + rand() * 0.2);
+  for (let i = 0; i < points; i++) {
+    const drift = trend * card.currentBid * 0.05;
+    const noise = (rand() - 0.5) * card.currentBid * volatility;
+    value = Math.max(1, value + drift + noise);
+    series.push(value);
+  }
+  series[points - 1] = card.currentBid;
+  return series;
+}
+
+============================================================
+FILE: src/data/pokemon.ts
+============================================================
+export type Category =
+  | "Pokemon"
+  | "Basketball"
+  | "Baseball"
+  | "Football"
+  | "Hockey"
+  | "Soccer";
+export type Grade = "Raw" | "PSA 8" | "PSA 9" | "PSA 10";
+
+export type TradingCard = {
+  id: string;
+  name: string;
+  category: Category;
+  image: string;
+  currentBid: number;
+  grade: Grade;
+  /** Affiliate-wrapped at fetch time by services/ebay.ts. */
+  ebayUrl: string;
+};
+
+export const allCards: TradingCard[] = [
+  // Pokémon
+  { id: "p1",  name: "Charizard - Base Set Holo",       category: "Pokemon", image: "https://images.pokemontcg.io/base1/4_hires.png",  currentBid: 1250.0,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p2",  name: "Pikachu - Base Set",              category: "Pokemon", image: "https://images.pokemontcg.io/base1/58_hires.png", currentBid: 5400.0,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p3",  name: "Blastoise - Base Set Holo",       category: "Pokemon", image: "https://images.pokemontcg.io/base1/2_hires.png",  currentBid: 480.5,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p4",  name: "Venusaur - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/15_hires.png", currentBid: 320.0,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p5",  name: "Mewtwo - Base Set Holo",          category: "Pokemon", image: "https://images.pokemontcg.io/base1/10_hires.png", currentBid: 875.25,  grade: "PSA 10", ebayUrl: "" },
+  { id: "p6",  name: "Gyarados - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/6_hires.png",  currentBid: 210.0,   grade: "Raw",    ebayUrl: "" },
+  { id: "p7",  name: "Alakazam - Base Set Holo",        category: "Pokemon", image: "https://images.pokemontcg.io/base1/1_hires.png",  currentBid: 145.99,  grade: "PSA 9",  ebayUrl: "" },
+  { id: "p8",  name: "Machamp - Base Set Holo",         category: "Pokemon", image: "https://images.pokemontcg.io/base1/8_hires.png",  currentBid: 95.0,    grade: "Raw",    ebayUrl: "" },
+  { id: "p9",  name: "Gengar - Fossil Holo",            category: "Pokemon", image: "https://images.pokemontcg.io/fossil/5_hires.png", currentBid: 175.5,   grade: "PSA 9",  ebayUrl: "" },
+  { id: "p10", name: "Dragonite - Fossil Holo",         category: "Pokemon", image: "https://images.pokemontcg.io/fossil/4_hires.png", currentBid: 225.75,  grade: "PSA 10", ebayUrl: "" },
+  // Basketball
+  { id: "b1",  name: "LeBron James - 2003 Topps Rookie",        category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/Lebron_James_Lakers.jpg/800px-Lebron_James_Lakers.jpg", currentBid: 12500.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "b2",  name: "LeBron James - Upper Deck SP",            category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/LeBron_James_%2851959977144%29_%28cropped2%29.jpg/600px-LeBron_James_%2851959977144%29_%28cropped2%29.jpg", currentBid: 4200.0, grade: "PSA 9",  ebayUrl: "" },
+  { id: "b3",  name: "Michael Jordan - 1986 Fleer",             category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ae/Michael_Jordan_in_2014.jpg/600px-Michael_Jordan_in_2014.jpg", currentBid: 18900.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "b4",  name: "Stephen Curry - Topps Chrome RC",         category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/Stephen_Curry_shooting_in_2024.jpg/600px-Stephen_Curry_shooting_in_2024.jpg", currentBid: 1800.0, grade: "Raw",    ebayUrl: "" },
+  { id: "b5",  name: "Kobe Bryant - Topps Chrome RC",           category: "Basketball", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Kobe_Bryant_2014.jpg/600px-Kobe_Bryant_2014.jpg", currentBid: 9500.0, grade: "PSA 9", ebayUrl: "" },
+  // Baseball
+  { id: "bb1", name: "Mike Trout - 2011 Topps Update",          category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Mike_Trout_2018.jpg/600px-Mike_Trout_2018.jpg", currentBid: 3400.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "bb2", name: "Shohei Ohtani - Bowman Chrome",           category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Shohei_Ohtani_in_2023.jpg/600px-Shohei_Ohtani_in_2023.jpg", currentBid: 2100.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "bb3", name: "Mickey Mantle - 1952 Topps",              category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8b/Mickey_Mantle_1953.jpg/600px-Mickey_Mantle_1953.jpg", currentBid: 27500.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "bb4", name: "Ronald Acuña Jr. - Bowman Chrome RC",     category: "Baseball",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Ronald_Acuna_Jr._on_July_1%2C_2021_%28cropped%29.jpg/600px-Ronald_Acuna_Jr._on_July_1%2C_2021_%28cropped%29.jpg", currentBid: 650.0, grade: "Raw", ebayUrl: "" },
+  // Football
+  { id: "f1",  name: "Patrick Mahomes - Prizm Rookie",          category: "Football",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/Patrick_Mahomes_%28cropped%29.jpg/600px-Patrick_Mahomes_%28cropped%29.jpg", currentBid: 5800.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "f2",  name: "Tom Brady - 2000 Bowman Chrome",          category: "Football",   image: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c2/Tom_Brady_2019.jpg/600px-Tom_Brady_2019.jpg", currentBid: 14200.0, grade: "PSA 9", ebayUrl: "" },
+  // Hockey
+  { id: "h1",  name: "Wayne Gretzky - 1979 O-Pee-Chee Rookie",  category: "Hockey",     image: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Wayne_Gretzky_2006.jpg/600px-Wayne_Gretzky_2006.jpg", currentBid: 22000.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "h2",  name: "Connor McDavid - 2015 Upper Deck Young Guns", category: "Hockey", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Connor_McDavid_2016.jpg/600px-Connor_McDavid_2016.jpg", currentBid: 3400.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "h3",  name: "Sidney Crosby - 2005 Upper Deck Young Guns",  category: "Hockey", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5b/Sidney_Crosby_2017-04-29.jpg/600px-Sidney_Crosby_2017-04-29.jpg", currentBid: 2800.0, grade: "PSA 8", ebayUrl: "" },
+  // Soccer
+  { id: "s1",  name: "Lionel Messi - 2004 Panini Megacracks Rookie",        category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Lionel_Messi_20180626.jpg/600px-Lionel_Messi_20180626.jpg", currentBid: 8900.0, grade: "PSA 10", ebayUrl: "" },
+  { id: "s2",  name: "Cristiano Ronaldo - 2003 Panini Sports Mega Craques", category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/Cristiano_Ronaldo_2018.jpg/600px-Cristiano_Ronaldo_2018.jpg", currentBid: 6200.0, grade: "PSA 9", ebayUrl: "" },
+  { id: "s3",  name: "Erling Haaland - 2021 Topps Chrome",                  category: "Soccer", image: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Erling_Haaland_2023_%28cropped%29.jpg/600px-Erling_Haaland_2023_%28cropped%29.jpg", currentBid: 950.0, grade: "PSA 8", ebayUrl: "" },
+];
+
+export const CATEGORIES: Category[] = [
+  "Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer",
+];
+export const GRADES: Grade[] = ["Raw", "PSA 8", "PSA 9", "PSA 10"];
+
+export type Preferences = {
+  category: Category;
+  query: string;
+  minGrade: Grade;
+};
+
+export const DEFAULT_PREFS: Preferences = {
+  category: "Pokemon",
+  query: "",
+  minGrade: "Raw",
+};
+
+const GRADE_RANK: Record<Grade, number> = {
+  Raw: 0,
+  "PSA 8": 1,
+  "PSA 9": 2,
+  "PSA 10": 3,
+};
+
+export function buildSearchQuery(prefs: Preferences): string {
+  return [prefs.category, prefs.query.trim()].filter(Boolean).join(" ");
+}
+
+export function fetchCards(prefs: Preferences): TradingCard[] {
+  const minRank = GRADE_RANK[prefs.minGrade];
+  const tokens = prefs.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  return allCards.filter((card) => {
+    if (card.category !== prefs.category) return false;
+    if (GRADE_RANK[card.grade] < minRank) return false;
+    if (tokens.length > 0) {
+      const haystack = card.name.toLowerCase();
+      if (!tokens.every((t) => haystack.includes(t))) return false;
+    }
+    return true;
+  });
+}
+
+============================================================
+FILE: src/hooks/usePreferences.ts
+============================================================
+import { useEffect, useState } from "react";
+import { DEFAULT_PREFS, type Preferences } from "@/data/pokemon";
+
+const STORAGE_KEY = "cardmatch:preferences";
+const ONBOARDED_KEY = "cardmatch:onboarded";
+
+function load(): Preferences {
+  if (typeof window === "undefined") return DEFAULT_PREFS;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_PREFS;
+    const parsed = JSON.parse(raw) as Partial<Preferences>;
+    return { ...DEFAULT_PREFS, ...parsed };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+function loadOnboarded(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(ONBOARDED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function usePreferences() {
+  const [prefs, setPrefsState] = useState<Preferences>(() => load());
+  const [hasOnboarded, setHasOnboarded] = useState<boolean>(() => loadOnboarded());
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    } catch {}
+  }, [prefs]);
+
+  function setPrefs(next: Preferences) {
+    setPrefsState(next);
+    if (!hasOnboarded) {
+      try { window.localStorage.setItem(ONBOARDED_KEY, "true"); } catch {}
+      setHasOnboarded(true);
+    }
+  }
+
+  return { prefs, setPrefs, hasOnboarded } as const;
+}
+
+============================================================
+FILE: src/components/Sparkline.tsx
+============================================================
+type Props = {
+  values: number[];
+  width?: number;
+  height?: number;
+};
+
+export function Sparkline({ values, width = 70, height = 22 }: Props) {
+  if (!values || values.length < 2) return <div style={{ width, height }} />;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = width / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / range) * (height - 2) - 1;
+    return `${x.toFixed(2)},${y.toFixed(2)}`;
+  });
+
+  const first = values[0];
+  const last = values[values.length - 1];
+  const delta = last - first;
+  const pct = (delta / first) * 100;
+  const color = delta > 0 ? "#16a34a" : delta < 0 ? "#dc2626" : "#9ca3af";
+
+  const areaPath = `M0,${height} L` + points.join(" L") + ` L${width},${height} Z`;
+  const linePath = `M` + points.join(" L");
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible" aria-label="Price trend">
+        <path d={areaPath} fill={color} fillOpacity={0.12} />
+        <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <span className="text-[10px] font-bold tabular-nums" style={{ color }}>
+        {delta >= 0 ? "+" : ""}
+        {pct.toFixed(1)}%
+      </span>
+    </div>
+  );
+}
+
+============================================================
+FILE: src/components/InstallPrompt.tsx
+============================================================
+import { useEffect, useState } from "react";
+import { Download, Share, Plus } from "lucide-react";
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+function isIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  const isAppleMobile = /iPhone|iPad|iPod/.test(ua);
+  const isIPadOS =
+    /Macintosh/.test(ua) &&
+    "maxTouchPoints" in navigator &&
+    (navigator as Navigator).maxTouchPoints > 1;
+  return isAppleMobile || isIPadOS;
+}
+
+function isStandalone(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.matchMedia?.("(display-mode: standalone)").matches) return true;
+  return Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+}
+
+export function InstallPrompt() {
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showIOSHint, setShowIOSHint] = useState(false);
+  const [installed, setInstalled] = useState(false);
+
+  useEffect(() => {
+    if (isStandalone()) { setInstalled(true); return; }
+    function onBeforeInstall(e: Event) { e.preventDefault(); setInstallEvent(e as BeforeInstallPromptEvent); }
+    function onInstalled() { setInstalled(true); setInstallEvent(null); }
+    window.addEventListener("beforeinstallprompt", onBeforeInstall);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstall);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  if (installed) return null;
+  const ios = isIOS();
+
+  async function handleClick() {
+    if (installEvent) {
+      await installEvent.prompt();
+      const choice = await installEvent.userChoice;
+      if (choice.outcome === "accepted") setInstalled(true);
+      setInstallEvent(null);
+      return;
+    }
+    if (ios) setShowIOSHint((v) => !v);
+  }
+
+  if (!installEvent && !ios) return null;
+
+  return (
+    <div className="px-3 pb-3 pt-1">
+      <button onClick={handleClick} className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-primary text-primary-foreground font-semibold text-sm hover-elevate active-elevate-2">
+        <span className="flex items-center gap-2">
+          <Download className="w-4 h-4" />
+          Install App
+        </span>
+        <span className="text-[10px] uppercase tracking-wider opacity-70">PWA</span>
+      </button>
+
+      {ios && showIOSHint && (
+        <div className="mt-2 rounded-lg border border-sidebar-border bg-sidebar-accent/40 px-3 py-2.5 text-xs text-sidebar-foreground/90 leading-relaxed">
+          <p className="font-semibold mb-1">Add to Home Screen</p>
+          <p className="flex items-center gap-1.5 flex-wrap">
+            Tap{" "}
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-background/40 font-semibold">
+              <Share className="w-3 h-3" /> Share
+            </span>{" "}
+            then{" "}
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-background/40 font-semibold">
+              <Plus className="w-3 h-3" /> Add to Home Screen
+            </span>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+============================================================
+FILE: src/components/SettingsDialog.tsx
+============================================================
+import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { X, Sparkles } from "lucide-react";
+import {
+  CATEGORIES,
+  GRADES,
+  buildSearchQuery,
+  type Category,
+  type Grade,
+  type Preferences,
+} from "@/data/pokemon";
+
+type Props = {
+  open: boolean;
+  prefs: Preferences;
+  onClose: () => void;
+  onSave: (next: Preferences) => void;
+  isOnboarding?: boolean;
+};
+
+export function SettingsDialog({ open, prefs, onClose, onSave, isOnboarding = false }: Props) {
+  const [draft, setDraft] = useState<Preferences>(prefs);
+
+  useEffect(() => { if (open) setDraft(prefs); }, [open, prefs]);
+
+  function handleSave() { onSave(draft); onClose(); }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={isOnboarding ? undefined : onClose}
+            className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: "spring", stiffness: 300, damping: 28 }}
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[92vw] max-w-md bg-card border border-card-border rounded-2xl shadow-2xl overflow-hidden"
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                {isOnboarding && <Sparkles className="w-4 h-4 text-primary" />}
+                <h2 className="text-lg font-bold text-card-foreground">
+                  {isOnboarding ? "Welcome to The Card Match" : "Preferences"}
+                </h2>
+              </div>
+              {!isOnboarding && (
+                <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center hover-elevate" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {isOnboarding && (
+              <div className="px-5 pt-4 -mb-1">
+                <p className="text-sm text-muted-foreground">
+                  Tell us what you collect so we can show you the right cards.
+                </p>
+              </div>
+            )}
+
+            <div className="p-5 space-y-5">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Favorite Category</label>
+                <select
+                  value={draft.category}
+                  onChange={(e) => setDraft({ ...draft, category: e.target.value as Category })}
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {CATEGORIES.map((c) => (<option key={c} value={c}>{c}</option>))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Specific Players / Cards</label>
+                <input
+                  type="text"
+                  placeholder="e.g. LeBron James, Charizard"
+                  value={draft.query}
+                  onChange={(e) => setDraft({ ...draft, query: e.target.value })}
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Minimum Grade</label>
+                <select
+                  value={draft.minGrade}
+                  onChange={(e) => setDraft({ ...draft, minGrade: e.target.value as Grade })}
+                  className="mt-2 w-full px-3 py-2.5 rounded-lg bg-background border border-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {GRADES.map((g) => (<option key={g} value={g}>{g}</option>))}
+                </select>
+              </div>
+
+              <div className="rounded-lg bg-muted/60 px-3 py-2 text-xs">
+                <span className="text-muted-foreground">Search query: </span>
+                <span className="font-mono font-semibold text-foreground">"{buildSearchQuery(draft) || "—"}"</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border bg-muted/30">
+              {!isOnboarding && (
+                <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold text-foreground hover-elevate">Cancel</button>
+              )}
+              <button onClick={handleSave} className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover-elevate active-elevate-2">
+                {isOnboarding ? "Start Swiping" : "Save"}
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+============================================================
+FILE: src/components/SwipeCard.tsx
+============================================================
+import { useState } from "react";
+import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
+import { ExternalLink, RotateCw } from "lucide-react";
+import type { TradingCard } from "@/data/pokemon";
+import { getAffiliateUrl } from "@/services/ebay";
+
+type Props = {
+  card: TradingCard;
+  isTop: boolean;
+  zIndex: number;
+  offset: number;
+  onSwipe: (direction: "left" | "right" | "up") => void;
+};
+
+export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
+  const x = useMotionValue(0);
+  const y = useMotionValue(0);
+  const rotate = useTransform(x, [-300, 0, 300], [-20, 0, 20]);
+  const saveOpacity = useTransform(x, [0, 120], [0, 1]);
+  const passOpacity = useTransform(x, [-120, 0], [1, 0]);
+  const buyOpacity = useTransform(y, [-120, 0], [1, 0]);
+
+  const [flipped, setFlipped] = useState(false);
+
+  function handleDragEnd(_: unknown, info: PanInfo) {
+    const SWIPE = 110;
+    const VEL = 500;
+    const ax = info.offset.x;
+    const ay = info.offset.y;
+    const vx = info.velocity.x;
+    const vy = info.velocity.y;
+
+    if ((-ay > SWIPE && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { onSwipe("up"); return; }
+    if (ax > SWIPE || vx > VEL) { onSwipe("right"); return; }
+    if (ax < -SWIPE || vx < -VEL) { onSwipe("left"); return; }
+  }
+
+  function getExitAnimation() {
+    const cx = x.get();
+    const cy = y.get();
+    if (cy < -80 && Math.abs(cy) > Math.abs(cx)) return { y: -1000, opacity: 0, transition: { duration: 0.3 } };
+    if (cx > 80) return { x: 1000, rotate: 30, opacity: 0, transition: { duration: 0.3 } };
+    if (cx < -80) return { x: -1000, rotate: -30, opacity: 0, transition: { duration: 0.3 } };
+    return { opacity: 0, transition: { duration: 0.2 } };
+  }
+
+  return (
+    <motion.div
+      className="absolute inset-0 select-none perspective-1000"
+      style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
+      initial={false}
+      animate={{ scale: 1 - offset * 0.04, y: offset * 12 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      drag={isTop}
+      dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+      dragElastic={0.9}
+      onDragEnd={handleDragEnd}
+      exit={getExitAnimation()}
+    >
+      <motion.div
+        className="relative w-full h-full preserve-3d"
+        animate={{ rotateY: flipped ? 180 : 0 }}
+        transition={{ duration: 0.6, type: "spring", stiffness: 120, damping: 18 }}
+        onClick={(e) => {
+          if (Math.abs(x.get()) > 5 || Math.abs(y.get()) > 5) return;
+          const target = e.target as HTMLElement;
+          if (target.closest("[data-no-flip]")) return;
+          setFlipped((f) => !f);
+        }}
+      >
+        {/* FRONT */}
+        <div className="absolute inset-0 backface-hidden">
+          <div className="h-full w-full rounded-3xl bg-card border border-card-border shadow-2xl overflow-hidden flex flex-col">
+            <div className="relative flex-1 bg-muted overflow-hidden flex items-center justify-center p-4">
+              <img src={card.image} alt={card.name} className="max-w-full max-h-full object-contain pointer-events-none drop-shadow-lg" draggable={false} />
+              {isTop && (
+                <>
+                  <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-15deg] bg-black/70 backdrop-blur">SAVE</motion.div>
+                  <motion.div style={{ opacity: passOpacity }} className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[15deg] bg-black/70 backdrop-blur">PASS</motion.div>
+                  <motion.div
+                    style={{ opacity: buyOpacity, borderColor: "#FFD700", color: "#FFD700", textShadow: "0 0 20px rgba(255, 215, 0, 0.6)" }}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 text-3xl font-black rounded-xl bg-black/70 backdrop-blur"
+                  >BUY</motion.div>
+                  <button data-no-flip onClick={(e) => { e.stopPropagation(); setFlipped(true); }} className="absolute bottom-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white/90 flex items-center justify-center backdrop-blur hover:bg-black/80" aria-label="Flip card">
+                    <RotateCw className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="p-5 bg-card">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">{card.category}</span> **...**
+
+_This response is too long to display in full._

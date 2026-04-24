@@ -1,0 +1,41 @@
+CRITICAL SYSTEM OVERHAUL: CLEAN FEED, LIVE TIMERS, & WATCHLIST SORTING
+Role: Lead Full-Stack Developer.
+Objective: Finalize link repairs, implement live timers, clean the search feed, remove redundant UI, and sync Watchlist sorting.
+
+1. UI REFINEMENT: Remove Flip & Fix Gallery
+Remove Flip Logic: Delete the "Flip Card" button and all CSS flip animations. The card must stay face-up.
+
+Image Gallery: Tapping the Right 50% shows the next image; Left 50% shows the previous image from the additionalImages array.
+
+Swipe Up = Buy: Ensure the Swipe Up gesture triggers the eBay Affiliate Link (itemWebUrl) in a new tab.
+
+2. CRITICAL: Link & Item ID Repair
+Fix Links: Stop using 1x1 tracking pixels. Every "Buy" action and Watchlist click must use the itemWebUrl.
+
+Affiliate Tagging: Append mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=5339150952 to all outgoing eBay links.
+
+3. LIVE DATA: Auction Timers & Watchlist Sync
+Live Countdown: Implement a 1-second setInterval heartbeat for itemEndDate. Display as DDd HHh MMm SSs. When it hits 0, display "AUCTION ENDED".
+
+Watchlist Data: Ensure the Supabase watchlist table saves endTime, currentPrice, and listingType (Auction/BIN).
+
+Watchlist UI: Display Current Price and the Live Ticking Timer. Add a mobile-friendly "X" button for individual deletion.
+
+4. WATCHLIST SORTING (NEW):
+Sync Sorting: Add a "Sort By" dropdown to the Watchlist page.
+
+Options: Must include Ending Soonest, Price: Low to High, Price: High to Low, and Newly Added.
+
+Logic: "Ending Soonest" must sort by the endTime saved in the database.
+
+5. SEARCH CLEANUP: Anti-Junk & "Pick Your Card" Filters
+Negative Keywords: Append to every query: -lot -bundle -collection -joblot -bulk -"wholesale" -"set of" -display -case -holder -stand -sleeves -"top loaders" -"toploader" -pack -box -storage -protector -"pick your card" -"choose your card" -"complete your set" -"multi-listing" -"pick your team" -break -"personal break" -"box break" -"case break".
+
+Category Exclusion: Exclude Category ID 183444 (Supplies). Set a $1.00 minimum price floor.
+
+6. METADATA & TRENDING
+Fix Grading: Use eBay Aspect Filters for grades. If "Grade 10" is selected, use aspect_filter=fieldGroups(ITEM_ASPECTS),itemFilter(name:Grade,value:10).
+
+Add WWE: Include Category ID 261328.
+
+Trending: When "Let's See What's Trending" is clicked, apply bidCount:[5..], close settings, and refresh the feed.

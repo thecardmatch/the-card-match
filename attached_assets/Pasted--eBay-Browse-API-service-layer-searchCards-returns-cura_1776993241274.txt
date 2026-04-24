@@ -1,0 +1,124 @@
+/**
+ * eBay Browse API service layer.
+ *
+ * `searchCards()` returns curated mock data today. To go live:
+ *   1. Add eBay credentials to your hosting environment as secrets.
+ *   2. Implement `searchCardsLive()` to call the eBay Browse API
+ *      (https://api.ebay.com/buy/browse/v1/item_summary/search) via a
+ *      server-side proxy and map results into TradingCard.
+ *   3. Set VITE_EBAY_LIVE=true to enable the live path.
+ */
+
+import type { TradingCard, Preferences } from "@/data/pokemon";
+import { fetchCards, buildSearchQuery } from "@/data/pokemon";
+
+// ---- Affiliate (eBay Partner Network "Rover") ---------------------------
+
+/** Live eBay Partner Network campaign id. */
+export const EPN_CAMP_ID = "5339150952";
+
+const EPN_TOOL_ID = "10001";
+const EPN_CUSTOM_ID = "thecardmatch";
+
+function ebaySearchUrl(name: string): string {
+  const q = encodeURIComponent(`${name} card`);
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}`;
+}
+
+/** Wrap any eBay listing URL in the Rover affiliate format. */
+export function wrapAffiliateUrl(rawUrl: string): string {
+  if (!rawUrl) return rawUrl;
+  if (!/ebay\.[a-z.]+/i.test(rawUrl)) return rawUrl;
+  if (!EPN_CAMP_ID || EPN_CAMP_ID === "REPLACE_ME") return rawUrl;
+
+  const params = new URLSearchParams({
+    mpre: rawUrl,
+    campid: EPN_CAMP_ID,
+    toolid: EPN_TOOL_ID,
+    customid: EPN_CUSTOM_ID,
+  });
+  return `https://rover.ebay.com/rover/1/711-53200-19255-0/1?${params.toString()}`;
+}
+
+/**
+ * Universal helper: given a card name (or any search term), produce a
+ * fully-formed, affiliate-wrapped eBay URL. Used everywhere a user can
+ * click out to eBay (swipe-up Buy, back-of-card Buy Now, watchlist row).
+ */
+export function getAffiliateUrl(name: string): string {
+  return wrapAffiliateUrl(ebaySearchUrl(name));
+}
+
+// ---- Search -------------------------------------------------------------
+
+function isLiveEbayConfigured(): boolean {
+  return import.meta.env.VITE_EBAY_LIVE === "true";
+}
+
+export async function searchCards(prefs: Preferences): Promise<TradingCard[]> {
+  if (isLiveEbayConfigured()) {
+    try {
+      return await searchCardsLive(prefs);
+    } catch (err) {
+      console.warn("[ebay] live search failed, falling back to mock", err);
+    }
+  }
+  return searchCardsMock(prefs);
+}
+
+export function buildEbayQuery(prefs: Preferences): string {
+  return buildSearchQuery(prefs);
+}
+
+function searchCardsMock(prefs: Preferences): TradingCard[] {
+  return fetchCards(prefs).map((card) => ({
+    ...card,
+    ebayUrl: getAffiliateUrl(card.name),
+  }));
+}
+
+async function searchCardsLive(_prefs: Preferences): Promise<TradingCard[]> {
+  throw new Error(
+    "Live eBay search not yet implemented. Set VITE_EBAY_LIVE=true and " +
+      "implement /api/ebay/search proxy once eBay keys are added.",
+  );
+}
+
+// ---- Price history -----------------------------------------------------
+
+const HISTORY_CACHE = new Map<string, number[]>();
+
+export async function getPriceHistory(card: TradingCard): Promise<number[]> {
+  if (HISTORY_CACHE.has(card.id)) return HISTORY_CACHE.get(card.id)!;
+  const series = mockPriceHistory(card);
+  HISTORY_CACHE.set(card.id, series);
+  return series;
+}
+
+function mockPriceHistory(card: TradingCard): number[] {
+  // Deterministic pseudo-random series seeded from the card id so the
+  // sparkline stays stable across renders.
+  let seed = 0;
+  for (let i = 0; i < card.id.length; i++) {
+    seed = (seed * 31 + card.id.charCodeAt(i)) >>> 0;
+  }
+  function rand() {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 0xffffffff;
+  }
+
+  const points = 12;
+  const trend = (rand() - 0.45) * 0.4;
+  const volatility = 0.06 + rand() * 0.06;
+
+  const series: number[] = [];
+  let value = card.currentBid * (0.85 + rand() * 0.2);
+  for (let i = 0; i < points; i++) {
+    const drift = trend * card.currentBid * 0.05;
+    const noise = (rand() - 0.5) * card.currentBid * volatility;
+    value = Math.max(1, value + drift + noise);
+    series.push(value);
+  }
+  series[points - 1] = card.currentBid;
+  return series;
+}

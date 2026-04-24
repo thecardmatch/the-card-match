@@ -1,0 +1,58 @@
+modules = ["nodejs-20"]
+[agent]
+expertMode = true
+stack = "BEST_EFFORT_FALLBACK"
+
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[ports]]
+localPort = 3001
+externalPort = 3000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3001
+
+[deployment]
+deploymentTarget = "static"
+build = ["npm", "run", "build"]
+publicDir = "dist"
+
+[userenv]
+
+[userenv.shared]
+SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co/rest/v1/"
+SUPABASE_ANON_KEY = "sb_publishable_zxfBEAi2JmjFYKiXqP9s3w_5ztQ_h-7"
+VITE_SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co"
+VITE_SUPABASE_ANON_KEY = "sb_publishable_zxfBEAi2JmjFYKiXqP9s3w_5ztQ_h-7"
+EBAY_CLIENT_ID = "JosephPe-TheCardM-PRD-a84c0e5fe-2341975d"
+EBAY_CLIENT_SECRET = "PRD-84c0e5fed192-99f6-4cb9-8357-5a36"

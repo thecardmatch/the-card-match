@@ -1,0 +1,151 @@
+import { useEffect, useState } from "react";
+import { Heart, ExternalLink, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import type { TradingCard } from "@/data/pokemon";
+import { getPriceHistory, getAffiliateUrl } from "@/services/ebay";
+import { InstallPrompt } from "./InstallPrompt";
+import { Sparkline } from "./Sparkline";
+
+type Props = {
+  liked: TradingCard[];
+  /** Provide onClose + open to render as a mobile overlay; omit for desktop side panel. */
+  onClose?: () => void;
+  open?: boolean;
+  className?: string;
+};
+
+function PriceTrend({ card }: { card: TradingCard }) {
+  const [series, setSeries] = useState<number[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getPriceHistory(card).then((s) => {
+      if (!cancelled) setSeries(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [card]);
+  if (!series) return <div style={{ width: 70, height: 22 }} />;
+  return <Sparkline values={series} />;
+}
+
+function WatchlistBody({ liked }: { liked: TradingCard[] }) {
+  const total = liked.reduce((sum, c) => sum + c.currentBid, 0);
+  return (
+    <>
+      <div className="px-6 py-5 border-b border-sidebar-border">
+        <div className="flex items-center gap-2">
+          {/* Red heart matches the mobile header trigger button */}
+          <Heart className="w-5 h-5 text-red-500 fill-red-500" />
+          <h1 className="text-lg font-bold text-sidebar-foreground">
+            My Watchlist
+          </h1>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          {liked.length} {liked.length === 1 ? "card" : "cards"} • $
+          {total.toFixed(2)} total
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        {liked.length === 0 ? (
+          <div className="text-center py-12 px-4">
+            <p className="text-sm text-muted-foreground">
+              Swipe right on cards you want to track.
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-2 list-none p-0">
+            {liked.map((card, idx) => (
+              <li key={`${card.id}-${idx}`}>
+                {/* Each row is an affiliate-wrapped eBay link (campid 5339150952) */}
+                <a
+                  href={getAffiliateUrl(card.name)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-3 p-2 rounded-lg bg-sidebar-accent/40 hover-elevate"
+                  title="Buy on eBay"
+                >
+                  <div className="w-12 h-12 rounded-md bg-muted overflow-hidden flex-shrink-0">
+                    <img
+                      src={card.image}
+                      alt={card.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-sidebar-foreground truncate">
+                      {card.name}
+                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs text-foreground font-bold">
+                        ${card.currentBid.toFixed(2)}
+                      </p>
+                      <PriceTrend card={card} />
+                    </div>
+                  </div>
+                  <span
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-muted-foreground"
+                    aria-label="Open on eBay"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="border-t border-sidebar-border">
+        <InstallPrompt />
+      </div>
+    </>
+  );
+}
+
+export function Sidebar({ liked, onClose, open, className = "" }: Props) {
+  // Mobile overlay variant — triggered by the red heart in the header.
+  if (onClose) {
+    return (
+      <AnimatePresence>
+        {open && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="fixed inset-0 bg-black/50 z-40 backdrop-blur-sm"
+            />
+            <motion.aside
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", stiffness: 280, damping: 30 }}
+              className="fixed top-0 right-0 bottom-0 z-50 w-[88vw] max-w-sm bg-sidebar border-l border-sidebar-border flex flex-col shadow-2xl"
+            >
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 z-10 w-9 h-9 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate"
+                aria-label="Close watchlist"
+              >
+                <X className="w-4 h-4 text-foreground" />
+              </button>
+              <WatchlistBody liked={liked} />
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+    );
+  }
+
+  // Desktop side panel variant — pinned to the right of the swipe deck.
+  return (
+    <aside
+      className={`w-full md:w-80 md:h-screen bg-sidebar border-t md:border-t-0 md:border-l border-sidebar-border flex flex-col order-2 ${className}`}
+    >
+      <WatchlistBody liked={liked} />
+    </aside>
+  );
+}
