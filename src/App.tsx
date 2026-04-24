@@ -132,7 +132,13 @@ export default function App() {
 
   function handleBuy(card: TradingCard) {
     const url = card.ebayUrl || getAffiliateUrl(card.name);
-    if (typeof window !== "undefined") window.open(url, "_blank", "noopener,noreferrer");
+    if (!url) return;
+    // window.open is blocked by mobile popup blockers when called from a gesture
+    // (not a direct click event). Try it first; if blocked, navigate in the same tab.
+    const win = window.open(url, "_blank", "noopener,noreferrer");
+    if (!win || win.closed || typeof win.closed === "undefined") {
+      window.location.href = url;
+    }
   }
 
   async function handleLike(card: TradingCard) {
