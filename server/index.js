@@ -89,22 +89,37 @@ function detectGrade(title) {
  * otherwise builds a clean URL with EPN params.
  */
 function buildAffiliateUrl(item) {
+  // Prefer eBay's pre-signed affiliate URL (requires the X-EBAY-C-ENDUSERCTX header).
   if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
+
+  const AFF_PARAMS = {
+    campid:   EPN_CAMP_ID,
+    toolid:   "10001",
+    mkevt:    "1",
+    mkcid:    "1",
+    mkrid:    "711-53200-19255-0",
+    customid: "thecardmatch",
+  };
+
+  // Try to stamp the itemWebUrl.
   const rawUrl = item.itemWebUrl || "";
-  if (!rawUrl) return "";
-  try {
-    const u = new URL(rawUrl);
-    const cleanUrl = new URL(`${u.origin}${u.pathname}`);
-    cleanUrl.searchParams.set("campid", EPN_CAMP_ID);
-    cleanUrl.searchParams.set("toolid", "10001");
-    cleanUrl.searchParams.set("mkevt", "1");
-    cleanUrl.searchParams.set("mkcid", "1");
-    cleanUrl.searchParams.set("mkrid", "711-53200-19255-0");
-    cleanUrl.searchParams.set("customid", "thecardmatch");
-    return cleanUrl.toString();
-  } catch {
-    return rawUrl;
+  if (rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      const cleanUrl = new URL(`${u.origin}${u.pathname}`);
+      Object.entries(AFF_PARAMS).forEach(([k, v]) => cleanUrl.searchParams.set(k, v));
+      return cleanUrl.toString();
+    } catch { /* fall through */ }
   }
+
+  // Last resort: build a direct /itm/{id} URL from the itemId.
+  if (item.itemId) {
+    const direct = new URL(`https://www.ebay.com/itm/${item.itemId}`);
+    Object.entries(AFF_PARAMS).forEach(([k, v]) => direct.searchParams.set(k, v));
+    return direct.toString();
+  }
+
+  return "";
 }
 
 function mapItem(item, selectedCats) {
@@ -115,16 +130,28 @@ function mapItem(item, selectedCats) {
     : additionalImgs;
   const buyingOptions = item.buyingOptions || [];
   const listingType = buyingOptions.includes("AUCTION") ? "Auction" : "BuyItNow";
+
+  // For active auctions, eBay returns the live bid in currentBidPrice.
+  // price can be $0.00 (starting price before any bids) — always prefer currentBidPrice.
+  const bidValue =
+    parseFloat(item.currentBidPrice?.value ?? "") ||
+    parseFloat(item.price?.value ?? "") ||
+    0;
+
+  // Always build an affiliate URL — prefer the EPN-signed one eBay returns,
+  // fall back to our own stamped URL so campid is never missing.
+  const affiliateUrl = buildAffiliateUrl(item);
+
   return {
     id: item.itemId,
     name: item.title || "Unknown Card",
     category: detectCategory(item.title || "", selectedCats),
     image: primaryImg,
     images: allImages,
-    currentBid: parseFloat(item.price?.value ?? "0"),
-    currency: item.price?.currency ?? "USD",
+    currentBid: bidValue,
+    currency: item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
     grade: detectGrade(item.title || ""),
-    ebayUrl: buildAffiliateUrl(item),
+    ebayUrl: affiliateUrl,
     endTime: item.itemEndDate || null,
     watchCount: item.watchCount || 0,
     condition: item.condition || "",

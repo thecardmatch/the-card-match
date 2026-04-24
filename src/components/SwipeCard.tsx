@@ -32,11 +32,12 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
   const hasMultiple  = allImages.length > 1;
 
   function handleDragEnd(_: unknown, info: PanInfo) {
-    const SWIPE = 110, VEL = 500;
+    const SWIPE_HORIZ = 100, SWIPE_UP = 75, VEL = 450;
     const { offset: { x: ax, y: ay }, velocity: { x: vx, y: vy } } = info;
-    if ((-ay > SWIPE && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { onSwipe("up");    return; }
-    if (ax > SWIPE  || vx > VEL)  { onSwipe("right"); return; }
-    if (ax < -SWIPE || vx < -VEL) { onSwipe("left");  return; }
+    // Up swipe gets a lower threshold — the most deliberate gesture on mobile.
+    if ((-ay > SWIPE_UP && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { onSwipe("up");    return; }
+    if (ax > SWIPE_HORIZ  || vx > VEL)  { onSwipe("right"); return; }
+    if (ax < -SWIPE_HORIZ || vx < -VEL) { onSwipe("left");  return; }
   }
 
   function getExitAnimation() {
