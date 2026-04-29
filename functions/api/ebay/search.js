@@ -28,7 +28,7 @@ export async function onRequest(context) {
       else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "raw ungraded -psa -bgs -sgc -cgc";
     }
 
-    const cleanCategory = category === "—" ? "" : category;
+    const cleanCategory = category === "—" || !category ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
     let ebaySort = "newlyListed";
@@ -48,48 +48,47 @@ export async function onRequest(context) {
     const data = await ebayRes.json();
 
     const items = (data.itemSummaries || []).map(item => {
-      // 1. MULTI-PHOTO (BUBBLES) FIX
-      const mainImg = item.image?.imageUrl || "";
-      const additionalImgs = (item.additionalImages || []).map(i => i.imageUrl);
-      const allPhotos = [mainImg, ...additionalImgs].filter(Boolean);
+      const title = item.title || "";
 
-      // 2. THE ULTIMATE TIMER FIX
-      // We send both the ISO string AND a numeric timestamp.
-      // If your frontend uses new Date(endTime), the ISO string works.
-      // If it uses a numeric comparison, the live site is safer.
-      const rawEndTime = item.listingEndingAt;
-      let finalEndTime = "Buy It Now";
-      if (rawEndTime) {
-        const d = new Date(rawEndTime);
-        if (!isNaN(d.getTime())) {
-          finalEndTime = d.toISOString();
-        }
+      // 1. SMART SPORT DETECTION (For "Everything" mode)
+      let detectedSport = cleanCategory || "Card";
+      if (detectedSport === "Card") {
+        if (/pokemon|charizard|pikachu/i.test(title)) detectedSport = "Pokemon";
+        else if (/basketball|nba|lebron|curry/i.test(title)) detectedSport = "Basketball";
+        else if (/baseball|mlb|shohei|judge/i.test(title)) detectedSport = "Baseball";
+        else if (/football|nfl|brady|mahomes/i.test(title)) detectedSport = "Football";
+        else if (/soccer|messi|ronaldo/i.test(title)) detectedSport = "Soccer";
       }
 
-      // 3. AFFILIATE LINK
+      // 2. CONDITION BADGE FIX (Middle Badge)
+      let conditionLabel = "Raw";
+      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC)\s*(\d+\.?\d*)/i);
+      if (gradeMatch) {
+        conditionLabel = `${gradeMatch[1]} ${gradeMatch[2]}`;
+      } else if (item.condition) {
+        conditionLabel = item.condition;
+      }
+
+      // 3. THE "RAW NUMBER" TIMER FIX
+      // We send a numeric timestamp. If this still shows NaN, the issue is your Frontend Timer code.
+      const rawEndTime = item.listingEndingAt;
+      const endTimeValue = rawEndTime ? new Date(rawEndTime).getTime() : "Buy It Now";
+
+      // 4. AFFILIATE LINK
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
       const trackingUrl = `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`;
 
-      // 4. BADGE LABEL FIX (NO MORE BLANKS)
-      const isAuction = (item.buyingOptions || []).includes("AUCTION") || !!item.bidCount;
-
-      // We force a value here so it's never blank
-      let gradeLabel = "Raw"; 
-      if (item.title.toUpperCase().includes("PSA 10")) gradeLabel = "PSA 10";
-      else if (conditions && conditions !== "—") gradeLabel = conditions; 
-      else if (item.condition) gradeLabel = item.condition;
-
       return {
         id: String(item.itemId),
-        name: item.title,
-        image: mainImg,
-        images: allPhotos,
+        name: title,
+        image: item.image?.imageUrl || "",
+        images: [item.image?.imageUrl, ...(item.additionalImages || []).map(i => i.imageUrl)].filter(Boolean),
         currentBid: item.price ? parseFloat(item.price.value) : 0,
         ebayUrl: trackingUrl,
-        condition: gradeLabel, // This fills the middle badge
-        category: cleanCategory || "Card", // This fills the first badge
-        listingType: isAuction ? "Auction" : "Buy It Now", // This fills the last badge
-        endTime: finalEndTime,
+        condition: conditionLabel, 
+        category: detectedSport,
+        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+        endTime: endTimeValue, // Sending as a NUMBER now
         bidCount: item.bidCount || 0
       };
     });
