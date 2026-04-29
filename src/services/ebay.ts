@@ -1,9 +1,7 @@
-// We are removing the old pokemon-specific imports to stop the "Pokemon-only" bias
-import type { TradingCard, Preferences } from "@/data/pokemon"; 
+import type { TradingCard, Preferences } from "@/data/pokemon";
 
 export const EPN_CAMP_ID = "5339150952";
 
-/** Universal Search URL builder */
 export function getAffiliateUrl(name: string): string {
   const searchUrl = new URL("https://www.ebay.com/sch/i.html");
   searchUrl.searchParams.set("_nkw", name);
@@ -15,48 +13,60 @@ export function getAffiliateUrl(name: string): string {
 export async function searchCards(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
   try {
     const results = await searchCardsLive(prefs, offset);
-    // If live results exist, show them. If not, return empty so we don't see fakes.
-    return results.length > 0 ? results : []; 
+    return results;
   } catch (err) {
-    console.error("Platform Search Error:", err);
-    return []; 
+    console.error("Platform search failed:", err);
+    return [];
   }
 }
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
-  // 1. Dynamic Category Routing
-  // This maps your UI buttons to the broad eBay categories
-  const sportsList = ["Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1"];
-  const isSports = prefs.categories.some(cat => sportsList.includes(cat));
+  // 1. Dynamic Sorting Logic
+  // We map your UI labels to eBay's API sort keys
+  let ebaySort = "";
+  switch (prefs.sort) {
+    case "ending_soon":
+      ebaySort = "endingSoonest"; // Prioritizes Auctions
+      break;
+    case "price_asc":
+      ebaySort = "price"; 
+      break;
+    case "price_desc":
+      ebaySort = "-price";
+      break;
+    case "newly_listed":
+      ebaySort = "newlyListed";
+      break;
+    default:
+      ebaySort = "distance"; // Default 'Best Match' logic
+  }
 
-  // Category 261328 = Sports Trading Cards
-  // Category 183454 = Non-Sport / CCG (Pokemon, WWE, etc.)
-  const categoryId = isSports ? "261328" : "183454";
+  // 2. Query & Category Logic
+  const categoryLabel = prefs.categories?.[0] || "";
+  const query = `${prefs.query} ${categoryLabel} card`.trim();
 
-  // 2. Multi-Type Query Construction
-  // It takes the user query (e.g. "Topps") and the category (e.g. "Baseball")
-  const categoryName = prefs.categories[0] || "";
-  const fullQuery = `${prefs.query} ${categoryName} card`.trim();
-
+  // 3. The "Broad Search" Params
   const params = new URLSearchParams({
-    q: fullQuery,
-    category_ids: categoryId,
-    filter: `price:[${prefs.minPrice || 0}..${prefs.maxPrice || 99999}],priceCurrency:USD`,
+    q: query,
+    // This makes sure both Auctions and Buy It Now appear
+    filter: `buyingOptions:{FIXED_PRICE|AUCTION},priceCurrency:USD`,
+    sort: ebaySort,
     limit: "50",
     offset: String(offset)
   });
 
   const res = await fetch(`/ebay-search?${params.toString()}`);
-  if (!res.ok) throw new Error("Bridge Link Offline");
+  if (!res.ok) throw new Error(`API error ${res.status}`);
 
   const data = await res.json();
-  const rawItems = data.itemSummaries || data.items || [];
+  const rawItems = data.itemSummaries || [];
 
-  // 3. The Universal Mapper
-  // This translates eBay's data into your platform's format, regardless of sport
   return rawItems.map((item: any) => {
     const endTimeRaw = item.listingEndingAt;
     const isEnded = endTimeRaw ? new Date(endTimeRaw) < new Date() : false;
+
+    // Determine if it's an auction or buy it now for the UI
+    const isAuction = item.buyingOptions?.includes("AUCTION");
 
     return {
       id: String(item.itemId),
@@ -65,19 +75,20 @@ async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingC
       currentBid: item.price ? parseFloat(item.price.value) : 0,
       ebayUrl: item.itemWebUrl,
       condition: item.condition || "Ungraded",
-      // Handles the watchlist "Ended" logic you wanted
+      // UI Labeling
       endTime: isEnded ? "ENDED" : (endTimeRaw || "Buy It Now"),
-      bidCount: item.bidCount || 0
+      bidCount: item.bidCount || 0,
+      // We can pass extra info to the UI if needed
+      isAuction: isAuction
     };
   });
 }
 
-// Keep the rest of the file clean for the build
 export function buildEbayQuery(prefs: Preferences): string {
   return prefs.query;
 }
 
 export async function getPriceHistory(card: TradingCard): Promise<number[]> {
-  const base = card.currentBid || 10;
-  return [base * 0.95, base * 1.05, base];
+  const p = card.currentBid || 20;
+  return [p * 0.9, p * 1.05, p * 0.88, p];
 }
