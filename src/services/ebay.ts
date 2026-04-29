@@ -3,7 +3,6 @@ import { fetchCards, buildSearchQuery } from "@/data/pokemon";
 
 export const EPN_CAMP_ID = "5339150952";
 
-/** Build a direct eBay search URL for the "Buy Now" buttons. */
 export function getAffiliateUrl(name: string): string {
   const searchUrl = new URL("https://www.ebay.com/sch/i.html");
   searchUrl.searchParams.set("_nkw", name);
@@ -15,10 +14,14 @@ export function getAffiliateUrl(name: string): string {
 
 export async function searchCards(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
   try {
-    return await searchCardsLive(prefs, offset);
+    const results = await searchCardsLive(prefs, offset);
+    // If we get an empty array back from eBay, show mocks so the site isn't empty
+    if (!results || results.length === 0) {
+      return searchCardsMock(prefs);
+    }
+    return results;
   } catch (err) {
-    console.warn("[ebay] live search failed, falling back to mock", err);
-    // If the live search fails, this mock ensures the site stays up
+    console.error("eBay Search Error:", err);
     return searchCardsMock(prefs);
   }
 }
@@ -28,49 +31,45 @@ export function buildEbayQuery(prefs: Preferences): string {
 }
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
-  // 1. Simplified Category Logic (Build-Safe)
-  const categoryTerms = prefs.categories && prefs.categories.length > 0 
-    ? prefs.categories.join(" ") 
-    : "";
+  // 1. Clean up the query
+  const searchTerm = prefs.query || "pokemon";
+  const categoryTerm = prefs.categories?.[0] || "card";
 
-  const fullQuery = `${prefs.query} ${categoryTerms} card`.trim();
-
-  // 2. Strict Filter Formatting
-  const minP = prefs.minPrice || 0;
-  const maxP = prefs.maxPrice || 999999;
-  const filterString = `price:[${minP}..${maxP}],priceCurrency:USD,buyingOptions:{FIXED_PRICE|AUCTION}`;
+  // 2. Format the Filter string exactly how eBay likes it
+  // Removed buyingOptions temporarily to ensure we get ANY data first
+  const min = prefs.minPrice || 0;
+  const max = prefs.maxPrice || 99999;
+  const filterParams = `price:[${min}..${max}],priceCurrency:USD`;
 
   const params = new URLSearchParams({
-    q: fullQuery,
-    filter: filterString,
-    sort: prefs.sort === "price_asc" ? "price" : "-price",
+    q: `${searchTerm} ${categoryTerm}`,
+    filter: filterParams,
     limit: "40",
-    offset: String(offset),
+    offset: String(offset)
   });
 
-  // 3. The Fetch
-  const res = await fetch(`/ebay-search?${params.toString()}`);
+  // 3. Call the bridge
+  const response = await fetch(`/ebay-search?${params.toString()}`);
 
-  if (!res.ok) {
-    throw new Error(`eBay API error: ${res.status}`);
+  if (!response.ok) {
+    throw new Error(`Bridge Error: ${response.status}`);
   }
 
-  const data = await res.json();
+  const data = await response.json();
 
-  // 4. Safe Mapping Logic
-  if (!data || !data.itemSummaries) {
-    return [];
-  }
+  // 4. eBay's Browse API returns 'itemSummaries', not 'items'
+  const items = data.itemSummaries || data.items || [];
 
-  return data.itemSummaries.map((item: any) => {
-    // Determine if the auction is already over
+  if (!Array.isArray(items)) return [];
+
+  return items.map((item: any) => {
     const rawEndTime = item.listingEndingAt;
     const isEnded = rawEndTime ? new Date(rawEndTime) < new Date() : false;
 
     return {
-      id: item.itemId || Math.random().toString(),
-      name: item.title || "Unknown Card",
-      image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
+      id: item.itemId || String(Math.random()),
+      name: item.title || "Trading Card",
+      image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
       currentBid: item.price ? parseFloat(item.price.value) : 0,
       ebayUrl: item.itemWebUrl || "#",
       condition: item.condition || "Ungraded",
@@ -87,14 +86,6 @@ function searchCardsMock(prefs: Preferences): TradingCard[] {
   }));
 }
 
-// Mock Price History (Safe logic for the charts)
 export async function getPriceHistory(card: TradingCard): Promise<number[]> {
-  const points = 12;
-  const series = [];
-  let base = card.currentBid || 10;
-  for (let i = 0; i < points; i++) {
-    series.push(base * (0.9 + Math.random() * 0.2));
-  }
-  series[points - 1] = card.currentBid;
-  return series;
+  return Array.from({ length: 12 }, () => (card.currentBid || 10) * (0.8 + Math.random() * 0.4));
 }
