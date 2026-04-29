@@ -21,14 +21,15 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
+    // 1. Precise Grading Search Keywords
     let gradeKeywords = "";
-    if (conditions) {
+    if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
-      if (match) gradeKeywords = `(psa,bgs,sgc,cgc,grade) ${match[0]}`;
+      if (match) gradeKeywords = `(psa,bgs,sgc,cgc,grade,vgs) ${match[0]}`;
       else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "raw ungraded -psa -bgs -sgc -cgc";
     }
 
-    const cleanCategory = category === "—" || !category ? "" : category;
+    const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
     let ebaySort = "newlyListed";
@@ -50,31 +51,42 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
 
-      // 1. SMART SPORT DETECTION (For "Everything" mode)
+      // 2. MULTI-SPORT DETECTION (Expanded for all sports)
       let detectedSport = cleanCategory || "Card";
       if (detectedSport === "Card") {
-        if (/pokemon|charizard|pikachu/i.test(title)) detectedSport = "Pokemon";
-        else if (/basketball|nba|lebron|curry/i.test(title)) detectedSport = "Basketball";
-        else if (/baseball|mlb|shohei|judge/i.test(title)) detectedSport = "Baseball";
-        else if (/football|nfl|brady|mahomes/i.test(title)) detectedSport = "Football";
-        else if (/soccer|messi|ronaldo/i.test(title)) detectedSport = "Soccer";
+        const t = title.toLowerCase();
+        if (t.includes("pokemon") || t.includes("charizard") || t.includes("pikachu")) detectedSport = "Pokemon";
+        else if (t.includes("basketball") || t.includes("nba") || t.includes("lebron")) detectedSport = "Basketball";
+        else if (t.includes("baseball") || t.includes("mlb") || t.includes("shohei")) detectedSport = "Baseball";
+        else if (t.includes("football") || t.includes("nfl") || t.includes("mahomes")) detectedSport = "Football";
+        else if (t.includes("soccer") || t.includes("messi") || t.includes("ronaldo")) detectedSport = "Soccer";
+        else if (t.includes("hockey") || t.includes("nhl") || t.includes("mcdavid")) detectedSport = "Hockey";
+        else if (t.includes("ufc") || t.includes("mma") || t.includes("conor")) detectedSport = "UFC";
       }
 
-      // 2. CONDITION BADGE FIX (Middle Badge)
-      let conditionLabel = "Raw";
-      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC)\s*(\d+\.?\d*)/i);
-      if (gradeMatch) {
-        conditionLabel = `${gradeMatch[1]} ${gradeMatch[2]}`;
+      // 3. MIDDLE BADGE FIX (Condition/Grade)
+      // We look for PSA 10, BGS 9.5, SGC 10, etc., in the title first.
+      let gradeLabel = "Raw";
+      const gradeRegex = /(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i;
+      const foundGrade = title.match(gradeRegex);
+
+      if (foundGrade) {
+        gradeLabel = `${foundGrade[1].toUpperCase()} ${foundGrade[2]}`;
       } else if (item.condition) {
-        conditionLabel = item.condition;
+        gradeLabel = item.condition.replace("Used", "Raw").replace("New", "Raw");
       }
 
-      // 3. THE "RAW NUMBER" TIMER FIX
-      // We send a numeric timestamp. If this still shows NaN, the issue is your Frontend Timer code.
+      // 4. THE TIMER FIX (Strict ISO String)
       const rawEndTime = item.listingEndingAt;
-      const endTimeValue = rawEndTime ? new Date(rawEndTime).getTime() : "Buy It Now";
+      let finalEndTime = "Buy It Now";
+      if (rawEndTime) {
+        const d = new Date(rawEndTime);
+        if (!isNaN(d.getTime())) {
+          finalEndTime = d.toISOString(); // Most standard format for React components
+        }
+      }
 
-      // 4. AFFILIATE LINK
+      // 5. AFFILIATE LINK
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
       const trackingUrl = `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`;
 
@@ -85,10 +97,10 @@ export async function onRequest(context) {
         images: [item.image?.imageUrl, ...(item.additionalImages || []).map(i => i.imageUrl)].filter(Boolean),
         currentBid: item.price ? parseFloat(item.price.value) : 0,
         ebayUrl: trackingUrl,
-        condition: conditionLabel, 
+        condition: gradeLabel, 
         category: detectedSport,
         listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
-        endTime: endTimeValue, // Sending as a NUMBER now
+        endTime: finalEndTime,
         bidCount: item.bidCount || 0
       };
     });
