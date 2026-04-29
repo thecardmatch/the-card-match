@@ -21,30 +21,32 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
-    // 1. Grading Keyword Logic
+    // 1. Precise Grading Keywords
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
       if (match) gradeKeywords = `(psa,bgs,sgc,cgc,grade) ${match[0]}`;
-      else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "raw ungraded -psa -bgs -sgc -cgc";
+      else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "-psa -bgs -sgc -cgc ungraded";
     }
 
     const cleanCategory = (category === "—" || !category) ? "" : category;
+    // Adding 'card' and specific category search to filter out non-card items
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Sorting mapping
+    // 2. Sorting Logic
     let ebaySort = "newlyListed";
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
 
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&sort=${ebaySort}&limit=100`;
+    // 3. THE "AUCTION-HEAVY" URL
+    // We add categoryId 183444 (Singles) and specifically request AUCTION buying options
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { 
         Authorization: `Bearer ${tokenData.access_token}`,
-        // THIS IS THE API LEVEL FIX: Sets the marketplace to US
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US", 
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${CAMP_ID},affiliateReferenceId=thecardmatch`
       },
     });
@@ -54,35 +56,20 @@ export async function onRequest(context) {
     let items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
 
-      // 3. Smart Sport Detection for labels
-      let detectedSport = cleanCategory || "Card";
-      if (detectedSport === "Card") {
-        const t = title.toLowerCase();
-        if (t.includes("pokemon") || t.includes("charizard")) detectedSport = "Pokemon";
-        else if (t.includes("basketball") || t.includes("nba")) detectedSport = "Basketball";
-        else if (t.includes("baseball") || t.includes("mlb")) detectedSport = "Baseball";
-        else if (t.includes("football") || t.includes("nfl")) detectedSport = "Football";
-      }
+      // Timer Fix (Removing milliseconds for frontend compatibility)
+      const rawEnd = item.listingEndingAt;
+      let fEnd = "Buy It Now";
+      let sKey = 9999999999999; 
 
-      // 4. Middle Label Fix (Grade/Raw)
-      let gradeLabel = "Raw";
-      const gradeRegex = /(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i;
-      const foundGrade = title.match(gradeRegex);
-      if (foundGrade) gradeLabel = `${foundGrade[1].toUpperCase()} ${foundGrade[2]}`;
-      else if (item.condition) gradeLabel = item.condition.replace("Used", "Raw").replace("New", "Raw");
-
-      // 5. Timer Formatting (ISO String)
-      const rawEndTime = item.listingEndingAt;
-      let finalEndTime = "Buy It Now";
-      if (rawEndTime) {
-        const d = new Date(rawEndTime);
+      if (rawEnd) {
+        const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
-          finalEndTime = d.toISOString();
+          fEnd = d.toISOString().split('.')[0] + "Z";
+          sKey = d.getTime();
         }
       }
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-      const trackingUrl = `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`;
 
       return {
         id: String(item.itemId),
@@ -90,22 +77,20 @@ export async function onRequest(context) {
         image: item.image?.imageUrl || "",
         images: [item.image?.imageUrl, ...(item.additionalImages || []).map(i => i.imageUrl)].filter(Boolean),
         currentBid: item.price ? parseFloat(item.price.value) : 0,
-        ebayUrl: trackingUrl,
-        condition: gradeLabel, 
-        category: detectedSport,
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
+        condition: title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw", 
+        category: cleanCategory || "Card",
         listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
-        endTime: finalEndTime,
+        endTime: fEnd,
+        _sortKey: sKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 6. THE MANUAL SORT: Forces 37 mins to show before 59 mins
+    // 4. THE MASTER CHRONO SORT
+    // If sorting by ending soon, we force items with a real end time to the top
     if (sort === "ending_soon") {
-      items.sort((a, b) => {
-        if (a.endTime === "Buy It Now") return 1;
-        if (b.endTime === "Buy It Now") return -1;
-        return new Date(a.endTime).getTime() - new Date(b.endTime).getTime();
-      });
+      items.sort((a, b) => a._sortKey - b._sortKey);
     }
 
     return new Response(JSON.stringify({ items }), {
