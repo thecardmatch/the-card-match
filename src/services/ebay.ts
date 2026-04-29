@@ -74,15 +74,6 @@ async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingC
   }));
 }
 
-  const res = await fetch(`/ebay-search?${params.toString()}`);
-  if (!res.ok) throw new Error(`API ${res.status}`);
-  const data = await res.json() as { items: TradingCard[] };
-  if (!Array.isArray(data.items) || data.items.length === 0) {
-    throw new Error("No results from API");
-  }
-  return data.items;
-}
-
 function searchCardsMock(prefs: Preferences): TradingCard[] {
   return fetchCards(prefs).map((card) => ({
     ...card,
