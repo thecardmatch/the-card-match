@@ -42,7 +42,39 @@ async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingC
     offset: String(offset),
   });
 
-  const res = await fetch("/ebay-search?" + params.toString())
+  // 1. The Call to your Cloudflare Bridge
+  const res = await fetch(`/ebay-search?${params.toString()}`);
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error("Bridge Error:", errorText);
+    throw new Error(`API returned ${res.status}`);
+  }
+
+  const data = await res.json();
+
+  // 2. The Safety Check (eBay calls the list 'itemSummaries')
+  if (!data.itemSummaries || !Array.isArray(data.itemSummaries)) {
+    throw new Error("No items found in eBay response");
+  }
+
+  // 3. Mapping eBay's data to your app's "TradingCard" format
+  return data.itemSummaries.map((item: any) => ({
+    id: item.itemId,
+    name: item.title,
+    // Grabs the high-res image if possible, otherwise empty string
+    image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
+    // Converts eBay price string to a number
+    currentBid: parseFloat(item.price?.value || "0"),
+    ebayUrl: item.itemWebUrl,
+    // Setting defaults for your other required fields
+    condition: item.condition || "Used",
+    endTime: item.listingEndingAt || "",
+    bidCount: item.bidCount || 0,
+  }));
+}
+
+  const res = await fetch(`/ebay-search?${params.toString()}`);
   if (!res.ok) throw new Error(`API ${res.status}`);
   const data = await res.json() as { items: TradingCard[] };
   if (!Array.isArray(data.items) || data.items.length === 0) {
