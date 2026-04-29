@@ -6,7 +6,7 @@ export const EPN_CAMP_ID = "5339150952";
 /** Build a direct eBay search URL with affiliate params. */
 export function getAffiliateUrl(name: string): string {
   const searchUrl = new URL("https://www.ebay.com/sch/i.html");
-  searchUrl.searchParams.set("_nkw", `${name} card`);
+  searchUrl.searchParams.set("_nkw", name);
   searchUrl.searchParams.set("campid", EPN_CAMP_ID);
   searchUrl.searchParams.set("toolid", "10001");
   searchUrl.searchParams.set("mkevt", "1");
@@ -30,35 +30,64 @@ export function buildEbayQuery(prefs: Preferences): string {
 }
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
+  // 1. Target the correct eBay Category IDs
+  const sportsCategories = ["Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1"];
+  const isSports = prefs.categories.some(cat => sportsCategories.includes(cat));
+  const categoryId = isSports ? "261328" : "183454"; // Sports vs CCG/WWE
+
+  // 2. Map Keywords
+  const categoryTerms = prefs.categories.join(" ");
+  const fullQuery = `${prefs.query} ${categoryTerms} card`.trim();
+
+  // 3. Build the Filter
+  // Note: We search for ACTIVE items, but our mapping (below) handles items that might end.
+  const filters = [
+    `price:[${prefs.minPrice || 0}..${prefs.maxPrice || 999999}]`,
+    `priceCurrency:USD`,
+    `buyingOptions:{FIXED_PRICE|AUCTION}`
+  ].join(",");
+
   const params = new URLSearchParams({
-    query: prefs.query || "pokemon card",
+    q: fullQuery,
+    category_ids: categoryId,
+    filter: filters,
+    sort: prefs.sort === "price_asc" ? "price" : "-price",
+    limit: "50", 
     offset: String(offset),
-    limit: "20"
   });
 
   const res = await fetch(`/ebay-search?${params.toString()}`);
 
   if (!res.ok) {
+    const errorText = await res.text();
+    console.error("Bridge Error:", errorText);
     throw new Error(`API returned ${res.status}`);
   }
 
   const data = await res.json();
 
-  // THIS IS THE FIX: We must use 'itemSummaries' to match the data you just sent me
   if (!data.itemSummaries || !Array.isArray(data.itemSummaries)) {
     return [];
   }
 
-  return data.itemSummaries.map((item: any) => ({
-    id: item.itemId,
-    name: item.title,
-    image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
-    currentBid: parseFloat(item.price?.value || "0"),
-    ebayUrl: item.itemWebUrl,
-    condition: item.condition || "Ungraded",
-    endTime: item.itemOriginDate || "",
-    bidCount: 0,
-  }));
+  return data.itemSummaries.map((item: any) => {
+    // Check if the listing has already ended
+    const endTime = item.listingEndingAt ? new Date(item.listingEndingAt) : null;
+    const isEnded = endTime ? endTime < new Date() : false;
+
+    return {
+      id: item.itemId,
+      name: item.title,
+      image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
+      currentBid: parseFloat(item.price?.value || "0"),
+      ebayUrl: item.itemWebUrl,
+      condition: item.condition || "Ungraded",
+      // If it ended, we label it so the Watchlist can show "ENDED"
+      endTime: isEnded ? "ENDED" : (item.listingEndingAt || "Active"),
+      bidCount: item.bidCount || 0,
+      isEnded: isEnded
+    };
+  });
 }
 
 function searchCardsMock(prefs: Preferences): TradingCard[] {
