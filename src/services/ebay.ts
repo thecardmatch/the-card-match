@@ -3,15 +3,12 @@ import { fetchCards, buildSearchQuery } from "@/data/pokemon";
 
 export const EPN_CAMP_ID = "5339150952";
 
-/** Build a direct eBay search URL with affiliate params. */
+/** Build a direct eBay search URL for the "Buy Now" buttons. */
 export function getAffiliateUrl(name: string): string {
   const searchUrl = new URL("https://www.ebay.com/sch/i.html");
   searchUrl.searchParams.set("_nkw", name);
   searchUrl.searchParams.set("campid", EPN_CAMP_ID);
   searchUrl.searchParams.set("toolid", "10001");
-  searchUrl.searchParams.set("mkevt", "1");
-  searchUrl.searchParams.set("mkcid", "1");
-  searchUrl.searchParams.set("mkrid", "711-53200-19255-0");
   searchUrl.searchParams.set("customid", "thecardmatch");
   return searchUrl.toString();
 }
@@ -21,6 +18,7 @@ export async function searchCards(prefs: Preferences, offset = 0): Promise<Tradi
     return await searchCardsLive(prefs, offset);
   } catch (err) {
     console.warn("[ebay] live search failed, falling back to mock", err);
+    // If the live search fails, this mock ensures the site stays up
     return searchCardsMock(prefs);
   }
 }
@@ -30,60 +28,53 @@ export function buildEbayQuery(prefs: Preferences): string {
 }
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
-  // 1. Identify if it's a Sports Card or a CCG (Pokemon/WWE/Magic)
-  const sportsCategories = ["Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1"];
-  const isSports = prefs.categories.some(cat => sportsCategories.includes(cat));
-  const categoryId = isSports ? "261328" : "183454"; 
+  // 1. Simplified Category Logic (Build-Safe)
+  const categoryTerms = prefs.categories && prefs.categories.length > 0 
+    ? prefs.categories.join(" ") 
+    : "";
 
-  // 2. Build the keywords based on selected sports/categories
-  const categoryTerms = prefs.categories.join(" ");
   const fullQuery = `${prefs.query} ${categoryTerms} card`.trim();
 
-  // 3. Build Search Filters (Price + Active Status)
-  const filters = [
-    `price:[${prefs.minPrice || 0}..${prefs.maxPrice || 999999}]`,
-    `priceCurrency:USD`,
-    `buyingOptions:{FIXED_PRICE|AUCTION}`
-  ].join(",");
+  // 2. Strict Filter Formatting
+  const minP = prefs.minPrice || 0;
+  const maxP = prefs.maxPrice || 999999;
+  const filterString = `price:[${minP}..${maxP}],priceCurrency:USD,buyingOptions:{FIXED_PRICE|AUCTION}`;
 
   const params = new URLSearchParams({
     q: fullQuery,
-    category_ids: categoryId,
-    filter: filters,
+    filter: filterString,
     sort: prefs.sort === "price_asc" ? "price" : "-price",
-    limit: "50", 
+    limit: "40",
     offset: String(offset),
   });
 
+  // 3. The Fetch
   const res = await fetch(`/ebay-search?${params.toString()}`);
 
   if (!res.ok) {
-    const errorText = await res.text();
-    console.error("Bridge Error:", errorText);
-    throw new Error(`API returned ${res.status}`);
+    throw new Error(`eBay API error: ${res.status}`);
   }
 
   const data = await res.json();
 
-  if (!data.itemSummaries || !Array.isArray(data.itemSummaries)) {
+  // 4. Safe Mapping Logic
+  if (!data || !data.itemSummaries) {
     return [];
   }
 
-  // 4. Map the Data and handle "Ended" status
   return data.itemSummaries.map((item: any) => {
-    // Check if current time is past the end date
-    const endTimeRaw = item.listingEndingAt;
-    const isEnded = endTimeRaw ? new Date(endTimeRaw) < new Date() : false;
+    // Determine if the auction is already over
+    const rawEndTime = item.listingEndingAt;
+    const isEnded = rawEndTime ? new Date(rawEndTime) < new Date() : false;
 
     return {
-      id: item.itemId,
-      name: item.title,
+      id: item.itemId || Math.random().toString(),
+      name: item.title || "Unknown Card",
       image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
-      currentBid: parseFloat(item.price?.value || "0"),
-      ebayUrl: item.itemWebUrl,
+      currentBid: item.price ? parseFloat(item.price.value) : 0,
+      ebayUrl: item.itemWebUrl || "#",
       condition: item.condition || "Ungraded",
-      // If ended, set status to ENDED. Otherwise, keep the date.
-      endTime: isEnded ? "ENDED" : (endTimeRaw || "Active"),
+      endTime: isEnded ? "ENDED" : (rawEndTime || "Active"),
       bidCount: item.bidCount || 0,
     };
   });
@@ -96,23 +87,14 @@ function searchCardsMock(prefs: Preferences): TradingCard[] {
   }));
 }
 
-const HISTORY_CACHE = new Map<string, number[]>();
-
+// Mock Price History (Safe logic for the charts)
 export async function getPriceHistory(card: TradingCard): Promise<number[]> {
-  if (HISTORY_CACHE.has(card.id)) return HISTORY_CACHE.get(card.id)!;
-  const series = mockPriceHistory(card);
-  HISTORY_CACHE.set(card.id, series);
+  const points = 12;
+  const series = [];
+  let base = card.currentBid || 10;
+  for (let i = 0; i < points; i++) {
+    series.push(base * (0.9 + Math.random() * 0.2));
+  }
+  series[points - 1] = card.currentBid;
   return series;
 }
-
-function mockPriceHistory(card: TradingCard): number[] {
-  let seed = 0;
-  for (let i = 0; i < card.id.length; i++) seed = (seed * 31 + card.id.charCodeAt(i)) >>> 0;
-  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
-  const points = 12;
-  const trend = (rand() - 0.45) * 0.4;
-  const vol = 0.06 + rand() * 0.06;
-  const series: number[] = [];
-  let v = card.currentBid * (0.85 + rand() * 0.2);
-  for (let i = 0; i < points; i++) {
-    v = Math.max(1, v + trend * card.currentBid * 0.05 + (rand() - 0.5) * card
