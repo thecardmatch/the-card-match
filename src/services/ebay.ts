@@ -1,34 +1,78 @@
 import type { TradingCard, Preferences } from "@/data/pokemon";
 
+export const EPN_CAMP_ID = "5339150952";
+
 export async function searchCards(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
   try {
-    // If everything is empty, default to 'trading cards' so the site isn't blank
-    const q = (prefs.query || prefs.categories?.[0] || "trading cards").trim();
+    // 1. Dynamic Query for ALL cards
+    // If search is empty, we default to "trading card" to ensure the site is populated
+    const searchTerm = prefs.query || "trading card";
+    const category = prefs.categories?.[0] || "";
+    const q = `${searchTerm} ${category}`.trim();
 
-    // We are stripping this down to ONLY the search term. No price, no sort, no nothing.
-    const res = await fetch(`/ebay-search?q=${encodeURIComponent(q)}&limit=40`);
+    // 2. Sorting Logic
+    let sortField = "";
+    if (prefs.sort === "ending_soon") sortField = "endingSoonest";
+    else if (prefs.sort === "price_asc") sortField = "price";
+    else if (prefs.sort === "price_desc") sortField = "-price";
+    else sortField = "newlyListed";
 
+    // 3. The URL Construction
+    // We are putting the keywords in 'q' and only the essential 'filter'
+    const params = new URLSearchParams({
+      q: q,
+      sort: sortField,
+      limit: "50",
+      offset: String(offset),
+      // We removed 'buyingOptions' to ensure we get ANY data first. 
+      // If this works, we will add Auction/BuyNow back.
+      filter: "priceCurrency:USD" 
+    });
+
+    const bridgeUrl = `/ebay-search?${params.toString()}`;
+
+    const res = await fetch(bridgeUrl);
     if (!res.ok) return [];
 
     const data = await res.json();
-    const items = data.itemSummaries || data.items || [];
 
-    return items.map((item: any) => ({
-      id: String(item.itemId),
-      name: item.title,
-      image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
-      currentBid: item.price ? parseFloat(item.price.value) : 0,
-      ebayUrl: item.itemWebUrl,
-      condition: item.condition || "Used",
-      endTime: item.listingEndingAt || "Active",
-      bidCount: item.bidCount || 0
-    }));
+    // Browse API uses 'itemSummaries'
+    const items = data.itemSummaries || [];
+
+    if (items.length === 0) return [];
+
+    return items.map((item: any) => {
+      const endTimeRaw = item.listingEndingAt;
+      const isEnded = endTimeRaw ? new Date(endTimeRaw) < new Date() : false;
+
+      return {
+        id: String(item.itemId),
+        name: item.title,
+        image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
+        currentBid: item.price ? parseFloat(item.price.value) : 0,
+        ebayUrl: item.itemWebUrl,
+        condition: item.condition || "Ungraded",
+        // This handles your Watchlist "Ended" requirement
+        endTime: isEnded ? "ENDED" : (endTimeRaw || "Buy It Now"),
+        bidCount: item.bidCount || 0
+      };
+    });
   } catch (err) {
+    console.error("Search failed:", err);
     return [];
   }
 }
 
-// Minimal helpers to prevent build errors
-export function getAffiliateUrl(n: string) { return `https://www.ebay.com/sch/i.html?_nkw=${n}`; }
-export function buildEbayQuery(p: Preferences) { return p.query; }
-export async function getPriceHistory(c: TradingCard) { return [10, 12, 11]; }
+// Helpers to keep the site functional
+export function getAffiliateUrl(name: string): string {
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}&campid=${EPN_CAMP_ID}&toolid=10001&customid=thecardmatch`;
+}
+
+export function buildEbayQuery(prefs: Preferences): string {
+  return prefs.query || "trading card";
+}
+
+export async function getPriceHistory(card: TradingCard): Promise<number[]> {
+  const p = card.currentBid || 10;
+  return [p * 0.9, p * 1.1, p];
+}
