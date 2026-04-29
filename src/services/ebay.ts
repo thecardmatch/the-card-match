@@ -3,7 +3,7 @@ import { fetchCards, buildSearchQuery } from "@/data/pokemon";
 
 export const EPN_CAMP_ID = "5339150952";
 
-/** Build a direct eBay search URL with affiliate params (no Rover redirect). */
+/** Build a direct eBay search URL with affiliate params. */
 export function getAffiliateUrl(name: string): string {
   const searchUrl = new URL("https://www.ebay.com/sch/i.html");
   searchUrl.searchParams.set("_nkw", `${name} card`);
@@ -31,46 +31,33 @@ export function buildEbayQuery(prefs: Preferences): string {
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
   const params = new URLSearchParams({
-    categories: prefs.categories.join(","),
-    sort: prefs.sort,
-    minPrice: String(prefs.minPrice),
-    maxPrice: String(prefs.maxPrice),
-    query: prefs.query,
-    conditions: prefs.conditions.join(","),
-    showBulk: String(prefs.showBulk ?? false),
-    listingType: prefs.listingType ?? "All",
+    query: prefs.query || "pokemon card",
     offset: String(offset),
+    limit: "20"
   });
 
-  // 1. The Call to your Cloudflare Bridge
   const res = await fetch(`/ebay-search?${params.toString()}`);
 
   if (!res.ok) {
-    const errorText = await res.text();
-    console.error("Bridge Error:", errorText);
     throw new Error(`API returned ${res.status}`);
   }
 
   const data = await res.json();
 
-  // 2. The Safety Check (eBay calls the list 'itemSummaries')
+  // THIS IS THE FIX: We must use 'itemSummaries' to match the data you just sent me
   if (!data.itemSummaries || !Array.isArray(data.itemSummaries)) {
-    throw new Error("No items found in eBay response");
+    return [];
   }
 
-  // 3. Mapping eBay's data to your app's "TradingCard" format
   return data.itemSummaries.map((item: any) => ({
     id: item.itemId,
     name: item.title,
-    // Grabs the high-res image if possible, otherwise empty string
-    image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
-    // Converts eBay price string to a number
+    image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
     currentBid: parseFloat(item.price?.value || "0"),
     ebayUrl: item.itemWebUrl,
-    // Setting defaults for your other required fields
-    condition: item.condition || "Used",
-    endTime: item.listingEndingAt || "",
-    bidCount: item.bidCount || 0,
+    condition: item.condition || "Ungraded",
+    endTime: item.itemOriginDate || "",
+    bidCount: 0,
   }));
 }
 
