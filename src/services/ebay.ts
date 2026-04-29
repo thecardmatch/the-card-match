@@ -30,17 +30,16 @@ export function buildEbayQuery(prefs: Preferences): string {
 }
 
 async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
-  // 1. Target the correct eBay Category IDs
+  // 1. Identify if it's a Sports Card or a CCG (Pokemon/WWE/Magic)
   const sportsCategories = ["Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1"];
   const isSports = prefs.categories.some(cat => sportsCategories.includes(cat));
-  const categoryId = isSports ? "261328" : "183454"; // Sports vs CCG/WWE
+  const categoryId = isSports ? "261328" : "183454"; 
 
-  // 2. Map Keywords
+  // 2. Build the keywords based on selected sports/categories
   const categoryTerms = prefs.categories.join(" ");
   const fullQuery = `${prefs.query} ${categoryTerms} card`.trim();
 
-  // 3. Build the Filter
-  // Note: We search for ACTIVE items, but our mapping (below) handles items that might end.
+  // 3. Build Search Filters (Price + Active Status)
   const filters = [
     `price:[${prefs.minPrice || 0}..${prefs.maxPrice || 999999}]`,
     `priceCurrency:USD`,
@@ -70,22 +69,22 @@ async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingC
     return [];
   }
 
+  // 4. Map the Data and handle "Ended" status
   return data.itemSummaries.map((item: any) => {
-    // Check if the listing has already ended
-    const endTime = item.listingEndingAt ? new Date(item.listingEndingAt) : null;
-    const isEnded = endTime ? endTime < new Date() : false;
+    // Check if current time is past the end date
+    const endTimeRaw = item.listingEndingAt;
+    const isEnded = endTimeRaw ? new Date(endTimeRaw) < new Date() : false;
 
     return {
       id: item.itemId,
       name: item.title,
-      image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
+      image: item.image?.imageUrl || (item.thumbnailImages && item.thumbnailImages[0]?.imageUrl) || "",
       currentBid: parseFloat(item.price?.value || "0"),
       ebayUrl: item.itemWebUrl,
       condition: item.condition || "Ungraded",
-      // If it ended, we label it so the Watchlist can show "ENDED"
-      endTime: isEnded ? "ENDED" : (item.listingEndingAt || "Active"),
+      // If ended, set status to ENDED. Otherwise, keep the date.
+      endTime: isEnded ? "ENDED" : (endTimeRaw || "Active"),
       bidCount: item.bidCount || 0,
-      isEnded: isEnded
     };
   });
 }
@@ -116,9 +115,4 @@ function mockPriceHistory(card: TradingCard): number[] {
   const series: number[] = [];
   let v = card.currentBid * (0.85 + rand() * 0.2);
   for (let i = 0; i < points; i++) {
-    v = Math.max(1, v + trend * card.currentBid * 0.05 + (rand() - 0.5) * card.currentBid * vol);
-    series.push(v);
-  }
-  series[points - 1] = card.currentBid;
-  return series;
-}
+    v = Math.max(1, v + trend * card.currentBid * 0.05 + (rand() - 0.5) * card
