@@ -1,82 +1,85 @@
 import type { TradingCard, Preferences } from "@/data/pokemon";
+import { fetchCards, buildSearchQuery } from "@/data/pokemon";
 
 export const EPN_CAMP_ID = "5339150952";
 
+/** Build a direct eBay search URL with affiliate params (no Rover redirect). */
+export function getAffiliateUrl(name: string): string {
+  const searchUrl = new URL("https://www.ebay.com/sch/i.html");
+  searchUrl.searchParams.set("_nkw", `${name} card`);
+  searchUrl.searchParams.set("campid", EPN_CAMP_ID);
+  searchUrl.searchParams.set("toolid", "10001");
+  searchUrl.searchParams.set("mkevt", "1");
+  searchUrl.searchParams.set("mkcid", "1");
+  searchUrl.searchParams.set("mkrid", "711-53200-19255-0");
+  searchUrl.searchParams.set("customid", "thecardmatch");
+  return searchUrl.toString();
+}
+
 export async function searchCards(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
   try {
-    // 1. CLEAN THE DATA
-    // Get the query, but kill the "—" or "undefined" glitch
-    const rawQuery = (!prefs.query || prefs.query === "—") ? "" : prefs.query;
-
-    // Grab the first category selected (e.g., "Basketball", "F1", "WWE")
-    const category = prefs.categories && prefs.categories.length > 0 ? prefs.categories[0] : "";
-
-    // 2. BUILD THE MULTI-SPORT QUERY
-    // This creates "Zion Basketball card" or "Leclerc Formula 1 card"
-    // If everything is empty, it defaults to "trading card" so the site isn't blank.
-    let finalSearch = "";
-    if (!rawQuery && !category) {
-      finalSearch = "trading card";
-    } else {
-      finalSearch = `${rawQuery} ${category} card`.trim().replace(/\s+/g, ' ');
-    }
-
-    // 3. MAP THE SORTING
-    let ebaySort = "newlyListed"; 
-    if (prefs.sort === "ending_soon") ebaySort = "endingSoonest";
-    else if (prefs.sort === "price_asc") ebaySort = "price";
-    else if (prefs.sort === "price_desc") ebaySort = "-price";
-
-    // 4. EXECUTE
-    const params = new URLSearchParams({
-      q: finalSearch,
-      sort: ebaySort,
-      limit: "40",
-      offset: String(offset),
-      filter: "priceCurrency:USD"
-    });
-
-    const bridgeUrl = `/ebay-search?${params.toString()}`;
-
-    // LOG THIS: You can see in your browser console exactly what sport is being sent
-    console.log(`[Platform Search] Query: "${finalSearch}" | Sort: ${ebaySort}`);
-
-    const res = await fetch(bridgeUrl);
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const items = data.itemSummaries || data.items || [];
-
-    if (items.length === 0) return [];
-
-    return items.map((item: any) => ({
-      id: String(item.itemId),
-      name: item.title || "Trading Card",
-      image: item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "",
-      currentBid: item.price ? parseFloat(item.price.value) : 0,
-      ebayUrl: item.itemWebUrl || "#",
-      condition: item.condition || "Raw",
-      endTime: item.listingEndingAt || "Buy It Now",
-      bidCount: item.bidCount || 0
-    }));
-
+    return await searchCardsLive(prefs, offset);
   } catch (err) {
-    console.error("Multi-sport fetch failed:", err);
-    return [];
+    console.warn("[ebay] live search failed, falling back to mock", err);
+    return searchCardsMock(prefs);
   }
 }
 
-export function getAffiliateUrl(name: string): string {
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}&campid=${EPN_CAMP_ID}&toolid=10001&mkevt=1&mkcid=1`;
+export function buildEbayQuery(prefs: Preferences): string {
+  return buildSearchQuery(prefs);
 }
 
-export function buildEbayQuery(prefs: Preferences): string {
-  const q = prefs.query === "—" ? "" : (prefs.query || "");
-  const cat = prefs.categories?.[0] || "";
-  return `${q} ${cat}`.trim() || "trading card";
+async function searchCardsLive(prefs: Preferences, offset = 0): Promise<TradingCard[]> {
+  const params = new URLSearchParams({
+    categories: prefs.categories.join(","),
+    sort: prefs.sort,
+    minPrice: String(prefs.minPrice),
+    maxPrice: String(prefs.maxPrice),
+    query: prefs.query,
+    conditions: prefs.conditions.join(","),
+    showBulk: String(prefs.showBulk ?? false),
+    listingType: prefs.listingType ?? "All",
+    offset: String(offset),
+  });
+
+  const res = await fetch(`/api/ebay/search?${params}`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  const data = await res.json() as { items: TradingCard[] };
+  if (!Array.isArray(data.items) || data.items.length === 0) {
+    throw new Error("No results from API");
+  }
+  return data.items;
 }
+
+function searchCardsMock(prefs: Preferences): TradingCard[] {
+  return fetchCards(prefs).map((card) => ({
+    ...card,
+    ebayUrl: getAffiliateUrl(card.name),
+  }));
+}
+
+const HISTORY_CACHE = new Map<string, number[]>();
 
 export async function getPriceHistory(card: TradingCard): Promise<number[]> {
-  const p = card.currentBid || 10;
-  return [p * 0.95, p * 1.05, p];
+  if (HISTORY_CACHE.has(card.id)) return HISTORY_CACHE.get(card.id)!;
+  const series = mockPriceHistory(card);
+  HISTORY_CACHE.set(card.id, series);
+  return series;
+}
+
+function mockPriceHistory(card: TradingCard): number[] {
+  let seed = 0;
+  for (let i = 0; i < card.id.length; i++) seed = (seed * 31 + card.id.charCodeAt(i)) >>> 0;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0xffffffff; };
+  const points = 12;
+  const trend = (rand() - 0.45) * 0.4;
+  const vol = 0.06 + rand() * 0.06;
+  const series: number[] = [];
+  let v = card.currentBid * (0.85 + rand() * 0.2);
+  for (let i = 0; i < points; i++) {
+    v = Math.max(1, v + trend * card.currentBid * 0.05 + (rand() - 0.5) * card.currentBid * vol);
+    series.push(v);
+  }
+  series[points - 1] = card.currentBid;
+  return series;
 }
