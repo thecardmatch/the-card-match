@@ -32,14 +32,14 @@ export async function onRequest(context) {
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Sorting Logic (Standardized for API)
+    // 2. Strict Sort Mapping
     let ebaySort = "newlyListed";
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
-    else if (sort === "most_bids") ebaySort = "-bidCount";
 
-    // 3. THE URL - Stripped down for maximum speed
+    // 3. THE "ALL-CARDS" FILTER
+    // categoryId 183444 (Singles) + buyingOptions AUCTION forces the auctions to the front
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=50&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -52,17 +52,17 @@ export async function onRequest(context) {
 
     const data = await ebayRes.json();
 
-    const items = (data.itemSummaries || []).map(item => {
+    let items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
       const isAuction = (item.buyingOptions || []).includes("AUCTION");
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      // Image Quality Fix
-      const img = item.image?.imageUrl || "";
-      const hiResImg = img.replace(/s-l\d+\./, "s-l1600.");
+      // IMAGE FALLBACK FIX:
+      // If the main image is missing, we try the additional images array.
+      let rawImg = item.image?.imageUrl || (item.additionalImages && item.additionalImages[0]?.imageUrl) || "";
+      const hiResImg = rawImg.replace(/s-l\d+\./, "s-l1600.");
 
-      // Timer Logic: Sending a clean format that won't crash the frontend
-      // If Auction, send ISO string. If BIN, send "FIXED"
+      // TIMER FIX
       const endTimestamp = isAuction && item.listingEndingAt ? item.listingEndingAt : "FIXED";
 
       return {
@@ -75,14 +75,26 @@ export async function onRequest(context) {
         condition: title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
         category: cleanCategory || "Card",
         listingType: isAuction ? "Auction" : "Buy It Now",
-        endTime: endTimestamp, // This variable is the key to the timer fix
-        bidCount: item.bidCount || 0
+        endTime: endTimestamp,
+        bidCount: item.bidCount || 0,
+        _sortKey: isAuction && item.listingEndingAt ? new Date(item.listingEndingAt).getTime() : 9999999999999
       };
     });
 
+    // 4. THE "FORCE AUCTION" CHRONO-SORT
+    // If the user wants 'ending_soon', we manually push all Auctions to index 0-X 
+    // and sort them by exact seconds.
+    if (sort === "ending_soon") {
+      items.sort((a, b) => {
+        if (a.listingType === "Auction" && b.listingType !== "Auction") return -1;
+        if (a.listingType !== "Auction" && b.listingType === "Auction") return 1;
+        return a._sortKey - b._sortKey;
+      });
+    }
+
     return new Response(JSON.stringify({ 
       items, 
-      total: data.total || 10000 // Ensure infinite swiping is possible
+      total: data.total || 10000 
     }), {
       headers: { "Content-Type": "application/json" }
     });
