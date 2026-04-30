@@ -2,12 +2,11 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  // Inputs from your frontend
   const query = searchParams.get("query") || "";
   const category = searchParams.get("categories") || "";
   const sort = searchParams.get("sort") || "newlyListed";
   const conditions = searchParams.get("conditions") || "";
-  const offset = searchParams.get("offset") || "0"; 
+  const offset = searchParams.get("offset") || "0";
   const CAMP_ID = "5339150952";
 
   try {
@@ -23,24 +22,26 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
-    // 1. Refine Search Keywords
+    // 1. Keyword setup
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
       if (match) gradeKeywords = `(psa,bgs,sgc,cgc,vgs,grade) ${match[0]}`;
-      else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "-psa -bgs -sgc -cgc ungraded";
+      else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "ungraded -psa -bgs -sgc -cgc";
     }
 
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Map eBay Sort
+    // 2. Sorting mapping
     let ebaySort = "newlyListed";
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
 
-    // 3. The API Call (Targeting Category 183444 for Trading Card Singles)
+    // 3. THE "ALL CARDS" FILTER
+    // We explicitly target the Trading Card Singles category (183444)
+    // We MUST include both AUCTION and FIXED_PRICE in the filter to see all items.
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -56,43 +57,29 @@ export async function onRequest(context) {
     let items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
 
-      // 4. IMAGE RESOLUTION BOOST
-      // Swaps the 's-l225' (tiny) for 's-l1600' (High-Def)
+      // 4. IMAGE RESOLUTION FIX
       const toHighRes = (url) => url ? url.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1') : "";
-
       const mainImg = toHighRes(item.image?.imageUrl);
-      const additionalImgs = (item.additionalImages || []).map(i => toHighRes(i.imageUrl));
 
-      // 5. CONDITION DETECTION (The Middle Badge)
-      let conditionLabel = "Raw";
-      // Look for PSA 10, BGS 9.5, etc. in the title
+      // 5. CONDITION BADGE FIX (PSA 10, BGS 9, etc.)
+      let condLabel = "Raw";
       const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
       if (gradeMatch) {
-        conditionLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
+        condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
       } else if (item.condition) {
-        conditionLabel = item.condition.replace(/Used|New/gi, "Raw");
+        condLabel = item.condition.replace(/Used|New/gi, "Raw");
       }
 
-      // 6. SPORT DETECTION
-      let sportLabel = cleanCategory || "Card";
-      if (sportLabel === "Card") {
-        const t = title.toLowerCase();
-        if (t.includes("pokemon")) sportLabel = "Pokemon";
-        else if (t.includes("basketball") || t.includes("nba")) sportLabel = "Basketball";
-        else if (t.includes("baseball") || t.includes("mlb")) sportLabel = "Baseball";
-        else if (t.includes("football") || t.includes("nfl")) sportLabel = "Football";
-      }
-
-      // 7. TIMER FIX (Removing milliseconds for browser stability)
-      const rawEnd = item.listingEndingAt;
-      let fEnd = "Buy It Now";
-      let sKey = 9999999999999; 
+      // 6. TIMER FIX (Strict Date Format)
+      const rawEnd = item.itemEndDate || item.listingEndingAt;
+      let finalEndTime = "Fixed Price";
+      let sortKey = 9999999999999; 
 
       if (rawEnd) {
         const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
-          fEnd = d.toISOString().split('.')[0] + "Z";
-          sKey = d.getTime();
+          finalEndTime = d.toISOString(); // Sending ISO string for frontend math
+          sortKey = d.getTime();
         }
       }
 
@@ -102,24 +89,31 @@ export async function onRequest(context) {
         id: String(item.itemId),
         name: title,
         image: mainImg,
-        images: [mainImg, ...additionalImgs].filter(Boolean),
+        images: [mainImg, ...(item.additionalImages || []).map(i => toHighRes(i.imageUrl))].filter(Boolean),
         currentBid: item.price ? parseFloat(item.price.value) : 0,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        condition: conditionLabel, // Middle Badge
-        category: sportLabel,     // Left Badge
-        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now", // Right Badge
-        endTime: fEnd,
-        _sortKey: sKey,
+        condition: condLabel, 
+        category: cleanCategory || "Card",
+        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+        endTime: finalEndTime,
+        _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 8. STRICT CHRONOLOGICAL SORT
+    // 7. STRICT AUCTION-FIRST SORT
+    // When sorting by "Ending Soonest", we move Auctions to the top and Buy It Nows to the bottom
     if (sort === "ending_soon") {
-      items.sort((a, b) => a._sortKey - b._sortKey);
+      items.sort((a, b) => {
+        const aIsAuction = a.listingType === "Auction";
+        const bIsAuction = b.listingType === "Auction";
+        if (aIsAuction && !bIsAuction) return -1;
+        if (!aIsAuction && bIsAuction) return 1;
+        return a._sortKey - b._sortKey;
+      });
     }
 
-    return new Response(JSON.stringify({ items, total: data.total || items.length }), {
+    return new Response(JSON.stringify({ items, total: data.total }), {
       headers: { "Content-Type": "application/json" }
     });
 
