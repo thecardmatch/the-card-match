@@ -23,12 +23,23 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    const cleanCategory = (category === "—" || !category) ? "" : category;
-    const finalQuery = encodeURIComponent(`${query} ${cleanCategory} card`.trim());
+    // 1. DYNAMIC KEYWORDS & ASPECT FILTERS
+    let aspectFilter = "";
+    let searchKeywords = `${query} ${category === "—" ? "" : category} card`.trim();
 
-    // 1. DUAL FETCH: AUCTIONS (Sorted by Ending Soonest) vs Buy It Now
-    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
-    const binUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{FIXED_PRICE}&limit=20&offset=${offset}`;
+    if (conditions && conditions !== "—") {
+      // If user chose a grade (e.g., 10), we force the 'Graded' condition ID (2750)
+      // and add the specific grade to the keyword search for precision
+      aspectFilter = `,conditions:{GRADED}`; 
+      searchKeywords += ` ${conditions}`;
+    }
+
+    const finalQuery = encodeURIComponent(searchKeywords);
+
+    // 2. DUAL FETCH (Auctions vs BIN)
+    // Adding categoryId 183444 (Trading Card Singles) strictly
+    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}${aspectFilter},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
+    const binUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}${aspectFilter},buyingOptions:{FIXED_PRICE}&limit=20&offset=${offset}`;
 
     const [aRes, bRes] = await Promise.all([
       fetch(auctionUrl, { headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" } }),
@@ -44,15 +55,12 @@ export async function onRequest(context) {
       const hiResImg = rawImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1');
       const val = item.price ? parseFloat(item.price.value) : 0;
 
-      // Extract Grade/Condition
+      // Extract Grade
       const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
       const gradeLabel = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
 
-      // TIMER FIX: Create multiple date formats
-      let auctionEndTime = null;
-      if (type === "Auction" && item.listingEndingAt) {
-        auctionEndTime = item.listingEndingAt; // ISO String: "2024-05-20T..."
-      }
+      // THE TIMER FIX: We provide every possible naming convention
+      const time = type === "Auction" ? item.listingEndingAt : null;
 
       return {
         id: itemId,
@@ -64,15 +72,15 @@ export async function onRequest(context) {
         currentPrice: val,
         currentBid: val,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        category: cleanCategory || "Card",
+        category: category || "Card",
         condition: gradeLabel, 
         grade: gradeLabel,
         listingType: type,
-        // TIMER LOGIC: If BIN, we send a distinct string. If Auction, we send the timestamp.
-        endTime: type === "Auction" ? auctionEndTime : "BUY_IT_NOW",
-        listingEndingAt: type === "Auction" ? auctionEndTime : null,
-        // This provides a raw numeric timestamp just in case
-        endTimestamp: auctionEndTime ? new Date(auctionEndTime).getTime() : null,
+        // Send under every common frontend name
+        endTime: time,
+        listingEndingAt: time,
+        expirationDate: time,
+        endTimestamp: time ? new Date(time).getTime() : null,
         bidCount: item.bidCount || 0
       };
     };
@@ -81,9 +89,6 @@ export async function onRequest(context) {
     const bins = (bData.itemSummaries || []).map(i => mapItem(i, "Buy It Now"));
 
     let finalItems = [...auctions, ...bins];
-
-    if (sort === "price_asc") finalItems.sort((a, b) => a.price - b.price);
-    if (sort === "price_desc") finalItems.sort((a, b) => b.price - a.price);
 
     return new Response(JSON.stringify({ 
       items: finalItems, 
