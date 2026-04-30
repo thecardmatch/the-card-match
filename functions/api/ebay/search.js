@@ -23,82 +23,69 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. Strict Aspect Filtering
-    let aspectFilter = "";
-    let searchKeywords = `${query} ${category === "—" ? "" : category} card`.trim();
-    if (conditions && conditions !== "—") {
-      aspectFilter = `,conditions:{GRADED}`; 
-      searchKeywords += ` ${conditions}`;
-    }
-
+    // 1. "WIDE NET" SEARCH - We use keywords instead of restrictive filters 
+    // to make sure we don't miss cards that are simply missing 'aspect' tags.
+    const condQuery = (conditions && conditions !== "—") ? `graded ${conditions}` : "";
+    const catQuery = (category && category !== "—") ? category : "";
+    const searchKeywords = `${query} ${catQuery} ${condQuery} card`.trim();
     const finalQuery = encodeURIComponent(searchKeywords);
 
-    // 2. Fetching Auctions and Buy It Now
-    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}${aspectFilter},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
-    const binUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}${aspectFilter},buyingOptions:{FIXED_PRICE}&limit=20&offset=${offset}`;
+    // 2. FETCH - Grabbing 100 items to ensure we have a full deck
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}&sort=endingSoonest&limit=100&offset=${offset}`;
 
-    const [aRes, bRes] = await Promise.all([
-      fetch(auctionUrl, { headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" } }),
-      fetch(binUrl, { headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" } })
-    ]);
+    const ebayRes = await fetch(ebayUrl, {
+      headers: { 
+        Authorization: `Bearer ${token}`, 
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${CAMP_ID}`
+      },
+    });
 
-    const aData = await aRes.json();
-    const bData = await bRes.json();
+    const data = await ebayRes.json();
 
-    const mapItem = (item, type) => {
-      // WATCHLIST FIX: We must use the LEGACY ID format (the numbers) 
-      // Browse API IDs are long strings; Replit Watchlists usually expect the 12-digit number.
-      const rawId = item.itemId;
-      const legacyId = rawId.includes("|") ? rawId.split("|")[1] : rawId;
+    const items = (data.itemSummaries || []).map(item => {
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      const isAuction = (item.buyingOptions || []).includes("AUCTION");
 
-      // IMAGE RESOLUTION
-      const rawImg = item.image?.imageUrl || (item.additionalImages && item.additionalImages[0]?.imageUrl) || "";
-      const hiResImg = rawImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1');
-
-      // MINIMUM BID PRICE FIX:
-      // Browse API uses 'price' for current bid and 'minimumBidPrice' for start price.
+      // PRICE LOGIC: Always pick the 'active' price (Current Bid or Start Price)
       const currentPrice = item.price ? parseFloat(item.price.value) : 0;
-      const startPrice = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const finalPrice = currentPrice > 0 ? currentPrice : startPrice;
+      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
+      const displayPrice = currentPrice > 0 ? currentPrice : minBid;
 
-      // TIMER FIX:
-      // We provide the ISO string under EVERY name. 
-      // If your frontend uses 'timeLeft' or 'timeRemaining', it's covered.
-      const time = type === "Auction" ? item.listingEndingAt : null;
+      // GRADE EXTRACTION: Look for PSA/BGS in the title
+      const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
+      const gradeText = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
+
+      // THE "EVERYTHING" TIMER: Providing every possible variable name
+      const timeISO = item.listingEndingAt || null;
 
       return {
-        id: legacyId, // Stable 12-digit ID for Watchlist persistence
-        itemId: legacyId,
+        id: itemId,
+        itemId: itemId,
         name: item.title,
         title: item.title,
-        image: hiResImg,
-        images: [hiResImg],
-        // PRICE MAPPING
-        price: finalPrice,
-        currentPrice: finalPrice,
-        currentBid: finalPrice,
-        currency: "USD",
-        // TIMER MAPPING
-        endTime: time,
-        listingEndingAt: time,
-        timeRemaining: time, 
-        expirationDate: time,
+        image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
+        // PRICE
+        price: displayPrice,
+        currentPrice: displayPrice,
+        currentBid: displayPrice,
+        // CATEGORY & CONDITION
+        category: category !== "—" ? category : "Card",
+        condition: gradeText,
+        grade: gradeText,
+        // TIMER (Brute force naming)
+        endTime: timeISO,
+        listingEndingAt: timeISO,
+        timeRemaining: timeISO,
+        expirationDate: timeISO,
         // METADATA
-        category: category || "Baseball",
-        condition: item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
-        listingType: type,
-        ebayUrl: `https://www.ebay.com/itm/${legacyId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
+        listingType: isAuction ? "Auction" : "Buy It Now",
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         bidCount: item.bidCount || 0
       };
-    };
+    });
 
-    const auctions = (aData.itemSummaries || []).map(i => mapItem(i, "Auction"));
-    const bins = (bData.itemSummaries || []).map(i => mapItem(i, "Buy It Now"));
-
-    return new Response(JSON.stringify({ 
-      items: [...auctions, ...bins], 
-      total: (aData.total || 0) + (bData.total || 0) 
-    }), {
+    return new Response(JSON.stringify({ items, total: data.total || 10000 }), {
       headers: { "Content-Type": "application/json" }
     });
 
