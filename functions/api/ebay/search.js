@@ -20,7 +20,7 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. Logic for "Graded" vs "Ungraded" searching
+    // 1. Build Keyword Search
     let searchKeywords = `${query} ${category === "—" ? "" : category} card`.trim();
     if (conditions === "Ungraded") {
       searchKeywords += " -psa -bgs -sgc -cgc -graded -slab";
@@ -30,7 +30,7 @@ export async function onRequest(context) {
 
     const finalQuery = encodeURIComponent(searchKeywords);
 
-    // 2. Fetch Auctions (Ending Soonest)
+    // 2. Fetch Auctions Strictly
     const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
 
     const ebayRes = await fetch(auctionUrl, {
@@ -42,13 +42,18 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      // PRICE FIX: Prioritizing Entry Price (Current Bid or Min Bid)
-      const currentPrice = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
-      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const displayPrice = currentPrice > 0 ? currentPrice : (minBid > 0 ? minBid : 0);
+      // --- THE SURGICAL PRICE FIX ---
+      // We ignore item.price because that is often the "Buy It Now" price.
+      // We look specifically at the Bidding fields.
+      const currentBidVal = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
+      const minimumBidVal = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
 
-      // TIMER FIX: Sending the data under every name Replit might look for
-      const timeISO = item.listingEndingAt || "";
+      // If someone has bid, show that. If not, show the $35.00 starting price.
+      const actualAuctionPrice = currentBidVal > 0 ? currentBidVal : minimumBidVal;
+
+      // --- THE TIMER LOGIC ---
+      // eBay Browse API uses 'itemEndDate' or 'listingEndingAt'
+      const endTime = item.itemEndDate || item.listingEndingAt || "";
 
       return {
         id: itemId,
@@ -57,24 +62,21 @@ export async function onRequest(context) {
         title: item.title,
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
 
-        // --- DATA MAPPING FOR FRONTEND ---
-        price: displayPrice,
-        currentPrice: displayPrice,
-        currentBid: displayPrice,
+        // MAPPING TO ALL FRONTEND POSSIBILITIES
+        price: actualAuctionPrice,
+        currentPrice: actualAuctionPrice,
+        currentBid: actualAuctionPrice,
 
-        // --- TIMER MAPPING (Brute Force) ---
-        endTime: timeISO,
-        listingEndingAt: timeISO,
-        timeRemaining: timeISO,
-        timeLeft: timeISO,
-        endDate: timeISO,
+        // TIMER MAPPING (The Kitchen Sink)
+        endTime: endTime,
+        listingEndingAt: endTime,
+        timeRemaining: endTime,
+        timeLeft: endTime,
 
-        // --- CATEGORY & LABELS ---
+        // LABELS
         category: category !== "—" ? category : "Card",
         condition: item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
         listingType: "Auction",
-
-        // --- LINK BEHAVIOR ---
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         bidCount: item.bidCount || 0
       };
