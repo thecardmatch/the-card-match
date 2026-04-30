@@ -23,16 +23,10 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    let gradeKeywords = "";
-    if (conditions && conditions !== "—") {
-      const match = conditions.match(/\d+/);
-      if (match) gradeKeywords = `(psa,bgs,sgc,cgc,vgs,grade) ${match[0]}`;
-    }
-
     const cleanCategory = (category === "—" || !category) ? "" : category;
-    const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
+    const finalQuery = encodeURIComponent(`${query} ${cleanCategory} card`.trim());
 
-    // 1. DUAL FETCH: Auctions (strictly by time) vs Buy It Now
+    // --- DUAL FETCH: AUCTIONS FIRST ---
     const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
     const binUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{FIXED_PRICE}&limit=20&offset=${offset}`;
 
@@ -46,29 +40,30 @@ export async function onRequest(context) {
 
     const mapItem = (item, type) => {
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-
-      // Image Resolution Fix
       const rawImg = item.image?.imageUrl || (item.additionalImages && item.additionalImages[0]?.imageUrl) || "";
       const hiResImg = rawImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1');
+      const val = item.price ? parseFloat(item.price.value) : 0;
 
-      // Price Fix: Ensure we use the value your frontend expects
-      const priceValue = item.price ? parseFloat(item.price.value) : 0;
+      // Extract Grade for that missing "Category/Grade" slot
+      const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
+      const gradeLabel = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
 
       return {
         id: itemId,
         name: item.title,
+        title: item.title,
         image: hiResImg,
-        images: [hiResImg],
-        // MAP MULTIPLE NAMES TO ENSURE FRONTEND SEES THE PRICE
-        price: priceValue, 
-        currentBid: priceValue,
-        currentPrice: priceValue,
+        // PRICE FIX: Triple-naming ensures the UI sees it
+        price: val,
+        currentPrice: val,
+        currentBid: val,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        condition: item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
-        // CATEGORY FIX: Use the search category or fallback to Singles
-        category: cleanCategory || "Trading Cards",
+        // CATEGORY/CONDITION FIX
+        category: cleanCategory || "Card",
+        condition: gradeLabel, 
+        grade: gradeLabel,
         listingType: type,
-        // TIMER FIX: Provide both the raw date and the flag
+        // TIMER FIX: Send both names
         endTime: type === "Auction" ? item.listingEndingAt : "BUY_IT_NOW",
         listingEndingAt: type === "Auction" ? item.listingEndingAt : null,
         bidCount: item.bidCount || 0
@@ -78,15 +73,11 @@ export async function onRequest(context) {
     const auctions = (aData.itemSummaries || []).map(i => mapItem(i, "Auction"));
     const bins = (bData.itemSummaries || []).map(i => mapItem(i, "Buy It Now"));
 
-    // Final sorting logic
-    let finalItems = [];
-    if (sort === "ending_soon") {
-      finalItems = [...auctions, ...bins];
-    } else if (sort === "price_asc") {
-      finalItems = [...auctions, ...bins].sort((a, b) => a.price - b.price);
-    } else {
-      finalItems = [...auctions, ...bins];
-    }
+    let finalItems = [...auctions, ...bins];
+
+    // Manual re-sort for Price filters if needed
+    if (sort === "price_asc") finalItems.sort((a, b) => a.price - b.price);
+    if (sort === "price_desc") finalItems.sort((a, b) => b.price - a.price);
 
     return new Response(JSON.stringify({ 
       items: finalItems, 
