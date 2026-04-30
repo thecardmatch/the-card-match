@@ -22,26 +22,26 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
-    // 1. Keyword setup
+    // 1. Keyword Construction
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
       if (match) gradeKeywords = `(psa,bgs,sgc,cgc,vgs,grade) ${match[0]}`;
-      else if (conditions.toLowerCase().includes("raw")) gradeKeywords = "ungraded -psa -bgs -sgc -cgc";
     }
 
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Sorting mapping
-    let ebaySort = "newlyListed";
+    // 2. Advanced Sort Mapping
+    let ebaySort = "newlyListed"; // Default
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
+    else if (sort === "best_match") ebaySort = ""; // Empty string triggers eBay's default Best Match
+    else if (sort === "most_bids") ebaySort = "-bidCount"; 
 
-    // 3. THE "ALL CARDS" FILTER
-    // We explicitly target the Trading Card Singles category (183444)
-    // We MUST include both AUCTION and FIXED_PRICE in the filter to see all items.
+    // 3. API Call - Target Singles (183444)
+    // We increase limit to 100 and use the Marketplace ID to ensure we see US-only high-volume auctions
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -56,29 +56,26 @@ export async function onRequest(context) {
 
     let items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
+      const isAuction = (item.buyingOptions || []).includes("AUCTION");
 
-      // 4. IMAGE RESOLUTION FIX
+      // 4. High-Res Image Fix
       const toHighRes = (url) => url ? url.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1') : "";
       const mainImg = toHighRes(item.image?.imageUrl);
 
-      // 5. CONDITION BADGE FIX (PSA 10, BGS 9, etc.)
+      // 5. Condition Badge logic
       let condLabel = "Raw";
       const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
-      if (gradeMatch) {
-        condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
-      } else if (item.condition) {
-        condLabel = item.condition.replace(/Used|New/gi, "Raw");
-      }
+      if (gradeMatch) condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
 
-      // 6. TIMER FIX (Strict Date Format)
-      const rawEnd = item.itemEndDate || item.listingEndingAt;
-      let finalEndTime = "Fixed Price";
+      // 6. TIMER FIX (The "No NaN" Strategy)
+      const rawEnd = item.listingEndingAt;
+      let finalEndTime = "BUY_IT_NOW"; // String flag for frontend
       let sortKey = 9999999999999; 
 
-      if (rawEnd) {
+      if (isAuction && rawEnd) {
         const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
-          finalEndTime = d.toISOString(); // Sending ISO string for frontend math
+          finalEndTime = d.toISOString();
           sortKey = d.getTime();
         }
       }
@@ -94,21 +91,20 @@ export async function onRequest(context) {
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         condition: condLabel, 
         category: cleanCategory || "Card",
-        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+        listingType: isAuction ? "Auction" : "Buy It Now",
         endTime: finalEndTime,
         _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 7. STRICT AUCTION-FIRST SORT
-    // When sorting by "Ending Soonest", we move Auctions to the top and Buy It Nows to the bottom
+    // 7. THE MASTER RE-SORT
+    // eBay's API is lazy with 'endingSoonest'. We force Auctions to the top here.
     if (sort === "ending_soon") {
       items.sort((a, b) => {
-        const aIsAuction = a.listingType === "Auction";
-        const bIsAuction = b.listingType === "Auction";
-        if (aIsAuction && !bIsAuction) return -1;
-        if (!aIsAuction && bIsAuction) return 1;
+        // Auctions first, then by time
+        if (a.listingType === "Auction" && b.listingType !== "Auction") return -1;
+        if (a.listingType !== "Auction" && b.listingType === "Auction") return 1;
         return a._sortKey - b._sortKey;
       });
     }
