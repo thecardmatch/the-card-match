@@ -32,8 +32,7 @@ export async function onRequest(context) {
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. We fetch a high limit and use a filter that prioritizes Singles (183444)
-    // We do NOT let eBay sort yet; we will do it ourselves to guarantee the order.
+    // 2. Fetch a large pool (100) so we have enough data to actually sort manually
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -55,12 +54,12 @@ export async function onRequest(context) {
       let rawImg = item.image?.imageUrl || (item.additionalImages && item.additionalImages[0]?.imageUrl) || "";
       const hiResImg = rawImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1');
 
-      // TIMER DATA
+      // TIMER DATA (Standardized)
       const rawEnd = item.listingEndingAt;
-      let finalEndTime = ""; 
+      let finalEndTime = "FIXED"; // Default string for BIN
       let sortKey = 9999999999999; 
 
-      if (rawEnd) {
+      if (isAuction && rawEnd) {
         const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
           finalEndTime = d.toISOString();
@@ -78,27 +77,27 @@ export async function onRequest(context) {
         condition: title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
         category: cleanCategory || "Card",
         listingType: isAuction ? "Auction" : "Buy It Now",
-        endTime: isAuction ? finalEndTime : "FIXED", // "FIXED" flag for Buy It Now
+        endTime: finalEndTime, 
         _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 3. THE "DEATH TO BUY IT NOW" SORT
-    // This physically moves auctions ending in seconds to the absolute front of the array.
+    // 3. THE "MANUAL OVERRIDE" SORT
+    // This ignores eBay's response order and forces our own logic
     if (sort === "ending_soon") {
       items.sort((a, b) => {
-        const aIsAuc = a.listingType === "Auction";
-        const bIsAuc = b.listingType === "Auction";
-
-        if (aIsAuc && !bIsAuc) return -1;
-        if (!aIsAuc && bIsAuc) return 1;
+        // Auctions first, then by time. BIN at the bottom.
+        if (a.listingType === "Auction" && b.listingType !== "Auction") return -1;
+        if (a.listingType !== "Auction" && b.listingType === "Auction") return 1;
         return a._sortKey - b._sortKey;
       });
     } else if (sort === "price_asc") {
       items.sort((a, b) => a.currentBid - b.currentBid);
     } else if (sort === "price_desc") {
       items.sort((a, b) => b.currentBid - a.currentBid);
+    } else if (sort === "most_bids") {
+      items.sort((a, b) => (b.bidCount || 0) - (a.bidCount || 0));
     }
 
     return new Response(JSON.stringify({ 
