@@ -22,6 +22,7 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
+    // 1. Precise Grading Keywords
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
@@ -31,12 +32,15 @@ export async function onRequest(context) {
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
+    // 2. Sorting mapping
     let ebaySort = "newlyListed";
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
     else if (sort === "most_bids") ebaySort = "-bidCount";
 
+    // 3. THE URL - Locking into Singles (183444)
+    // We explicitly call for Auctions first to ensure we get the "Ending in seconds" cards
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -53,8 +57,6 @@ export async function onRequest(context) {
       const title = item.title || "";
       const isAuction = (item.buyingOptions || []).includes("AUCTION");
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-
-      // Image Resolution
       const toHighRes = (url) => url ? url.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1') : "";
 
       // Condition Detection
@@ -62,10 +64,9 @@ export async function onRequest(context) {
       const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
       if (gradeMatch) condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
 
-      // Timer Fix: If Buy It Now, we send a date 10 years in the future 
-      // so the frontend math doesn't result in "NaN"
+      // Timer Logic - No more 3000 days.
       const rawEnd = item.listingEndingAt;
-      let finalEndTime = new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000).toISOString(); 
+      let finalEndTime = null; // Default to null for Buy It Now
       let sortKey = 9999999999999;
 
       if (isAuction && rawEnd) {
@@ -77,7 +78,7 @@ export async function onRequest(context) {
       }
 
       return {
-        id: itemId, // Permanent ID for Watchlist saving
+        id: itemId,
         name: title,
         image: toHighRes(item.image?.imageUrl),
         images: [toHighRes(item.image?.imageUrl), ...(item.additionalImages || []).map(i => toHighRes(i.imageUrl))].filter(Boolean),
@@ -86,25 +87,26 @@ export async function onRequest(context) {
         condition: condLabel,
         category: cleanCategory || "Card",
         listingType: isAuction ? "Auction" : "Buy It Now",
-        endTime: finalEndTime,
+        endTime: finalEndTime, // If null, the frontend knows it's a Buy It Now
         isAuction: isAuction,
         _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
+    // 4. THE MASTER SORT - This forces the "Seconds" auctions to the top
     if (sort === "ending_soon") {
       items.sort((a, b) => {
-        if (a.isAuction && !b.isAuction) return -1;
-        if (!a.isAuction && b.isAuction) return 1;
+        // Always push real auctions with end times to the top
+        if (a.endTime && !b.endTime) return -1;
+        if (!a.endTime && b.endTime) return 1;
         return a._sortKey - b._sortKey;
       });
     }
 
     return new Response(JSON.stringify({ 
       items, 
-      total: 9999, // Telling the frontend there are "infinite" items
-      nextOffset: parseInt(offset) + 100 
+      total: data.total || 10000 
     }), {
       headers: { "Content-Type": "application/json" }
     });
