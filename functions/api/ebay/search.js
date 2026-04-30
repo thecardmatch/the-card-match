@@ -20,18 +20,23 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. Build Keyword Search
-    let searchKeywords = `${query} ${category === "—" ? "" : category} card`.trim();
+    // 1. IMPROVED KEYWORD LOGIC
+    // We make the search broader to ensure we get "Every Result"
+    let searchKeywords = `${query} ${category === "—" ? "" : category}`.trim();
+
     if (conditions === "Ungraded") {
-      searchKeywords += " -psa -bgs -sgc -cgc -graded -slab";
+      searchKeywords += " card -psa -bgs -sgc -cgc -graded";
     } else if (conditions && conditions !== "—") {
-      searchKeywords += ` ${conditions}`;
+      // If user selected "10", we look for "10 card" to be specific but broad
+      searchKeywords += ` ${conditions} card`;
+    } else {
+      searchKeywords += " card";
     }
 
     const finalQuery = encodeURIComponent(searchKeywords);
 
-    // 2. Fetch Auctions Strictly
-    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
+    // 2. THE FETCH - Upping limit to 100 to capture more "Ending Soon" cards
+    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(auctionUrl, {
       headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
@@ -42,18 +47,18 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      // --- THE SURGICAL PRICE FIX ---
-      // We ignore item.price because that is often the "Buy It Now" price.
-      // We look specifically at the Bidding fields.
+      // PRICE LOGIC (Surgical Bid Fix)
       const currentBidVal = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
       const minimumBidVal = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
+      const actualPrice = currentBidVal > 0 ? currentBidVal : minimumBidVal;
 
-      // If someone has bid, show that. If not, show the $35.00 starting price.
-      const actualAuctionPrice = currentBidVal > 0 ? currentBidVal : minimumBidVal;
+      // GRADE EXTRACTION (Fixes the missing Category/Grade badge)
+      // We look for PSA, BGS, etc. in the title. If none, we use the user's category.
+      const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
+      const conditionTag = gradeMatch ? gradeMatch[0].toUpperCase() : (conditions !== "—" ? conditions : "Raw");
 
-      // --- THE TIMER LOGIC ---
-      // eBay Browse API uses 'itemEndDate' or 'listingEndingAt'
-      const endTime = item.itemEndDate || item.listingEndingAt || "";
+      // TIMER DATA (Using the name that finally worked)
+      const timeISO = item.listingEndingAt || item.itemEndDate || "";
 
       return {
         id: itemId,
@@ -62,20 +67,22 @@ export async function onRequest(context) {
         title: item.title,
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
 
-        // MAPPING TO ALL FRONTEND POSSIBILITIES
-        price: actualAuctionPrice,
-        currentPrice: actualAuctionPrice,
-        currentBid: actualAuctionPrice,
+        // MAPPED PRICES
+        price: actualPrice,
+        currentPrice: actualPrice,
+        currentBid: actualPrice,
 
-        // TIMER MAPPING (The Kitchen Sink)
-        endTime: endTime,
-        listingEndingAt: endTime,
-        timeRemaining: endTime,
-        timeLeft: endTime,
+        // TIMER MAPPED NAMES (Keep all of them so we don't lose the timer again)
+        endTime: timeISO,
+        listingEndingAt: timeISO,
+        timeRemaining: timeISO,
+        timeLeft: timeISO,
 
-        // LABELS
-        category: category !== "—" ? category : "Card",
-        condition: item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i)?.[0] || "Raw",
+        // CATEGORY & GRADE (This is likely what went missing)
+        category: category !== "—" ? category : "Trading Card",
+        condition: conditionTag,
+        grade: conditionTag,
+
         listingType: "Auction",
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         bidCount: item.bidCount || 0
