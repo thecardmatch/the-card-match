@@ -26,7 +26,7 @@ export async function onRequest(context) {
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} card`.trim());
 
-    // --- DUAL FETCH: AUCTIONS FIRST ---
+    // 1. DUAL FETCH: AUCTIONS (Sorted by Ending Soonest) vs Buy It Now
     const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=50&offset=${offset}`;
     const binUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{FIXED_PRICE}&limit=20&offset=${offset}`;
 
@@ -44,28 +44,35 @@ export async function onRequest(context) {
       const hiResImg = rawImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1');
       const val = item.price ? parseFloat(item.price.value) : 0;
 
-      // Extract Grade for that missing "Category/Grade" slot
+      // Extract Grade/Condition
       const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
       const gradeLabel = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
+
+      // TIMER FIX: Create multiple date formats
+      let auctionEndTime = null;
+      if (type === "Auction" && item.listingEndingAt) {
+        auctionEndTime = item.listingEndingAt; // ISO String: "2024-05-20T..."
+      }
 
       return {
         id: itemId,
         name: item.title,
         title: item.title,
         image: hiResImg,
-        // PRICE FIX: Triple-naming ensures the UI sees it
+        images: [hiResImg],
         price: val,
         currentPrice: val,
         currentBid: val,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        // CATEGORY/CONDITION FIX
         category: cleanCategory || "Card",
         condition: gradeLabel, 
         grade: gradeLabel,
         listingType: type,
-        // TIMER FIX: Send both names
-        endTime: type === "Auction" ? item.listingEndingAt : "BUY_IT_NOW",
-        listingEndingAt: type === "Auction" ? item.listingEndingAt : null,
+        // TIMER LOGIC: If BIN, we send a distinct string. If Auction, we send the timestamp.
+        endTime: type === "Auction" ? auctionEndTime : "BUY_IT_NOW",
+        listingEndingAt: type === "Auction" ? auctionEndTime : null,
+        // This provides a raw numeric timestamp just in case
+        endTimestamp: auctionEndTime ? new Date(auctionEndTime).getTime() : null,
         bidCount: item.bidCount || 0
       };
     };
@@ -75,7 +82,6 @@ export async function onRequest(context) {
 
     let finalItems = [...auctions, ...bins];
 
-    // Manual re-sort for Price filters if needed
     if (sort === "price_asc") finalItems.sort((a, b) => a.price - b.price);
     if (sort === "price_desc") finalItems.sort((a, b) => b.price - a.price);
 
