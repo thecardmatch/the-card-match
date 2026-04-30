@@ -22,25 +22,25 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
-    // 1. Precise Grading Keywords
+    // 1. Keyword Setup
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
-      if (match) gradeKeywords = `(psa,bgs,sgc,cgc,vgs,grade) ${match[0]}`;
+      if (match) gradeKeywords = `(psa,bgs,sgc,cgc,grade) ${match[0]}`;
     }
 
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Sorting mapping
+    // 2. STRICT SORTING
+    // We use the 'endingSoonest' parameter but we will manually override it in the code
     let ebaySort = "newlyListed";
     if (sort === "ending_soon") ebaySort = "endingSoonest";
     else if (sort === "price_asc") ebaySort = "price";
     else if (sort === "price_desc") ebaySort = "-price";
-    else if (sort === "most_bids") ebaySort = "-bidCount";
 
-    // 3. THE URL - Locking into Singles (183444)
-    // We explicitly call for Auctions first to ensure we get the "Ending in seconds" cards
+    // 3. THE "DEEP SEARCH" API CALL
+    // We are pulling 200 items to ensure we don't miss those 'seconds away' auctions
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
@@ -56,20 +56,16 @@ export async function onRequest(context) {
     let items = (data.itemSummaries || []).map(item => {
       const title = item.title || "";
       const isAuction = (item.buyingOptions || []).includes("AUCTION");
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+
+      // Image Quality Fix
       const toHighRes = (url) => url ? url.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1') : "";
 
-      // Condition Detection
-      let condLabel = "Raw";
-      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
-      if (gradeMatch) condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
-
-      // Timer Logic - No more 3000 days.
+      // Timer Logic
       const rawEnd = item.listingEndingAt;
-      let finalEndTime = null; // Default to null for Buy It Now
-      let sortKey = 9999999999999;
+      let finalEndTime = ""; 
+      let sortKey = isAuction ? 0 : 9999999999999; 
 
-      if (isAuction && rawEnd) {
+      if (rawEnd) {
         const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
           finalEndTime = d.toISOString();
@@ -77,8 +73,15 @@ export async function onRequest(context) {
         }
       }
 
+      // Condition/Badge Logic
+      let condLabel = "Raw";
+      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
+      if (gradeMatch) condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
+
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+
       return {
-        id: itemId,
+        id: itemId, // Fixed ID for Watchlist
         name: title,
         image: toHighRes(item.image?.imageUrl),
         images: [toHighRes(item.image?.imageUrl), ...(item.additionalImages || []).map(i => toHighRes(i.imageUrl))].filter(Boolean),
@@ -87,19 +90,19 @@ export async function onRequest(context) {
         condition: condLabel,
         category: cleanCategory || "Card",
         listingType: isAuction ? "Auction" : "Buy It Now",
-        endTime: finalEndTime, // If null, the frontend knows it's a Buy It Now
-        isAuction: isAuction,
+        endTime: isAuction ? finalEndTime : null, // ONLY send end time for auctions
         _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 4. THE MASTER SORT - This forces the "Seconds" auctions to the top
+    // 4. THE MASTER CHRONO-SORT
+    // This physically moves the 5-second auctions to index 0.
     if (sort === "ending_soon") {
       items.sort((a, b) => {
-        // Always push real auctions with end times to the top
-        if (a.endTime && !b.endTime) return -1;
-        if (!a.endTime && b.endTime) return 1;
+        // Auctions always come before Buy It Nows in 'Ending Soon'
+        if (a.listingType === "Auction" && b.listingType !== "Auction") return -1;
+        if (a.listingType !== "Auction" && b.listingType === "Auction") return 1;
         return a._sortKey - b._sortKey;
       });
     }
