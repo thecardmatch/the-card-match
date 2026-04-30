@@ -22,7 +22,6 @@ export async function onRequest(context) {
 
     const tokenData = await tokenRes.json();
 
-    // 1. Precise Keyword Mapping
     let gradeKeywords = "";
     if (conditions && conditions !== "—") {
       const match = conditions.match(/\d+/);
@@ -32,15 +31,8 @@ export async function onRequest(context) {
     const cleanCategory = (category === "—" || !category) ? "" : category;
     const finalQuery = encodeURIComponent(`${query} ${cleanCategory} ${gradeKeywords} card`.trim());
 
-    // 2. Sorting Logic for API
-    let ebaySort = "newlyListed";
-    if (sort === "ending_soon") ebaySort = "endingSoonest";
-    else if (sort === "price_asc") ebaySort = "price";
-    else if (sort === "price_desc") ebaySort = "-price";
-    else if (sort === "most_bids") ebaySort = "-bidCount";
-
-    // 3. THE "DEEP PULL" (Pulling 200 items to ensure no 'seconds-away' auctions are skipped)
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&sort=${ebaySort}&limit=100&offset=${offset}`;
+    // We fetch a larger pool (200) so our manual sort has plenty of data to find true auctions
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION|FIXED_PRICE}&limit=200&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { 
@@ -56,22 +48,19 @@ export async function onRequest(context) {
       const title = item.title || "";
       const isAuction = (item.buyingOptions || []).includes("AUCTION");
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-
-      // 4. IMAGE RESOLUTION BOOST (s-l1600 is the highest res eBay provides)
       const toHighRes = (url) => url ? url.replace(/s-l\d+\.(jpg|png|jpeg)/i, 's-l1600.$1') : "";
-      const mainImg = toHighRes(item.image?.imageUrl);
 
-      // 5. CONDITION BADGE DETECTION
+      // Condition Detection
       let condLabel = "Raw";
       const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
       if (gradeMatch) condLabel = `${gradeMatch[1].toUpperCase()} ${gradeMatch[2]}`;
 
-      // 6. TIMER DATA (Null for Buy It Now, ISO string for Auctions)
+      // TIMER FIX: Sending a clean ISO string that frontend JS can always parse
       const rawEnd = item.listingEndingAt;
-      let finalEndTime = null; 
+      let finalEndTime = ""; 
       let sortKey = 9999999999999; 
 
-      if (isAuction && rawEnd) {
+      if (rawEnd) {
         const d = new Date(rawEnd);
         if (!isNaN(d.getTime())) {
           finalEndTime = d.toISOString();
@@ -80,34 +69,40 @@ export async function onRequest(context) {
       }
 
       return {
-        id: itemId, // Stable ID for Watchlist persistence
+        id: itemId,
         name: title,
-        image: mainImg,
-        images: [mainImg, ...(item.additionalImages || []).map(i => toHighRes(i.imageUrl))].filter(Boolean),
+        image: toHighRes(item.image?.imageUrl),
+        images: [toHighRes(item.image?.imageUrl), ...(item.additionalImages || []).map(i => toHighRes(i.imageUrl))].filter(Boolean),
         currentBid: item.price ? parseFloat(item.price.value) : 0,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         condition: condLabel,
         category: cleanCategory || "Card",
         listingType: isAuction ? "Auction" : "Buy It Now",
-        endTime: finalEndTime,
+        endTime: finalEndTime, // Now always a string (ISO or empty)
+        isAuction: isAuction,
         _sortKey: sortKey,
         bidCount: item.bidCount || 0
       };
     });
 
-    // 7. THE MASTER RE-SORT (Forces real auctions to the front for "Ending Soon")
+    // THE MASTER SORT: Force strict chronological auctions to the top
     if (sort === "ending_soon") {
-      items.sort((a, b) => {
-        if (a.listingType === "Auction" && b.listingType !== "Auction") return -1;
-        if (a.listingType !== "Auction" && b.listingType === "Auction") return 1;
-        return a._sortKey - b._sortKey;
-      });
+      const auctions = items.filter(i => i.isAuction && i.endTime);
+      const buyItNows = items.filter(i => !i.isAuction || !i.endTime);
+
+      auctions.sort((a, b) => a._sortKey - b._sortKey);
+      items = [...auctions, ...buyItNows];
+    } else if (sort === "price_asc") {
+      items.sort((a, b) => a.currentBid - b.currentBid);
+    } else if (sort === "price_desc") {
+      items.sort((a, b) => b.currentBid - a.currentBid);
+    } else if (sort === "most_bids") {
+      items.sort((a, b) => b.bidCount - a.bidCount);
     }
 
     return new Response(JSON.stringify({ 
       items, 
-      total: data.total || 10000, // Forces infinite scroll logic in frontend
-      nextOffset: parseInt(offset) + 100 
+      total: data.total || 10000 
     }), {
       headers: { "Content-Type": "application/json" }
     });
