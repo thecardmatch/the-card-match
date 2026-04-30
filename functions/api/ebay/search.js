@@ -23,41 +23,46 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. "WIDE NET" SEARCH - We use keywords instead of restrictive filters 
-    // to make sure we don't miss cards that are simply missing 'aspect' tags.
+    // 1. Build Query
     const condQuery = (conditions && conditions !== "—") ? `graded ${conditions}` : "";
-    const catQuery = (category && category !== "—") ? category : "";
-    const searchKeywords = `${query} ${catQuery} ${condQuery} card`.trim();
+    const searchKeywords = `${query} ${category === "—" ? "" : category} ${condQuery} card`.trim();
     const finalQuery = encodeURIComponent(searchKeywords);
 
-    // 2. FETCH - Grabbing 100 items to ensure we have a full deck
+    // 2. Fetch - We ask for Auctions first to ensure 'Ending Soonest' works
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444}&sort=endingSoonest&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { 
         Authorization: `Bearer ${token}`, 
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${CAMP_ID}`
       },
     });
 
     const data = await ebayRes.json();
 
     const items = (data.itemSummaries || []).map(item => {
+      // WATCHLIST PERSISTENCE: Strip the "v1|" prefix to keep the 12-digit ID stable
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
       const isAuction = (item.buyingOptions || []).includes("AUCTION");
 
-      // PRICE LOGIC: Always pick the 'active' price (Current Bid or Start Price)
-      const currentPrice = item.price ? parseFloat(item.price.value) : 0;
-      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const displayPrice = currentPrice > 0 ? currentPrice : minBid;
+      // PRICE FIX: 
+      // For auctions, 'price' is often the "Buy It Now" price if one exists.
+      // We MUST use 'currentBidPrice' or 'minimumBidPrice' for the auction value.
+      let auctionPrice = 0;
+      if (isAuction) {
+        auctionPrice = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 
+                       (item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 
+                       (item.price ? parseFloat(item.price.value) : 0));
+      } else {
+        auctionPrice = item.price ? parseFloat(item.price.value) : 0;
+      }
 
-      // GRADE EXTRACTION: Look for PSA/BGS in the title
+      // GRADE/CONDITION LABEL
       const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
-      const gradeText = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
+      const conditionLabel = gradeMatch ? gradeMatch[0].toUpperCase() : "Raw";
 
-      // THE "EVERYTHING" TIMER: Providing every possible variable name
-      const timeISO = item.listingEndingAt || null;
+      // THE TIMER FIX: Provide the ISO string under EVERY name known to Replit/React
+      const timeISO = item.listingEndingAt || "";
 
       return {
         id: itemId,
@@ -65,19 +70,21 @@ export async function onRequest(context) {
         name: item.title,
         title: item.title,
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-        // PRICE
-        price: displayPrice,
-        currentPrice: displayPrice,
-        currentBid: displayPrice,
-        // CATEGORY & CONDITION
+        // PRICE (Mapped for all possible components)
+        price: auctionPrice,
+        currentPrice: auctionPrice,
+        currentBid: auctionPrice,
+        bidPrice: auctionPrice,
+        // CATEGORY & GRADE
         category: category !== "—" ? category : "Card",
-        condition: gradeText,
-        grade: gradeText,
-        // TIMER (Brute force naming)
+        condition: conditionLabel,
+        grade: conditionLabel,
+        // TIMER (The Kitchen Sink approach)
         endTime: timeISO,
         listingEndingAt: timeISO,
         timeRemaining: timeISO,
-        expirationDate: timeISO,
+        endDate: timeISO,
+        endTimestamp: timeISO ? new Date(timeISO).getTime() : null,
         // METADATA
         listingType: isAuction ? "Auction" : "Buy It Now",
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
