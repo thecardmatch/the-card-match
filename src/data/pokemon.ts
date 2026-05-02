@@ -1,8 +1,6 @@
 export type Category = "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer" | "Formula 1" | "WWE";
 export type ConditionFilter = "Raw" | "Grade 7" | "Grade 8" | "Grade 9" | "Grade 10";
 export type ListingType = "All" | "Auction" | "BuyItNow";
-
-// STRICT: Only these two are allowed
 export type SortOption = "bestMatch" | "endingSoonest";
 
 export type TradingCard = {
@@ -49,10 +47,5 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 export function buildSearchQuery(prefs: Preferences): string {
-  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
-  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
-}
-
-export function fetchCards(): TradingCard[] {
-  return []; 
+  return prefs.query || "All Cards";
 }
