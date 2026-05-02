@@ -2,7 +2,7 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  const query = searchParams.get("query") || "";
+  const query = (searchParams.get("query") || "").toLowerCase();
   const categories = searchParams.get("categories") || "";
   const conditions = searchParams.get("conditions") || "";
   const sortChoice = searchParams.get("sort") || "endingSoonest";
@@ -15,7 +15,6 @@ export async function onRequest(context) {
     const clientId = env.EBAY_CLIENT_ID;
     const clientSecret = env.EBAY_CLIENT_SECRET;
     const authHeader = btoa(`${clientId}:${clientSecret}`);
-
     const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Basic ${authHeader}` },
@@ -51,23 +50,45 @@ export async function onRequest(context) {
       const catPath = (item.categoryPath || "").toLowerCase();
       const catId = String(item.categoryId);
 
-      // Sport Detection
-      let sport = "Card"; 
-      if (catPath.includes("pokemon") || catId === "2610" || title.includes("pokemon") || title.includes("pika")) sport = "Pokemon";
-      else if (catPath.includes("basketball") || catId === "212" || title.includes("nba")) sport = "Basketball";
-      else if (catPath.includes("baseball") || catId === "213" || title.includes("mlb")) sport = "Baseball";
-      else if (catPath.includes("football") || catId === "214" || title.includes("nfl")) sport = "Football";
-      else if (catPath.includes("soccer") || catId === "216" || title.includes("fifa")) sport = "Soccer";
-      else if (catPath.includes("hockey") || catId === "215" || title.includes("nhl")) sport = "Hockey";
+      // --- AGGRESSIVE SPORT DETECTION ---
+      let sport = ""; 
 
-      // Grade Detection
+      // Match Pokemon
+      if (title.includes("pokemon") || title.includes("pika") || title.includes("tazo") || catPath.includes("pokemon") || catId === "2610" || query.includes("pokemon")) {
+        sport = "Pokemon";
+      } 
+      // Match Basketball
+      else if (title.includes("basketball") || title.includes("nba") || catPath.includes("basketball") || catId === "212" || query.includes("basketball")) {
+        sport = "Basketball";
+      } 
+      // Match Baseball
+      else if (title.includes("baseball") || title.includes("mlb") || catPath.includes("baseball") || catId === "213" || query.includes("baseball")) {
+        sport = "Baseball";
+      } 
+      // Match Football
+      else if (title.includes("football") || title.includes("nfl") || catPath.includes("football") || catId === "214" || query.includes("football")) {
+        sport = "Football";
+      } 
+      // Match Soccer
+      else if (title.includes("soccer") || title.includes("futbol") || catPath.includes("soccer") || catId === "216" || query.includes("soccer")) {
+        sport = "Soccer";
+      } 
+      // Match Hockey
+      else if (title.includes("hockey") || title.includes("nhl") || catPath.includes("hockey") || catId === "215" || query.includes("hockey")) {
+        sport = "Hockey";
+      }
+      // Safety Fallback if still empty
+      if (!sport) sport = "Card";
+
+      // --- GRADE DETECTION ---
       let grade = "Raw";
       if (title.includes("psa 10")) grade = "PSA 10";
       else if (title.includes("psa 9")) grade = "PSA 9";
       else if (title.includes("bgs")) grade = "BGS";
       else if (title.includes("sgc")) grade = "SGC";
-      else if (title.includes("graded")) grade = "Graded";
+      else if (title.includes("graded") || title.includes("slab")) grade = "Graded";
 
+      // --- LISTING TYPE ---
       const listingType = item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now";
 
       return {
