@@ -6,9 +6,9 @@ export type SortOption = "bestMatch" | "endingSoonest";
 export type TradingCard = {
   id: string;
   name: string;
-  sport: string;       // New separate field
-  grade: string;       // New separate field
-  listingType: string; // New separate field
+  sport: string;       // REQUIRED: Matches bridge
+  grade: string;       // REQUIRED: Matches bridge
+  listingType: string; // REQUIRED: Matches bridge
   image: string;
   currentBid: number;
   ebayUrl: string;
