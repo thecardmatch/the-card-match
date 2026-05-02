@@ -18,7 +18,6 @@ export type TradingCard = {
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];
 export const CONDITION_FILTERS: ConditionFilter[] = ["Raw", "Grade 7", "Grade 8", "Grade 9", "Grade 10"];
-
 export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
   { value: "bestMatch", label: "Best Match" },
   { value: "endingSoonest", label: "Ending Soonest" },
@@ -47,5 +46,6 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 export function buildSearchQuery(prefs: Preferences): string {
-  return prefs.query || "All Cards";
+  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
+  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }

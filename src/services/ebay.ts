@@ -22,10 +22,11 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
   }
 }
 
-export function buildEbayQuery(prefs: Preferences): string {
-  return prefs.query || "All Cards";
-}
-
 export function getAffiliateUrl(name: string): string {
   return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}`;
+}
+
+export function buildEbayQuery(prefs: Preferences): string {
+  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All";
+  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }

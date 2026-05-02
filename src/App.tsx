@@ -8,8 +8,8 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard, Preferences } from "@/data/pokemon";
-import { DEFAULT_PREFS, SORT_OPTIONS } from "@/data/pokemon";
-import { searchCards, buildEbayQuery, getAffiliateUrl } from "@/services/ebay";
+import { DEFAULT_PREFS, SORT_OPTIONS, buildSearchQuery } from "@/data/pokemon";
+import { searchCards, getAffiliateUrl } from "@/services/ebay";
 import { fetchWatchlist, addToWatchlist, removeFromWatchlist } from "@/services/watchlist";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
 
@@ -51,22 +51,6 @@ export default function App() {
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
   const [deckResetKey, setDeckResetKey] = useState(0);
-
-  const refreshWatchlist = useCallback(async () => {
-    if (user) {
-      const remote = await fetchWatchlist();
-      setLiked(remote);
-    } else {
-      setLiked(loadLocalWatchlist());
-    }
-  }, [user]);
-
-  useEffect(() => { refreshWatchlist(); }, [refreshWatchlist]);
-
-  useEffect(() => {
-    if (user) return;
-    try { window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked)); } catch {}
-  }, [liked, user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,43 +99,12 @@ export default function App() {
     });
   }, [user?.id, setPrefs]);
 
-  useEffect(() => {
-    if (!user || !isSupabaseReady) return;
-    supabase.auth.updateUser({ data: { app_preferences: prefs } }).catch(() => {});
-  }, [prefs, user]);
-
-  const searchQuery = buildEbayQuery(prefs);
+  const searchQuery = buildSearchQuery(prefs);
   const showOnboarding = !hasOnboarded;
-
-  function handleBuy(card: TradingCard) {
-    const url = card.ebayUrl || getAffiliateUrl(card.name);
-    if (!url) return;
-    const win = window.open(url, "_blank", "noopener,noreferrer");
-    if (!win || win.closed || typeof win.closed === "undefined") {
-      window.location.href = url;
-    }
-  }
 
   async function handleLike(card: TradingCard) {
     setLiked((prev) => prev.some((c) => c.id === card.id) ? prev : [card, ...prev]);
     if (user) await addToWatchlist(user.id, card);
-  }
-
-  async function handleRemove(cardId: string) {
-    setLiked((prev) => prev.filter((c) => c.id !== cardId));
-    if (user) await removeFromWatchlist(cardId);
-  }
-
-  async function handleClearAll() {
-    if (user) {
-      await Promise.all(liked.map((c) => removeFromWatchlist(c.id)));
-    }
-    setLiked([]);
-  }
-
-  async function handleSignOut() {
-    await signOut();
-    setLiked([]);
   }
 
   return (
@@ -159,47 +112,61 @@ export default function App() {
       <main className="flex-1 flex flex-col order-1 min-h-screen md:min-h-0">
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/logo.png" alt="The Card Match" className="w-11 h-11 rounded-lg object-cover ring-1 ring-primary/30 shadow-md flex-shrink-0" />
+            <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-lg md:text-xl font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
+              <h1 className="text-lg font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
               <p className="text-xs text-muted-foreground truncate">
-                {loading ? (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" />
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:300ms]" />
-                  </span>
-                ) : (
-                  <>Showing <span className="font-mono font-semibold text-foreground">"{searchQuery || "All"}"</span></>
-                )}
+                {loading ? "Searching..." : `Showing "${searchQuery}"`}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {isSupabaseReady && (
-              user ? (
-                <button onClick={handleSignOut} className="hidden sm:inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-card border border-card-border text-sm font-semibold text-foreground hover-elevate">
-                  <LogOut className="w-4 h-4" />Sign Out
-                </button>
-              ) : (
-                <button onClick={() => setAuthOpen(true)} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-primary text-primary-foreground text-sm font-bold hover-elevate">
-                  <LogIn className="w-4 h-4" />Sign In
-                </button>
-              )
-            )}
-
-            {/* Cleaned-up Sort Popover */}
             <div ref={sortBtnRef} className="relative">
               <button
                 onClick={() => setSortOpen((v) => !v)}
-                className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
-                  prefs.sort === "endingSoonest" ? "bg-primary border-primary text-primary-foreground" : "bg-card border-card-border text-foreground"
+                className={`w-10 h-10 rounded-full border flex items-center justify-center ${
+                  prefs.sort === "endingSoonest" ? "bg-primary text-primary-foreground" : "bg-card text-foreground"
                 }`}
               >
                 <ArrowUpDown className="w-4 h-4" />
               </button>
               <AnimatePresence>
                 {sortOpen && (
-                  <motion.div
-                    initial={{ opacity
+                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-50">
+                    {SORT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setPrefs({ ...prefs, sort: opt.value }); setSortOpen(false); }}
+                        className={`w-full flex items-center justify-between px-4 py-2.5 text-sm ${prefs.sort === opt.value ? "font-bold text-primary" : "text-foreground"}`}
+                      >
+                        {opt.label}
+                        {prefs.sort === opt.value && <Check className="w-4 h-4" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
+              <SettingsIcon className="w-5 h-5 text-foreground" />
+            </button>
+          </div>
+        </header>
+
+        <SwipeDeck
+          cards={cards}
+          onLike={handleLike}
+          onBuy={(card) => window.open(card.ebayUrl, "_blank")}
+          onNeedMore={handleNeedMore}
+          isLoadingMore={loadingMore}
+          resetKey={deckResetKey}
+        />
+      </main>
+
+      <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
+      <SettingsDialog open={settingsOpen || showOnboarding} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
+    </div>
+  );
+}
