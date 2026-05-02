@@ -1,17 +1,3 @@
-function getCategoryLabel(id) {
-  const mapping = {
-    "2610": "Pokemon",
-    "212": "Basketball",
-    "213": "Baseball",
-    "214": "Football",
-    "215": "Hockey",
-    "216": "Soccer",
-    "183444": "Formula 1",
-    "261328": "WWE"
-  };
-  return mapping[id] || "Card";
-}
-
 export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
@@ -41,19 +27,20 @@ export async function onRequest(context) {
     const tokenData = await tokenResponse.json();
     const token = tokenData.access_token;
 
+    // Build Search Query
     let searchTerms = query;
     if (categories && categories !== "—") searchTerms += ` ${categories}`;
     if (conditions && conditions.toLowerCase().includes("raw")) {
-      searchTerms += " -psa -bgs -sgc -cgc -graded -slab -vgs -csa -gma";
+      searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
     } else if (conditions && conditions !== "—") {
       searchTerms += ` ${conditions}`;
     }
     searchTerms += " card";
 
-    let filterParts = ["buyingOptions:{AUCTION}"];
+    // Build Filters
+    let filterParts = ["buyingOptions:{AUCTION|FIXED_PRICE}"]; // Allow both so we can label them
     if (minPrice || maxPrice) {
-      filterParts.push(`price:[${minPrice}..${maxPrice}]`);
-      filterParts.push(`priceCurrency:USD`);
+      filterParts.push(`price:[${minPrice}..${maxPrice}],priceCurrency:USD`);
     }
     const filterString = filterParts.join(",");
     const sortParam = sortChoice === "endingSoonest" ? "&sort=endingSoonest" : "";
@@ -61,24 +48,45 @@ export async function onRequest(context) {
     const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms.trim())}&filter=${encodeURIComponent(filterString)}${sortParam}&limit=20&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      },
+      headers: { "Authorization": `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
     });
 
     const data = await ebayRes.json();
     const items = (data.itemSummaries || []).map((item) => {
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      const title = (item.title || "").toLowerCase();
+
+      // 1. SMART SPORT DETECTION
+      let displayCategory = "Card";
+      if (title.includes("pokemon") || item.categoryId === "2610") displayCategory = "Pokemon";
+      else if (title.includes("basketball") || item.categoryId === "212") displayCategory = "Basketball";
+      else if (title.includes("baseball") || item.categoryId === "213") displayCategory = "Baseball";
+      else if (title.includes("football") || item.categoryId === "214") displayCategory = "Football";
+      else if (title.includes("soccer") || item.categoryId === "216") displayCategory = "Soccer";
+      else if (title.includes("hockey") || item.categoryId === "215") displayCategory = "Hockey";
+
+      // 2. SMART GRADE DETECTION
+      let gradeLabel = "Raw";
+      if (title.includes("psa 10")) gradeLabel = "PSA 10";
+      else if (title.includes("psa 9")) gradeLabel = "PSA 9";
+      else if (title.includes("bgs")) gradeLabel = "BGS";
+      else if (title.includes("sgc")) gradeLabel = "SGC";
+      else if (title.includes("graded") || title.includes("slab")) gradeLabel = "Graded";
+
+      // 3. LISTING TYPE DETECTION
+      const isAuction = item.buyingOptions?.includes("AUCTION");
+      const listingLabel = isAuction ? "Auction" : "Buy It Now";
+
       return {
         id: itemId,
         name: item.title,
-        category: getCategoryLabel(item.categoryId),
+        // COMBINED TAG: "Pokemon • PSA 10 • Auction"
+        category: `${displayCategory} • ${gradeLabel} • ${listingLabel}`,
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
-        currency: item.price?.currency || "USD",
+        currency: "USD",
         endTime: item.itemEndDate || null,
-        condition: item.condition || "Ungraded",
+        condition: gradeLabel,
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
       };
     });
