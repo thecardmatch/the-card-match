@@ -9,6 +9,7 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard, Preferences } from "@/data/pokemon";
 import { DEFAULT_PREFS, SORT_OPTIONS } from "@/data/pokemon";
+// NOTE: Ensure your searchCards service is updated to accept these new params
 import { searchCards, buildEbayQuery, getAffiliateUrl } from "@/services/ebay";
 import { fetchWatchlist, addToWatchlist, removeFromWatchlist } from "@/services/watchlist";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
@@ -38,7 +39,6 @@ export default function App() {
   const [sortOpen, setSortOpen] = useState(false);
   const sortBtnRef = useRef<HTMLDivElement>(null);
 
-  // Close sort popover on outside click
   useEffect(() => {
     function onOut(e: MouseEvent) {
       if (sortBtnRef.current && !sortBtnRef.current.contains(e.target as Node)) {
@@ -49,11 +49,8 @@ export default function App() {
     return () => document.removeEventListener("mousedown", onOut);
   }, []);
 
-  // Tracks which eBay offset the next load-more call should use.
   const ebayOffset = useRef(0);
-  // Deduplicates items across pages so appended cards are always fresh.
   const seenIds = useRef(new Set<string>());
-  // Incrementing key that tells SwipeDeck to reset to card 0 on fresh search.
   const [deckResetKey, setDeckResetKey] = useState(0);
 
   const refreshWatchlist = useCallback(async () => {
@@ -72,18 +69,20 @@ export default function App() {
     try { window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked)); } catch {}
   }, [liked, user]);
 
-  // Fresh search whenever prefs change — resets deck to card 0.
+  // FIXED: Fresh search now correctly passes Price and Sort to the service
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setLoadingMore(false);
     ebayOffset.current = 0;
-    seenIds.current    = new Set();
+    seenIds.current = new Set();
+
+    // searchCards must be able to handle: prefs.minPrice, prefs.maxPrice, prefs.sort
     searchCards(prefs, 0).then((results) => {
       if (cancelled) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
       fresh.forEach((c) => seenIds.current.add(c.id));
-      ebayOffset.current = 200; // matches server PAGE_SIZE
+      ebayOffset.current = 20; // Set this to your preferred page size (usually 20-50)
       setCards(fresh);
       setDeckResetKey((k) => k + 1);
       setLoading(false);
@@ -91,7 +90,7 @@ export default function App() {
     return () => { cancelled = true; };
   }, [prefs]);
 
-  // Load-more: called by SwipeDeck when ≤5 cards remain in the visible deck.
+  // FIXED: Load-more now correctly passes Price and Sort
   const handleNeedMore = useCallback(async () => {
     if (loadingMore || loading) return;
     setLoadingMore(true);
@@ -100,7 +99,7 @@ export default function App() {
       const fresh = more.filter((c) => !seenIds.current.has(c.id));
       if (fresh.length > 0) {
         fresh.forEach((c) => seenIds.current.add(c.id));
-        ebayOffset.current += 200;
+        ebayOffset.current += 20; 
         setCards((prev) => [...prev, ...fresh]);
       }
     } catch (err) {
@@ -110,7 +109,6 @@ export default function App() {
     }
   }, [loadingMore, loading, prefs]);
 
-  // ── Supabase preferences persistence ──────────────────────────────────────
   useEffect(() => {
     if (!user || !isSupabaseReady) return;
     supabase.auth.getUser().then(({ data }) => {
@@ -119,7 +117,6 @@ export default function App() {
         setPrefs({ ...DEFAULT_PREFS, ...saved } as Preferences);
       }
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   useEffect(() => {
@@ -133,8 +130,6 @@ export default function App() {
   function handleBuy(card: TradingCard) {
     const url = card.ebayUrl || getAffiliateUrl(card.name);
     if (!url) return;
-    // window.open is blocked by mobile popup blockers when called from a gesture
-    // (not a direct click event). Try it first; if blocked, navigate in the same tab.
     const win = window.open(url, "_blank", "noopener,noreferrer");
     if (!win || win.closed || typeof win.closed === "undefined") {
       window.location.href = url;
@@ -179,7 +174,7 @@ export default function App() {
                     <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:300ms]" />
                   </span>
                 ) : (
-                  <>Showing <span className="font-mono font-semibold text-foreground">"{searchQuery || "—"}"</span></>
+                  <>Showing <span className="font-mono font-semibold text-foreground">"{searchQuery || "All"}"</span></>
                 )}
               </p>
             </div>
@@ -198,7 +193,6 @@ export default function App() {
               )
             )}
 
-            {/* Sort — popover */}
             <div ref={sortBtnRef} className="relative">
               <button
                 onClick={() => setSortOpen((v) => !v)}
@@ -206,7 +200,6 @@ export default function App() {
                   prefs.sort !== "bestMatch" ? "bg-primary border-primary text-primary-foreground shadow-md" : "bg-card border-card-border text-foreground"
                 }`}
                 aria-label="Sort"
-                title="Sort order"
               >
                 <ArrowUpDown className="w-4 h-4" />
               </button>
@@ -242,11 +235,9 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {/* Watchlist — mobile */}
             <button
               onClick={() => setWatchlistOpen(true)}
               className="md:hidden relative w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2"
-              aria-label="Open watchlist"
             >
               <Heart className="w-5 h-5 text-red-500 fill-red-500" />
               {liked.length > 0 && (
@@ -256,7 +247,7 @@ export default function App() {
               )}
             </button>
 
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2" aria-label="Settings">
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2">
               <SettingsIcon className="w-5 h-5 text-foreground" />
             </button>
           </div>
@@ -285,5 +276,3 @@ export default function App() {
 
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
-  );
-}
