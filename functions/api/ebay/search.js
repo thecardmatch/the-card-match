@@ -2,113 +2,129 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
+  // 1. EXTRACT PARAMETERS
   const query = searchParams.get("query") || "";
-  const category = searchParams.get("categories") || "";
+  const categories = searchParams.get("categories") || "";
   const conditions = searchParams.get("conditions") || "";
   const sortChoice = searchParams.get("sort") || "endingSoonest";
+  const minPrice = searchParams.get("minPrice") || "0";
+  const maxPrice = searchParams.get("maxPrice") || "10000";
   const offset = searchParams.get("offset") || "0";
-  const CAMP_ID = "5339150952";
+  const CAMP_ID = "5339150952"; // Your EPN Campaign ID
 
   try {
-    const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
-    const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    // 2. EBAY AUTHENTICATION
+    const clientId = env.EBAY_CLIENT_ID;
+    const clientSecret = env.EBAY_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new Error("Missing eBay API credentials in environment variables.");
+    }
+
+    const authHeader = btoa(`${clientId}:${clientSecret}`);
+    const tokenResponse = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${auth}` },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Authorization": `Basic ${authHeader}`,
+      },
       body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
     });
 
-    const tokenData = await tokenRes.json();
+    const tokenData = await tokenResponse.json();
     const token = tokenData.access_token;
 
-    let searchString = `${query} ${category === "—" ? "" : category}`.trim();
-    if (conditions === "Ungraded") {
-      searchString += " card -psa -bgs -sgc -cgc -tag -graded -slab -vgs";
-    } else if (conditions && conditions !== "—") {
-      searchString += ` ${conditions} card`;
-    } else {
-      searchString += " card";
+    // 3. BUILD SEARCH QUERY WITH CATEGORY LOGIC
+    let searchTerms = query;
+    if (categories && categories !== "—") {
+      searchTerms += ` ${categories}`;
     }
 
-    const finalQuery = encodeURIComponent(searchString.trim());
-    const sortParam = sortChoice === "bestMatch" ? "" : "&sort=endingSoonest";
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=buyingOptions:{AUCTION}${sortParam}&limit=100&offset=${offset}`;
+    // Handle "Raw" vs Graded logic
+    if (conditions.includes("Raw")) {
+      searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
+    } else if (conditions && conditions !== "—") {
+      searchTerms += ` ${conditions}`;
+    }
 
+    searchTerms += " card"; // Ensure we are looking for cards
+
+    // 4. THE FILTER FIX (Price + Auction Only)
+    // We combine them into a single encoded string.
+    let filterParts = ["buyingOptions:{AUCTION}"];
+
+    // Add Price Range
+    if (minPrice || maxPrice) {
+      filterParts.push(`price:[${minPrice}..${maxPrice}]`);
+      filterParts.push(`priceCurrency:USD`);
+    }
+
+    const filterString = filterParts.join(",");
+
+    // 5. SORTING LOGIC
+    // bestMatch is default (no sort param needed), otherwise use endingSoonest
+    const sortParam = sortChoice === "endingSoonest" ? "&sort=endingSoonest" : "";
+
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms.trim())}&filter=${encodeURIComponent(filterString)}${sortParam}&limit=20&offset=${offset}`;
+
+    // 6. FETCH FROM EBAY
     const ebayRes = await fetch(ebayUrl, {
-      headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "Content-Type": "application/json",
+      },
     });
 
     const data = await ebayRes.json();
-
-    // SAFETY 1: Ensure items is ALWAYS an array
     const rawItems = data.itemSummaries || [];
 
-    const items = rawItems.map(item => {
-      const itemId = (item.itemId || "").includes("|") ? item.itemId.split("|")[1] : (item.itemId || Math.random().toString());
+    // 7. DATA MAPPING & IMAGE UPSCALING
+    const items = rawItems.map((item) => {
+      // Extract numeric ID from eBay's RESTful ID (e.g., "v1|123456789|0")
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      const currentBid = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
-      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const actualPrice = currentBid > 0 ? currentBid : minBid;
+      // Upscale image to 1600px for the Swipe Deck
+      const highResImage = item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "";
 
-      const title = (item.title || "Unknown Card").toUpperCase();
-      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS|TAG)\s*(\d+\.?\d*)/i);
+      // Calculate the correct "display price" (Current Bid)
+      const priceValue = item.currentBidPrice 
+        ? parseFloat(item.currentBidPrice.value) 
+        : parseFloat(item.price?.value || 0);
 
-      let finalLabel = "Raw";
-      if (gradeMatch) {
-        finalLabel = gradeMatch[0];
-      } else if (title.includes("GRADED") || title.includes("SLAB")) {
-        finalLabel = "Graded";
-      } else if (conditions && conditions !== "—") {
-        finalLabel = conditions;
-      }
-
-      const timeISO = item.listingEndingAt || item.itemEndDate || new Date().toISOString();
-
-      // THE "INDESRUCTIBLE" OBJECT
       return {
         id: itemId,
-        itemId: itemId,
-        name: item.title || "Unknown Card",
-        title: item.title || "Unknown Card",
-        image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-
-        // Covering all price keys
-        price: actualPrice || 0,
-        currentPrice: actualPrice || 0,
-        currentBid: actualPrice || 0,
-        current_price: actualPrice || 0,
-
-        // Covering all time keys
-        endTime: timeISO,
-        listingEndingAt: timeISO,
-        timeRemaining: timeISO,
-        timeLeft: timeISO,
-        end_time: timeISO,
-
-        // Covering all label keys
-        condition: finalLabel,
-        grade: finalLabel,
-        status: finalLabel,
-
-        category: category || "Card",
-        listingType: "Auction",
+        name: item.title,
+        image: highResImage,
+        currentBid: priceValue,
+        currency: item.price?.currency || "USD",
+        endTime: item.itemEndDate || null,
+        condition: item.condition || "Ungraded",
+        // Affiliate Wrapped URL
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        bidCount: item.bidCount || 0
       };
     });
 
-    // SAFETY 2: Ensure we return an object with an items array
+    // 8. RETURN RESPONSE
     return new Response(JSON.stringify({ 
-      items: items, 
-      total: parseInt(data.total) || items.length || 0 
+      items, 
+      total: data.total || 0,
+      refreshedAt: new Date().toISOString() 
     }), {
-      headers: { "Content-Type": "application/json" }
+      headers: { 
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache"
+      },
     });
 
-  } catch (err) {
-    // SAFETY 3: Even on error, return an empty items array so the map doesn't fail
-    return new Response(JSON.stringify({ error: err.message, items: [] }), { 
-      status: 200, // Keep status 200 so the frontend doesn't panic
-      headers: { "Content-Type": "application/json" }
+  } catch (error) {
+    return new Response(JSON.stringify({ 
+      error: "Bridge Error", 
+      message: error.message,
+      items: [] 
+    }), {
+      status: 200, // Return 200 so the frontend doesn't crash, just shows 0 results
+      headers: { "Content-Type": "application/json" },
     });
   }
 }
