@@ -6,14 +6,13 @@ export type SortOption = "bestMatch" | "endingSoonest";
 export type TradingCard = {
   id: string;
   name: string;
-  category: Category;
+  sport: string;       // New separate field
+  grade: string;       // New separate field
+  listingType: string; // New separate field
   image: string;
   currentBid: number;
-  grade: string;
   ebayUrl: string;
   endTime?: string | null;
-  condition?: string;
-  listingType?: "Auction" | "BuyItNow";
 };
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];
