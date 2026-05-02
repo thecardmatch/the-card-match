@@ -5,6 +5,7 @@ export async function onRequest(context) {
   const query = searchParams.get("query") || "";
   const category = searchParams.get("categories") || "";
   const conditions = searchParams.get("conditions") || "";
+  const sortChoice = searchParams.get("sort") || "endingSoonest"; // New: Handles Sort
   const offset = searchParams.get("offset") || "0";
   const CAMP_ID = "5339150952";
 
@@ -19,8 +20,7 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. THE "GENERAL SEARCH" KEYWORD ENGINE
-    // No more Category IDs. We search ALL of eBay.
+    // 1. KEYWORD ENGINE (No Category IDs)
     let searchString = `${query} ${category === "—" ? "" : category}`.trim();
 
     if (conditions === "Ungraded") {
@@ -33,8 +33,12 @@ export async function onRequest(context) {
 
     const finalQuery = encodeURIComponent(searchString.trim());
 
-    // 2. FETCH ACROSS ALL CATEGORIES
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=buyingOptions:{AUCTION}&sort=endingSoonest&limit=100&offset=${offset}`;
+    // 2. DYNAMIC SORT LOGIC
+    // Best Match is the default API behavior, so we leave sort empty.
+    const sortParam = sortChoice === "bestMatch" ? "" : "&sort=endingSoonest";
+
+    // 3. THE UNRESTRICTED FETCH
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=buyingOptions:{AUCTION}${sortParam}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
@@ -49,22 +53,19 @@ export async function onRequest(context) {
       const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
       const actualPrice = currentBid > 0 ? currentBid : minBid;
 
-      // --- THE UNIVERSAL LABELER ---
+      // UNIVERSAL LABELER
       const title = item.title.toUpperCase();
-
-      // Look for Graded info first
       const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS|TAG)\s*(\d+\.?\d*)/i);
 
-      let finalLabel = "Raw"; // Default
-
+      let finalLabel = "Raw";
       if (gradeMatch) {
-        finalLabel = gradeMatch[0]; // e.g. "PSA 10"
+        finalLabel = gradeMatch[0];
       } else if (title.includes("GRADED") || title.includes("SLAB")) {
         finalLabel = "Graded";
       } else if (title.includes("LOT") || title.includes("SET") || title.includes("BUNDLE")) {
         finalLabel = "Lot/Set";
       } else if (conditions && conditions !== "—") {
-        finalLabel = conditions; // Fallback to whatever filter the user clicked
+        finalLabel = conditions;
       }
 
       const timeISO = item.listingEndingAt || item.itemEndDate || "";
@@ -77,12 +78,10 @@ export async function onRequest(context) {
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         price: actualPrice,
         currentPrice: actualPrice,
-        currentBid: actualPrice,
         endTime: timeISO,
         listingEndingAt: timeISO,
         timeRemaining: timeISO,
         timeLeft: timeISO,
-        // Send the label to every possible field the frontend might check
         condition: finalLabel,
         grade: finalLabel,
         status: finalLabel,
