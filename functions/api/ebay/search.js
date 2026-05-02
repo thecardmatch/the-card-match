@@ -4,7 +4,6 @@ export async function onRequest(context) {
 
   const query = searchParams.get("query") || "";
   const category = searchParams.get("categories") || "";
-  const sort = searchParams.get("sort") || "newlyListed";
   const conditions = searchParams.get("conditions") || "";
   const offset = searchParams.get("offset") || "0";
   const CAMP_ID = "5339150952";
@@ -20,25 +19,24 @@ export async function onRequest(context) {
     const tokenData = await tokenRes.json();
     const token = tokenData.access_token;
 
-    // 1. IMPROVED KEYWORD LOGIC
-    // We make the search broader to ensure we get "Every Result"
-    let searchKeywords = `${query} ${category === "—" ? "" : category}`.trim();
+    // 1. THE "GENERAL SEARCH" KEYWORD ENGINE
+    // No more Category IDs. We search ALL of eBay.
+    let searchString = `${query} ${category === "—" ? "" : category}`.trim();
 
     if (conditions === "Ungraded") {
-      searchKeywords += " card -psa -bgs -sgc -cgc -graded";
+      searchString += " card -psa -bgs -sgc -cgc -tag -graded -slab -vgs";
     } else if (conditions && conditions !== "—") {
-      // If user selected "10", we look for "10 card" to be specific but broad
-      searchKeywords += ` ${conditions} card`;
+      searchString += ` ${conditions} card`;
     } else {
-      searchKeywords += " card";
+      searchString += " card";
     }
 
-    const finalQuery = encodeURIComponent(searchKeywords);
+    const finalQuery = encodeURIComponent(searchString.trim());
 
-    // 2. THE FETCH - Upping limit to 100 to capture more "Ending Soon" cards
-    const auctionUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=categoryId:{183444},buyingOptions:{AUCTION}&sort=endingSoonest&limit=100&offset=${offset}`;
+    // 2. FETCH ACROSS ALL CATEGORIES
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=buyingOptions:{AUCTION}&sort=endingSoonest&limit=100&offset=${offset}`;
 
-    const ebayRes = await fetch(auctionUrl, {
+    const ebayRes = await fetch(ebayUrl, {
       headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
     });
 
@@ -47,17 +45,28 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      // PRICE LOGIC (Surgical Bid Fix)
-      const currentBidVal = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
-      const minimumBidVal = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const actualPrice = currentBidVal > 0 ? currentBidVal : minimumBidVal;
+      const currentBid = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
+      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
+      const actualPrice = currentBid > 0 ? currentBid : minBid;
 
-      // GRADE EXTRACTION (Fixes the missing Category/Grade badge)
-      // We look for PSA, BGS, etc. in the title. If none, we use the user's category.
-      const gradeMatch = item.title.match(/(PSA|BGS|SGC|CGC|VGS)\s*(\d+\.?\d*)/i);
-      const conditionTag = gradeMatch ? gradeMatch[0].toUpperCase() : (conditions !== "—" ? conditions : "Raw");
+      // --- THE UNIVERSAL LABELER ---
+      const title = item.title.toUpperCase();
 
-      // TIMER DATA (Using the name that finally worked)
+      // Look for Graded info first
+      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS|TAG)\s*(\d+\.?\d*)/i);
+
+      let finalLabel = "Raw"; // Default
+
+      if (gradeMatch) {
+        finalLabel = gradeMatch[0]; // e.g. "PSA 10"
+      } else if (title.includes("GRADED") || title.includes("SLAB")) {
+        finalLabel = "Graded";
+      } else if (title.includes("LOT") || title.includes("SET") || title.includes("BUNDLE")) {
+        finalLabel = "Lot/Set";
+      } else if (conditions && conditions !== "—") {
+        finalLabel = conditions; // Fallback to whatever filter the user clicked
+      }
+
       const timeISO = item.listingEndingAt || item.itemEndDate || "";
 
       return {
@@ -66,23 +75,18 @@ export async function onRequest(context) {
         name: item.title,
         title: item.title,
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-
-        // MAPPED PRICES
         price: actualPrice,
         currentPrice: actualPrice,
         currentBid: actualPrice,
-
-        // TIMER MAPPED NAMES (Keep all of them so we don't lose the timer again)
         endTime: timeISO,
         listingEndingAt: timeISO,
         timeRemaining: timeISO,
         timeLeft: timeISO,
-
-        // CATEGORY & GRADE (This is likely what went missing)
-        category: category !== "—" ? category : "Trading Card",
-        condition: conditionTag,
-        grade: conditionTag,
-
+        // Send the label to every possible field the frontend might check
+        condition: finalLabel,
+        grade: finalLabel,
+        status: finalLabel,
+        category: category !== "—" ? category : "Card",
         listingType: "Auction",
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
         bidCount: item.bidCount || 0
