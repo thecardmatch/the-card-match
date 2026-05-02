@@ -1,16 +1,18 @@
 export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
+
+  // 1. Get User Input
   const query = (searchParams.get("query") || "").toLowerCase();
   const categories = (searchParams.get("categories") || "");
   const conditions = (searchParams.get("conditions") || "").toLowerCase();
-  const sortChoice = searchParams.get("sort") || "bestMatch"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "10000";
   const offset = searchParams.get("offset") || "0";
   const CAMP_ID = "5339150952"; 
 
   try {
+    // 2. Authentication
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
     const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
@@ -19,20 +21,21 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
+    // 3. Build Precision Search Terms
     let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
 
-    // --- NEW: STRICT SEARCH EXCLUSIONS ---
+    // Strict Graded Exclusions: Tells eBay to physically hide non-10s/9s
     if (conditions.includes("grade 10")) {
-      // Force 10/Gem keywords and subtract lower grades
-      searchTerms += " (psa,bgs,sgc,cgc,slab,graded) (10,gem,pristine) -raw -6 -7 -8 -9 -estimate";
+      searchTerms += " (psa,bgs,sgc,cgc,slab,10,gem,pristine) -raw -6 -7 -8 -9 -estimate -proxy";
     } else if (conditions.includes("grade 9")) {
-      searchTerms += " (psa,bgs,sgc,cgc,slab,graded) (9,mint) -raw -6 -7 -8 -10 -estimate";
+      searchTerms += " (psa,bgs,sgc,cgc,slab,9,mint) -raw -6 -7 -8 -10 -estimate";
     } else if (conditions.includes("raw")) {
       searchTerms += " -psa -bgs -sgc -cgc -graded -slab -vgs";
     }
     searchTerms += " card";
 
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=${sortChoice === "endingSoonest" ? "endingSoonest" : "newlyListed"}&limit=20&offset=${offset}`;
+    // 4. THE FIX: Changed sort to newlyListed to find cards like Entei/Pikachu instantly
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=newlyListed&limit=20&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { "Authorization": `Bearer ${access_token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
@@ -44,37 +47,37 @@ export async function onRequest(context) {
       const catId = String(item.categoryId);
       const catPath = (item.categoryPath || "").toLowerCase();
 
-      // --- SPORT DETECTION ---
+      // --- 5. CATEGORY TAGS (ID + KEYWORD HYBRID) ---
       let sport = "Card";
-      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || query.includes("pokemon")) sport = "Pokemon";
-      else if (catId === "213" || catPath.includes("baseball") || title.includes("mlb") || title.includes("topps") || title.includes("bowman")) sport = "Baseball";
-      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba") || title.includes("panini") || title.includes("prizm")) sport = "Basketball";
-      else if (catId === "214" || catPath.includes("football") || title.includes("nfl") || title.includes("prizm")) sport = "Football";
+
+      // Pokemon Priority (ID 2610)
+      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || query.includes("pokemon")) {
+        sport = "Pokemon";
+      }
+      // Baseball Priority (ID 213)
+      else if (catId === "213" || catPath.includes("baseball") || title.includes("topps") || title.includes("bowman") || title.includes("mlb") || title.includes("ohtani") || title.includes("degrom")) {
+        sport = "Baseball";
+      }
+      // Basketball Priority (ID 212)
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("panini") || title.includes("prizm") || title.includes("nba")) {
+        sport = "Basketball";
+      }
+      // Football Priority (ID 214)
+      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) {
+        sport = "Football";
+      }
+      // Soccer/Hockey
       else if (catId === "216" || title.includes("soccer")) sport = "Soccer";
       else if (catId === "215" || title.includes("hockey")) sport = "Hockey";
 
-      // --- NEW: PRECISION GRADE LABELING ---
+      // --- 6. GRADE TAGS (STRICT SCANNER) ---
       let grade = "Raw";
-      const hasGradeBrand = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("graded") || title.includes("slab");
-      const isNotActuallyGraded = title.includes("raw") || title.includes("estimate") || title.includes("proxy");
+      const hasSlabBrand = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("slab") || title.includes("graded");
 
-      if (hasGradeBrand && !isNotActuallyGraded) {
-        // Look for 10 or Gem Mint
-        if (title.match(/\b10\b/) || title.includes("gem") || title.includes("pristine")) {
-          grade = "PSA 10";
-        } 
-        // Look for 9 or Mint
-        else if (title.match(/\b9\b/) || title.includes("mint")) {
-          grade = "PSA 9";
-        } 
-        // Catch other grades (6, 7, 8) and label them generally
-        else if (title.match(/\b[1-8]\b/)) {
-          const match = title.match(/\b([1-8])\b/);
-          grade = `Grade ${match ? match[0] : ''}`;
-        }
-        else {
-          grade = "Graded";
-        }
+      if (hasSlabBrand && !title.includes("raw") && !title.includes("estimate")) {
+        if (title.match(/\b10\b/) || title.includes("gem") || title.includes("pristine")) grade = "PSA 10";
+        else if (title.match(/\b9\b/) || title.includes("mint")) grade = "PSA 9";
+        else grade = "Graded";
       }
 
       return {
@@ -91,7 +94,9 @@ export async function onRequest(context) {
       };
     });
 
-    return new Response(JSON.stringify({ items, total: data.total || 0 }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ items, total: data.total || 0 }), {
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message, items: [] }), { status: 200 });
   }
