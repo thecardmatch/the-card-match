@@ -21,13 +21,11 @@ export async function onRequest(context) {
 
     let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
 
-    // Strict Graded Exclusions
-    if (conditions.includes("grade 10")) {
-      searchTerms += " (psa,bgs,sgc,cgc,slab,10,gem,pristine) -6 -7 -8 -9 -estimate -proxy";
-    } else if (conditions.includes("grade 9")) {
-      searchTerms += " (psa,bgs,sgc,cgc,slab,9,mint) -6 -7 -8 -10 -estimate";
+    // Strict Graded Exclusions for Search
+    if (conditions.includes("grade 10") || conditions.includes("graded")) {
+      searchTerms += " (psa,bgs,sgc,cgc,graded,slab,10,gem) -raw -estimate -reprint";
     } else if (conditions.includes("raw")) {
-      searchTerms += " -psa -bgs -sgc -cgc -graded -slab -vgs";
+      searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
     }
     searchTerms += " card";
 
@@ -43,40 +41,41 @@ export async function onRequest(context) {
       const catId = String(item.categoryId);
       const catPath = (item.categoryPath || "").toLowerCase();
 
-      // --- SPORT DETECTION ---
-      let sport = "Card";
-      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || query.includes("pokemon")) sport = "Pokemon";
-      else if (catId === "213" || catPath.includes("baseball") || title.includes("topps") || title.includes("bowman") || title.includes("mlb") || title.includes("ohtani") || title.includes("degrom")) sport = "Baseball";
-      else if (catId === "212" || catPath.includes("basketball") || title.includes("panini") || title.includes("prizm") || title.includes("nba")) sport = "Basketball";
-      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) sport = "Football";
-      else if (catId === "216" || title.includes("soccer")) sport = "Soccer";
-      else if (catId === "215" || title.includes("hockey")) sport = "Hockey";
+      // --- 1. FORCE GRADE DETECTION (Tiered Priority) ---
+      let detectedGrade = "Raw"; // Default starting point
 
-      // --- IMPROVED GRADE DETECTION (Fixes Graded cards showing as Raw) ---
-      let grade = "Raw";
-      const hasSlabBrand = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("slab") || title.includes("graded");
+      const hasGradedMarker = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("graded") || title.includes("slab") || title.includes("auth");
 
-      // If it mentions a slab brand, it IS graded. Now we just find the number.
-      if (hasSlabBrand) {
-        if (title.match(/\b10\b/) || title.includes("gem") || title.includes("pristine")) {
-          grade = "PSA 10";
-        } else if (title.match(/\b9\b/) || title.includes("mint")) {
-          grade = "PSA 9";
-        } else {
-          grade = "Graded";
+      if (hasGradedMarker) {
+        // High Priority: 10s
+        if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
+          detectedGrade = "PSA 10";
+        } 
+        // Mid Priority: 9s
+        else if (title.includes("9") || title.includes("mint")) {
+          detectedGrade = "PSA 9";
+        } 
+        // Fallback: Just Graded
+        else {
+          detectedGrade = "Graded";
         }
-      } 
-      // Only set to Raw if NO brand is mentioned
-      else {
-        grade = "Raw";
       }
+
+      // --- 2. SPORT DETECTION ---
+      let detectedSport = "Card";
+      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || query.includes("pokemon")) detectedSport = "Pokemon";
+      else if (catId === "213" || catPath.includes("baseball") || title.includes("topps") || title.includes("mlb")) detectedSport = "Baseball";
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba") || title.includes("panini")) detectedSport = "Basketball";
+      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) detectedSport = "Football";
+      else if (catId === "216" || title.includes("soccer")) detectedSport = "Soccer";
+      else if (catId === "215" || title.includes("hockey")) detectedSport = "Hockey";
 
       return {
         id: item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId,
         name: item.title,
-        sport,
-        category: sport,
-        grade,
+        sport: detectedSport,
+        category: detectedSport,
+        grade: detectedGrade,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
