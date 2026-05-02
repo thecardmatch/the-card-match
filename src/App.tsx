@@ -9,7 +9,6 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard, Preferences } from "@/data/pokemon";
 import { DEFAULT_PREFS, SORT_OPTIONS } from "@/data/pokemon";
-// NOTE: Ensure your searchCards service is updated to accept these new params
 import { searchCards, buildEbayQuery, getAffiliateUrl } from "@/services/ebay";
 import { fetchWatchlist, addToWatchlist, removeFromWatchlist } from "@/services/watchlist";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
@@ -69,7 +68,6 @@ export default function App() {
     try { window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked)); } catch {}
   }, [liked, user]);
 
-  // FIXED: Fresh search now correctly passes Price and Sort to the service
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -77,12 +75,11 @@ export default function App() {
     ebayOffset.current = 0;
     seenIds.current = new Set();
 
-    // searchCards must be able to handle: prefs.minPrice, prefs.maxPrice, prefs.sort
     searchCards(prefs, 0).then((results) => {
       if (cancelled) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
       fresh.forEach((c) => seenIds.current.add(c.id));
-      ebayOffset.current = 20; // Set this to your preferred page size (usually 20-50)
+      ebayOffset.current = 20; 
       setCards(fresh);
       setDeckResetKey((k) => k + 1);
       setLoading(false);
@@ -90,7 +87,6 @@ export default function App() {
     return () => { cancelled = true; };
   }, [prefs]);
 
-  // FIXED: Load-more now correctly passes Price and Sort
   const handleNeedMore = useCallback(async () => {
     if (loadingMore || loading) return;
     setLoadingMore(true);
@@ -99,7 +95,7 @@ export default function App() {
       const fresh = more.filter((c) => !seenIds.current.has(c.id));
       if (fresh.length > 0) {
         fresh.forEach((c) => seenIds.current.add(c.id));
-        ebayOffset.current += 20; 
+        ebayOffset.current += 20;
         setCards((prev) => [...prev, ...fresh]);
       }
     } catch (err) {
@@ -117,7 +113,7 @@ export default function App() {
         setPrefs({ ...DEFAULT_PREFS, ...saved } as Preferences);
       }
     });
-  }, [user?.id]);
+  }, [user?.id, setPrefs]);
 
   useEffect(() => {
     if (!user || !isSupabaseReady) return;
@@ -169,7 +165,7 @@ export default function App() {
               <p className="text-xs text-muted-foreground truncate">
                 {loading ? (
                   <span className="inline-flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:0ms]" />
+                    <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" />
                     <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:150ms]" />
                     <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce [animation-delay:300ms]" />
                   </span>
@@ -183,96 +179,27 @@ export default function App() {
           <div className="flex items-center gap-2 flex-shrink-0">
             {isSupabaseReady && (
               user ? (
-                <button onClick={handleSignOut} className="hidden sm:inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-card border border-card-border text-sm font-semibold text-foreground hover-elevate active-elevate-2">
+                <button onClick={handleSignOut} className="hidden sm:inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-card border border-card-border text-sm font-semibold text-foreground hover-elevate">
                   <LogOut className="w-4 h-4" />Sign Out
                 </button>
               ) : (
-                <button onClick={() => setAuthOpen(true)} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-primary text-primary-foreground text-sm font-bold hover-elevate active-elevate-2">
+                <button onClick={() => setAuthOpen(true)} className="inline-flex items-center gap-1.5 h-10 px-3 rounded-full bg-primary text-primary-foreground text-sm font-bold hover-elevate">
                   <LogIn className="w-4 h-4" />Sign In
                 </button>
               )
             )}
 
+            {/* Cleaned-up Sort Popover */}
             <div ref={sortBtnRef} className="relative">
               <button
                 onClick={() => setSortOpen((v) => !v)}
-                className={`relative w-10 h-10 rounded-full border flex items-center justify-center hover-elevate active-elevate-2 transition-colors ${
-                  prefs.sort !== "bestMatch" ? "bg-primary border-primary text-primary-foreground shadow-md" : "bg-card border-card-border text-foreground"
+                className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+                  prefs.sort === "endingSoonest" ? "bg-primary border-primary text-primary-foreground" : "bg-card border-card-border text-foreground"
                 }`}
-                aria-label="Sort"
               >
                 <ArrowUpDown className="w-4 h-4" />
               </button>
               <AnimatePresence>
                 {sortOpen && (
                   <motion.div
-                    initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                    transition={{ duration: 0.12 }}
-                    className="absolute right-0 top-full mt-2 w-48 bg-card border border-card-border rounded-xl shadow-xl overflow-hidden z-50"
-                  >
-                    {SORT_OPTIONS.map((opt) => {
-                      const active = prefs.sort === opt.value;
-                      return (
-                        <button
-                          key={opt.value}
-                          onClick={() => {
-                            setPrefs({ ...prefs, sort: opt.value });
-                            setSortOpen(false);
-                          }}
-                          className={`w-full flex items-center justify-between px-4 py-2.5 text-sm text-left transition-colors hover:bg-muted/60 ${
-                            active ? "font-semibold text-primary" : "text-foreground"
-                          }`}
-                        >
-                          {opt.label}
-                          {active && <Check className="w-4 h-4 flex-shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            <button
-              onClick={() => setWatchlistOpen(true)}
-              className="md:hidden relative w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2"
-            >
-              <Heart className="w-5 h-5 text-red-500 fill-red-500" />
-              {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center border-2 border-background">
-                  {liked.length}
-                </span>
-              )}
-            </button>
-
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border border-card-border flex items-center justify-center hover-elevate active-elevate-2">
-              <SettingsIcon className="w-5 h-5 text-foreground" />
-            </button>
-          </div>
-        </header>
-
-        <SwipeDeck
-          cards={cards}
-          onLike={handleLike}
-          onBuy={handleBuy}
-          onNeedMore={handleNeedMore}
-          isLoadingMore={loadingMore}
-          resetKey={deckResetKey}
-        />
-      </main>
-
-      <Sidebar liked={liked} onRemove={handleRemove} onClearAll={handleClearAll} className="hidden md:flex" />
-      <Sidebar liked={liked} onRemove={handleRemove} onClearAll={handleClearAll} open={watchlistOpen} onClose={() => setWatchlistOpen(false)} />
-
-      <SettingsDialog
-        open={settingsOpen || showOnboarding}
-        prefs={prefs}
-        isOnboarding={showOnboarding}
-        onClose={() => setSettingsOpen(false)}
-        onSave={setPrefs}
-      />
-
-      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
-    </div>
+                    initial={{ opacity

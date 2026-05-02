@@ -1,10 +1,9 @@
 export type Category = "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer" | "Formula 1" | "WWE";
-
 export type ConditionFilter = "Raw" | "Grade 7" | "Grade 8" | "Grade 9" | "Grade 10";
-
-export type SortOption = "bestMatch" | "endingSoonest";
-
 export type ListingType = "All" | "Auction" | "BuyItNow";
+
+// STRICT: Only these two are allowed
+export type SortOption = "bestMatch" | "endingSoonest";
 
 export type TradingCard = {
   id: string;
@@ -20,7 +19,6 @@ export type TradingCard = {
 };
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];
-
 export const CONDITION_FILTERS: ConditionFilter[] = ["Raw", "Grade 7", "Grade 8", "Grade 9", "Grade 10"];
 
 export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
