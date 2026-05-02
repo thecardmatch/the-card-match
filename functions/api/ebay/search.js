@@ -21,11 +21,11 @@ export async function onRequest(context) {
 
     let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
 
-    // Strict Graded Exclusions for Search
+    // Improved Search Filter
     if (conditions.includes("grade 10") || conditions.includes("graded")) {
-      searchTerms += " (psa,bgs,sgc,cgc,graded,slab,10,gem) -raw -estimate -reprint";
+      searchTerms += " (psa,bgs,sgc,cgc,tag,graded,slab,10,gem,mint) -raw -reprint -proxy";
     } else if (conditions.includes("raw")) {
-      searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
+      searchTerms += " -psa -bgs -sgc -cgc -tag -graded -slab";
     }
     searchTerms += " card";
 
@@ -41,21 +41,31 @@ export async function onRequest(context) {
       const catId = String(item.categoryId);
       const catPath = (item.categoryPath || "").toLowerCase();
 
-      // --- 1. FORCE GRADE DETECTION (Tiered Priority) ---
-      let detectedGrade = "Raw"; // Default starting point
+      // --- 1. THE REBUILT GRADE DETECTOR ---
+      let detectedGrade = "Raw";
 
-      const hasGradedMarker = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("graded") || title.includes("slab") || title.includes("auth");
+      // Look for the "Big 5" Grading companies + TAG
+      const slabBrands = ["psa", "bgs", "sgc", "cgc", "tag", "beckett", "graded", "slab"];
+      const hasSlabBrand = slabBrands.some(brand => title.includes(brand));
 
-      if (hasGradedMarker) {
-        // High Priority: 10s
+      if (hasSlabBrand) {
+        // High priority: 10s and Gem Mint
         if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
-          detectedGrade = "PSA 10";
+          // Identify specific company for the tag
+          if (title.includes("psa")) detectedGrade = "PSA 10";
+          else if (title.includes("tag")) detectedGrade = "TAG 10";
+          else if (title.includes("bgs")) detectedGrade = "BGS 10";
+          else if (title.includes("sgc")) detectedGrade = "SGC 10";
+          else if (title.includes("cgc")) detectedGrade = "CGC 10";
+          else detectedGrade = "Grade 10";
         } 
-        // Mid Priority: 9s
+        // Mid priority: 9s
         else if (title.includes("9") || title.includes("mint")) {
-          detectedGrade = "PSA 9";
+          if (title.includes("psa")) detectedGrade = "PSA 9";
+          else if (title.includes("tag")) detectedGrade = "TAG 9";
+          else detectedGrade = "Grade 9";
         } 
-        // Fallback: Just Graded
+        // Fallback for other grades
         else {
           detectedGrade = "Graded";
         }
@@ -63,9 +73,9 @@ export async function onRequest(context) {
 
       // --- 2. SPORT DETECTION ---
       let detectedSport = "Card";
-      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || query.includes("pokemon")) detectedSport = "Pokemon";
-      else if (catId === "213" || catPath.includes("baseball") || title.includes("topps") || title.includes("mlb")) detectedSport = "Baseball";
-      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba") || title.includes("panini")) detectedSport = "Basketball";
+      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon")) detectedSport = "Pokemon";
+      else if (catId === "213" || catPath.includes("baseball") || title.includes("mlb")) detectedSport = "Baseball";
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba")) detectedSport = "Basketball";
       else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) detectedSport = "Football";
       else if (catId === "216" || title.includes("soccer")) detectedSport = "Soccer";
       else if (catId === "215" || title.includes("hockey")) detectedSport = "Hockey";
