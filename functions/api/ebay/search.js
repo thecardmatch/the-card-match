@@ -19,17 +19,17 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
+    // STRICT SEARCH: If user wants graded, we force the search to include brand names
     let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
-    if (conditions.includes("raw")) searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
+
+    if (conditions.includes("grade 10") || conditions.includes("graded")) {
+      searchTerms += " (psa,bgs,sgc,cgc,slab,graded) -raw -reprint -estimate";
+    } else if (conditions.includes("raw")) {
+      searchTerms += " -psa -bgs -sgc -cgc -graded -slab -vgs";
+    }
     searchTerms += " card";
 
-    // Build the Sort Parameter
-    let ebaySort = "";
-    if (sortChoice === "endingSoonest") ebaySort = "endingSoonest";
-    else if (sortChoice === "newlyListed") ebaySort = "newlyListed";
-    else ebaySort = "price"; 
-
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=${ebaySort}&limit=20&offset=${offset}`;
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=${sortChoice === "endingSoonest" ? "endingSoonest" : "newlyListed"}&limit=20&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { "Authorization": `Bearer ${access_token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
@@ -38,42 +38,40 @@ export async function onRequest(context) {
     const data = await ebayRes.json();
     const items = (data.itemSummaries || []).map((item) => {
       const title = (item.title || "").toLowerCase();
-      const catPath = (item.categoryPath || "").toLowerCase();
       const catId = String(item.categoryId);
+      const catPath = (item.categoryPath || "").toLowerCase();
 
-      // --- CATEGORY ID DOMINANCE ---
-      // This is the most accurate way to separate Sports
-      let detected = "Card";
+      // --- 1. SPORT DETECTION (Strict IDs) ---
+      let detectedSport = "Card";
+      if (catId === "213" || catPath.includes("baseball") || title.includes("mlb")) detectedSport = "Baseball";
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba")) detectedSport = "Basketball";
+      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) detectedSport = "Football";
+      else if (catId === "2610" || catPath.includes("pokemon")) detectedSport = "Pokemon";
+      else if (catId === "216" || title.includes("soccer")) detectedSport = "Soccer";
+      else if (catId === "215" || title.includes("hockey")) detectedSport = "Hockey";
 
-      // 213 = Baseball
-      if (catId === "213" || catPath.includes("baseball") || title.includes("baseball") || title.includes("mlb") || title.includes("degrom") || title.includes("ohtani")) {
-        detected = "Baseball";
-      }
-      // 212 = Basketball
-      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba") || title.includes("basketball")) {
-        detected = "Basketball";
-      }
-      // 214 = Football
-      else if (catId === "214" || catPath.includes("football") || title.includes("nfl") || title.includes("football")) {
-        detected = "Football";
-      }
-      // 2610 = Pokemon
-      else if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon") || title.includes("tazo")) {
-        detected = "Pokemon";
-      }
-      // 216 = Soccer / 215 = Hockey
-      else if (catId === "216" || catPath.includes("soccer") || title.includes("soccer")) detected = "Soccer";
-      else if (catId === "215" || catPath.includes("hockey") || title.includes("hockey")) detected = "Hockey";
+      // --- 2. PRECISION GRADE DETECTION ---
+      let detectedGrade = "Raw";
 
-      const listingType = item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now";
+      // Check for authentic Graded Slabs
+      const isGradedKeyword = title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("graded") || title.includes("slab");
+      const isFakeGraded = title.includes("raw") || title.includes("non-graded") || title.includes("estimate") || title.includes("l@@k") || title.includes("reprint");
+
+      if (isGradedKeyword && !isFakeGraded) {
+        if (title.includes("10") || title.includes("gem")) detectedGrade = "PSA 10";
+        else if (title.includes("9") || title.includes("mint")) detectedGrade = "PSA 9";
+        else detectedGrade = "Graded";
+      } else {
+        detectedGrade = "Raw";
+      }
 
       return {
         id: item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId,
         name: item.title,
-        sport: detected,
-        category: detected,
-        grade: title.includes("10") ? "PSA 10" : title.includes("9") ? "PSA 9" : title.includes("graded") ? "Graded" : "Raw",
-        listingType: listingType,
+        sport: detectedSport,
+        category: detectedSport,
+        grade: detectedGrade,
+        listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate || null,
