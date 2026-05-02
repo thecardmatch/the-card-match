@@ -1,102 +1,28 @@
-export async function onRequest(context) {
-  const { env, request } = context;
-  const { searchParams } = new URL(request.url);
+// Replace your return block with this safer version:
+return {
+  id: itemId || Math.random().toString(), // Safety: Ensure ID exists
+  itemId: itemId || "",
+  name: item.title || "Unknown Card",
+  title: item.title || "Unknown Card",
+  image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
 
-  const query = searchParams.get("query") || "";
-  const category = searchParams.get("categories") || "";
-  const conditions = searchParams.get("conditions") || "";
-  const sortChoice = searchParams.get("sort") || "endingSoonest"; // New: Handles Sort
-  const offset = searchParams.get("offset") || "0";
-  const CAMP_ID = "5339150952";
+  // PRICE SAFETY: Force a number, fallback to 0.00
+  price: Number(actualPrice) || 0,
+  currentPrice: Number(actualPrice) || 0,
+  currentBid: Number(actualPrice) || 0,
 
-  try {
-    const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
-    const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${auth}` },
-      body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
-    });
+  // TIMER SAFETY: Fallback to a far-future date if empty
+  endTime: timeISO || new Date().toISOString(),
+  listingEndingAt: timeISO || new Date().toISOString(),
+  timeRemaining: timeISO || new Date().toISOString(),
+  timeLeft: timeISO || new Date().toISOString(),
 
-    const tokenData = await tokenRes.json();
-    const token = tokenData.access_token;
+  condition: finalLabel || "Raw",
+  grade: finalLabel || "Raw",
+  status: finalLabel || "Raw",
 
-    // 1. KEYWORD ENGINE (No Category IDs)
-    let searchString = `${query} ${category === "—" ? "" : category}`.trim();
-
-    if (conditions === "Ungraded") {
-      searchString += " card -psa -bgs -sgc -cgc -tag -graded -slab -vgs";
-    } else if (conditions && conditions !== "—") {
-      searchString += ` ${conditions} card`;
-    } else {
-      searchString += " card";
-    }
-
-    const finalQuery = encodeURIComponent(searchString.trim());
-
-    // 2. DYNAMIC SORT LOGIC
-    // Best Match is the default API behavior, so we leave sort empty.
-    const sortParam = sortChoice === "bestMatch" ? "" : "&sort=endingSoonest";
-
-    // 3. THE UNRESTRICTED FETCH
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${finalQuery}&filter=buyingOptions:{AUCTION}${sortParam}&limit=100&offset=${offset}`;
-
-    const ebayRes = await fetch(ebayUrl, {
-      headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
-    });
-
-    const data = await ebayRes.json();
-
-    const items = (data.itemSummaries || []).map(item => {
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-
-      const currentBid = item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : 0;
-      const minBid = item.minimumBidPrice ? parseFloat(item.minimumBidPrice.value) : 0;
-      const actualPrice = currentBid > 0 ? currentBid : minBid;
-
-      // UNIVERSAL LABELER
-      const title = item.title.toUpperCase();
-      const gradeMatch = title.match(/(PSA|BGS|SGC|CGC|VGS|TAG)\s*(\d+\.?\d*)/i);
-
-      let finalLabel = "Raw";
-      if (gradeMatch) {
-        finalLabel = gradeMatch[0];
-      } else if (title.includes("GRADED") || title.includes("SLAB")) {
-        finalLabel = "Graded";
-      } else if (title.includes("LOT") || title.includes("SET") || title.includes("BUNDLE")) {
-        finalLabel = "Lot/Set";
-      } else if (conditions && conditions !== "—") {
-        finalLabel = conditions;
-      }
-
-      const timeISO = item.listingEndingAt || item.itemEndDate || "";
-
-      return {
-        id: itemId,
-        itemId: itemId,
-        name: item.title,
-        title: item.title,
-        image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-        price: actualPrice,
-        currentPrice: actualPrice,
-        endTime: timeISO,
-        listingEndingAt: timeISO,
-        timeRemaining: timeISO,
-        timeLeft: timeISO,
-        condition: finalLabel,
-        grade: finalLabel,
-        status: finalLabel,
-        category: category !== "—" ? category : "Card",
-        listingType: "Auction",
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
-        bidCount: item.bidCount || 0
-      };
-    });
-
-    return new Response(JSON.stringify({ items, total: data.total || 0 }), {
-      headers: { "Content-Type": "application/json" }
-    });
-
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message, items: [] }), { status: 500 });
-  }
-}
+  category: category !== "—" ? category : "Card",
+  listingType: "Auction",
+  ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
+  bidCount: item.bidCount || 0
+};
