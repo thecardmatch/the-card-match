@@ -5,6 +5,7 @@ export async function onRequest(context) {
   const query = (searchParams.get("query") || "").toLowerCase();
   const categories = (searchParams.get("categories") || "");
   const conditions = (searchParams.get("conditions") || "").toLowerCase();
+  const sortChoice = searchParams.get("sort") || "newlyListed"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "10000";
   const offset = searchParams.get("offset") || "0";
@@ -19,17 +20,15 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
+    // Simplify the search query to let eBay do the heavy lifting
     let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
+    if (conditions.includes("grade 10")) searchTerms += " 10 (psa,bgs,sgc,cgc,tag,graded)";
+    else if (conditions.includes("grade 9")) searchTerms += " 9 (psa,bgs,sgc,cgc,tag,graded)";
+    else if (conditions.includes("raw")) searchTerms += " -graded -psa -bgs -sgc -slab";
 
-    // Improved Search Filter
-    if (conditions.includes("grade 10") || conditions.includes("graded")) {
-      searchTerms += " (psa,bgs,sgc,cgc,tag,graded,slab,10,gem,mint) -raw -reprint -proxy";
-    } else if (conditions.includes("raw")) {
-      searchTerms += " -psa -bgs -sgc -cgc -tag -graded -slab";
-    }
     searchTerms += " card";
 
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=newlyListed&limit=20&offset=${offset}`;
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=${sortChoice}&limit=20&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
       headers: { "Authorization": `Bearer ${access_token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
@@ -41,51 +40,44 @@ export async function onRequest(context) {
       const catId = String(item.categoryId);
       const catPath = (item.categoryPath || "").toLowerCase();
 
-      // --- 1. THE REBUILT GRADE DETECTOR ---
-      let detectedGrade = "Raw";
+      // --- GRADE DETECTION (Simple & Robust) ---
+      let grade = "Raw";
 
-      // Look for the "Big 5" Grading companies + TAG
-      const slabBrands = ["psa", "bgs", "sgc", "cgc", "tag", "beckett", "graded", "slab"];
-      const hasSlabBrand = slabBrands.some(brand => title.includes(brand));
-
-      if (hasSlabBrand) {
-        // High priority: 10s and Gem Mint
-        if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
-          // Identify specific company for the tag
-          if (title.includes("psa")) detectedGrade = "PSA 10";
-          else if (title.includes("tag")) detectedGrade = "TAG 10";
-          else if (title.includes("bgs")) detectedGrade = "BGS 10";
-          else if (title.includes("sgc")) detectedGrade = "SGC 10";
-          else if (title.includes("cgc")) detectedGrade = "CGC 10";
-          else detectedGrade = "Grade 10";
-        } 
-        // Mid priority: 9s
-        else if (title.includes("9") || title.includes("mint")) {
-          if (title.includes("psa")) detectedGrade = "PSA 9";
-          else if (title.includes("tag")) detectedGrade = "TAG 9";
-          else detectedGrade = "Grade 9";
-        } 
-        // Fallback for other grades
-        else {
-          detectedGrade = "Graded";
-        }
+      // If it's a 10
+      if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
+        if (title.includes("psa")) grade = "PSA 10";
+        else if (title.includes("tag")) grade = "TAG 10";
+        else if (title.includes("bgs") || title.includes("beckett")) grade = "BGS 10";
+        else if (title.includes("sgc")) grade = "SGC 10";
+        else if (title.includes("cgc")) grade = "CGC 10";
+        else if (title.includes("graded") || title.includes("slab")) grade = "Grade 10";
+      } 
+      // If it's a 9
+      else if (title.includes("9") || title.includes("mint")) {
+        if (title.includes("psa")) grade = "PSA 9";
+        else if (title.includes("tag")) grade = "TAG 9";
+        else grade = "Grade 9";
+      }
+      // If it mentions a brand but no number found yet
+      else if (title.includes("psa") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("tag") || title.includes("graded")) {
+        grade = "Graded";
       }
 
-      // --- 2. SPORT DETECTION ---
-      let detectedSport = "Card";
-      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon")) detectedSport = "Pokemon";
-      else if (catId === "213" || catPath.includes("baseball") || title.includes("mlb")) detectedSport = "Baseball";
-      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba")) detectedSport = "Basketball";
-      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) detectedSport = "Football";
-      else if (catId === "216" || title.includes("soccer")) detectedSport = "Soccer";
-      else if (catId === "215" || title.includes("hockey")) detectedSport = "Hockey";
+      // --- SPORT DETECTION (IDs are most reliable) ---
+      let sport = "Card";
+      if (catId === "2610" || catPath.includes("pokemon") || title.includes("pokemon")) sport = "Pokemon";
+      else if (catId === "213" || catPath.includes("baseball") || title.includes("mlb")) sport = "Baseball";
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba")) sport = "Basketball";
+      else if (catId === "214" || catPath.includes("football") || title.includes("nfl")) sport = "Football";
+      else if (catId === "216" || title.includes("soccer")) sport = "Soccer";
+      else if (catId === "215" || title.includes("hockey")) sport = "Hockey";
 
       return {
         id: item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId,
         name: item.title,
-        sport: detectedSport,
-        category: detectedSport,
-        grade: detectedGrade,
+        sport,
+        category: sport,
+        grade,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
