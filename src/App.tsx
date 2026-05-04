@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X, LogIn, LogOut, X as CloseIcon, ShoppingCart } from "lucide-react";
+import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X, LogIn, LogOut, ArrowUp } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
@@ -39,7 +39,6 @@ export default function App() {
 
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
-  const deckRef = useRef<{ swipe: (dir: string) => void } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,10 +106,8 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-background flex flex-row overflow-hidden relative">
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10 overflow-y-auto">
-        {/* Header - Sticky at top */}
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background/80 backdrop-blur-md sticky top-0 z-50">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10 overflow-y-auto overflow-x-hidden">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-50">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
@@ -144,24 +141,24 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {user ? (
-              <button onClick={() => signOut()} className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full border hover:bg-accent transition-colors text-sm font-medium">
-                <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
+            <div className="flex items-center gap-2">
+              {user ? (
+                <button onClick={() => signOut()} className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full border text-sm font-medium">
+                  <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
+                </button>
+              ) : (
+                <button onClick={() => setAuthOpen(true)} className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium">
+                  <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
+                </button>
+              )}
+              <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
+                <SettingsIcon className="w-5 h-5" />
               </button>
-            ) : (
-              <button onClick={() => setAuthOpen(true)} className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full bg-primary text-primary-foreground hover:opacity-90 transition-opacity text-sm font-medium">
-                <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
-              </button>
-            )}
-
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
-              <SettingsIcon className="w-5 h-5" />
-            </button>
+            </div>
           </div>
         </header>
 
-        {/* Deck Container - Fixed aspect ratio area */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 min-h-[600px]">
+        <div className="flex-1 flex flex-col items-center justify-center p-4">
           <div className="w-full max-w-[400px] aspect-[3/4] relative">
             <SwipeDeck
               cards={cards}
@@ -173,38 +170,36 @@ export default function App() {
             />
           </div>
 
-          {/* RESTORED ACTION BUTTONS */}
-          <div className="flex items-center justify-center gap-6 mt-8 pb-10">
-            <button 
-              onClick={() => { /* In SwipeDeck logic, pass a ref to trigger pass */ }}
-              className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground hover:text-destructive hover:border-destructive transition-all shadow-sm"
-            >
-              <CloseIcon className="w-6 h-6" />
+          {/* CLEAN ORIGINAL ACTION BUTTONS */}
+          <div className="flex items-center justify-center gap-8 mt-6">
+            {/* PASS BUTTON */}
+            <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground shadow-sm">
+              <X className="w-6 h-6" />
             </button>
 
-            <button 
-              onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-              className="px-8 py-3 rounded-full bg-secondary text-secondary-foreground font-bold flex items-center gap-2 shadow-lg hover:scale-105 transition-transform"
-            >
-              <ShoppingCart className="w-5 h-5" /> BUY NOW
-            </button>
+            {/* BUY NOW BUTTON (The Gold Swipe-Up One) */}
+            <div className="flex flex-col items-center gap-2">
+              <button 
+                onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
+                className="w-16 h-16 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
+              >
+                <ArrowUp className="w-7 h-7" />
+              </button>
+              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Swipe Up to Buy</span>
+            </div>
 
-            <button 
-              onClick={() => { if(cards[0]) handleLike(cards[0]); }}
-              className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary transition-all shadow-sm"
-            >
+            {/* LIKE BUTTON */}
+            <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground shadow-sm">
               <Heart className="w-6 h-6" />
             </button>
           </div>
         </div>
       </main>
 
-      {/* Desktop Sidebar (Watchlist) */}
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto sidebar-scroll">
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto">
         <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
       </aside>
 
-      {/* Mobile Drawer (Watchlist) */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
