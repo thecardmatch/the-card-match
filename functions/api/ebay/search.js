@@ -19,7 +19,8 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. CONSTRUCT THE BROADEST POSSIBLE QUERY
+    // 1. THE "BOT-FRIENDLY" QUERY
+    // We avoid complex symbols like brackets () which often trigger eBay's security filters
     let baseSearch = queryInput;
     if (sportSetting !== "—" && sportSetting !== "") {
       baseSearch = `${sportSetting} ${queryInput}`;
@@ -27,40 +28,36 @@ export async function onRequest(context) {
     if (!baseSearch.trim()) baseSearch = "card";
 
     let finalQuery = baseSearch;
-
-    // We use a specific "OR" syntax without spaces inside parentheses.
-    // This is the most powerful way to hit every grader and every title variation.
     if (gradeSetting.includes("10")) {
-      finalQuery = `${baseSearch} 10 (psa,cgc,bgs,sgc,tag,slab,graded,gem,mint,pristine)`;
+      finalQuery = `${baseSearch} 10 psa cgc bgs sgc tag slab gem mint pristine`;
     } else if (gradeSetting.includes("9")) {
-      finalQuery = `${baseSearch} 9 (psa,cgc,bgs,sgc,tag,slab,graded,mint) -10`;
-    } else if (gradeSetting.includes("8")) {
-      finalQuery = `${baseSearch} 8 (psa,cgc,bgs,sgc,tag,slab,graded,nm) -10 -9`;
+      finalQuery = `${baseSearch} 9 psa cgc bgs sgc tag slab mint -10`;
     } else if (gradeSetting.includes("raw")) {
-      finalQuery = `${baseSearch} (raw,ungraded,nm,lp) -psa -cgc -bgs -sgc -slab -graded`;
+      finalQuery = `${baseSearch} raw nm -graded -psa -cgc -bgs -slab`;
     }
 
-    // 2. THE SECRET TO "ENDING SOONEST" ACCURACY
-    // We increase the limit to 200 items so we don't miss the gaps.
-    let buyingOptions = "{AUCTION|FIXED_PRICE}";
-    if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
+    // 2. SEARCH FILTERS
+    let buyingOptions = "AUCTION"; // Forced for 'Ending Soonest' accuracy
+    if (sortChoice === "newlyListed") buyingOptions = "AUCTION,FIXED_PRICE";
 
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:${buyingOptions}`,
+      `buyingOptions:{${buyingOptions}}`,
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // We use category_ids=212 as a "hint" rather than a hard lock.
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=200&offset=${offset}&category_ids=212`;
+    // 3. THE "TRUSTED" API CALL
+    // We add more specific marketplace headers to bypass the Captcha/Splash screen
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "User-Agent": "TheCardMatch/2.0",
-        "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch"
+        "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch",
+        "Content-Language": "en-US",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" 
       }
     });
 
@@ -70,27 +67,23 @@ export async function onRequest(context) {
     const items = rawItems.map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // AUTO-TAGGING LOGIC
+      // TAG MAPPING
       let sport = sportSetting !== "—" ? sportSetting : "Card";
       if (title.includes("pokemon")) sport = "Pokemon";
       else if (title.includes("baseball")) sport = "Baseball";
       else if (title.includes("basketball")) sport = "Basketball";
       else if (title.includes("football")) sport = "Football";
-      else if (title.includes("soccer")) sport = "Soccer";
-      else if (title.includes("f1") || title.includes("formula")) sport = "Formula 1";
 
-      // PRECISION GRADE TAGGING
+      // GRADE MAPPING
       let grade = "Raw";
       const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
       const is9 = title.includes("9") && !is10;
-      const is8 = title.includes("8") && !is10 && !is9;
 
-      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : (is8 ? "PSA 8" : "PSA Graded"));
-      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : (is8 ? "CGC 8" : "CGC Graded"));
-      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : (is8 ? "BGS 8" : "BGS Graded"));
-      else if (title.includes("sgc")) grade = is10 ? "SGC 10" : (is9 ? "SGC 9" : (is8 ? "SGC 8" : "SGC Graded"));
-      else if (title.includes("tag")) grade = is10 ? "TAG 10" : (is9 ? "TAG 9" : (is8 ? "TAG 8" : "TAG Graded"));
-      else if (title.includes("graded")) grade = is10 ? "Grade 10" : (is9 ? "Grade 9" : (is8 ? "Grade 8" : "Graded"));
+      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
+      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
+      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
+      else if (title.includes("tag")) grade = is10 ? "TAG 10" : (is9 ? "TAG 9" : "TAG Graded");
+      else if (title.includes("graded")) grade = is10 ? "Grade 10" : "Graded";
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
