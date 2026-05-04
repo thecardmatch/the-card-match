@@ -170,33 +170,35 @@ export default function App() {
             />
           </div>
 
-          {/* CLEAN ORIGINAL ACTION BUTTONS */}
-          <div className="flex items-center justify-center gap-8 mt-6">
-            {/* PASS BUTTON */}
-            <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground shadow-sm">
-              <X className="w-6 h-6" />
-            </button>
+          <div className="flex flex-col items-center gap-3 mt-8 pb-8">
+            <div className="flex items-center gap-8">
+              {/* Manual Pass Trigger */}
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-95 transition-transform">
+                <X className="w-6 h-6" />
+              </button>
 
-            {/* BUY NOW BUTTON (The Gold Swipe-Up One) */}
-            <div className="flex flex-col items-center gap-2">
+              {/* Swipe Up Icon (Buy) */}
               <button 
                 onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-                className="w-16 h-16 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center shadow-lg hover:scale-105 transition-transform"
+                className="w-16 h-16 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center shadow-lg border-4 border-secondary/20 active:scale-95 transition-transform"
               >
                 <ArrowUp className="w-7 h-7" />
               </button>
-              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Swipe Up to Buy</span>
+
+              {/* Manual Like Trigger */}
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-95 transition-transform">
+                <Heart className="w-6 h-6" />
+              </button>
             </div>
 
-            {/* LIKE BUTTON */}
-            <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-muted-foreground shadow-sm">
-              <Heart className="w-6 h-6" />
-            </button>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+              Swipe Up to Buy
+            </span>
           </div>
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto">
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto sidebar-scroll">
         <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
       </aside>
 
@@ -209,7 +211,7 @@ export default function App() {
                 <h2 className="font-bold">Watchlist ({liked.length})</h2>
                 <button onClick={() => setWatchlistOpen(false)}><X className="w-6 h-6" /></button>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto sidebar-scroll">
                 <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
               </div>
             </motion.div>
