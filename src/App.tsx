@@ -82,7 +82,7 @@ export default function App() {
   }
 
   const handleBuyAction = useCallback((card: TradingCard) => {
-    if (!card.ebayUrl) return;
+    if (!card?.ebayUrl) return;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
       window.location.href = card.ebayUrl;
@@ -106,15 +106,14 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
-      {/* Main Container */}
-      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-background">
         {/* Header */}
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-20">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-30">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg" />
             <div className="hidden sm:block">
               <h1 className="text-lg font-black leading-none">The Card Match</h1>
-              <p className="text-xs text-muted-foreground">{loading ? "Searching..." : `"${searchQuery}"`}</p>
+              <p className="text-xs text-muted-foreground">{loading ? "Searching..." : searchQuery}</p>
             </div>
           </div>
 
@@ -126,11 +125,11 @@ export default function App() {
               <ArrowUpDown className="w-4 h-4" />
             </button>
             {user ? (
-              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-3 md:px-4 rounded-full border text-sm font-medium">
+              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border text-sm font-medium">
                 <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
               </button>
             ) : (
-              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-3 md:px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium">
+              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium">
                 <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
               </button>
             )}
@@ -140,9 +139,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* Card Section */}
-        <div className="flex-1 relative flex flex-col items-center justify-center p-4 min-h-0">
-          <div className="w-full max-w-[420px] h-full max-h-[600px] relative">
+        {/* Card and Buttons Section */}
+        <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden p-4 md:p-8">
+          {/* Card Container */}
+          <div className="w-full max-w-[400px] flex-1 relative min-h-0">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -153,37 +153,39 @@ export default function App() {
             />
           </div>
 
-          {/* Action Buttons - Pure Layout */}
-          <div className="mt-6 flex flex-col items-center gap-3">
+          {/* Action Row - EXACTLY 3 BUTTONS */}
+          <div className="flex flex-col items-center gap-4 mt-6 mb-2">
             <div className="flex items-center gap-8">
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm">
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-90 transition-transform">
                 <X className="w-6 h-6" />
               </button>
 
-              <div className="flex flex-col items-center gap-2">
+              <div className="flex flex-col items-center">
                 <button 
                   onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-                  className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg"
+                  className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"
                 >
                   <ArrowUp className="w-8 h-8" />
                 </button>
               </div>
 
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm">
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-90 transition-transform">
                 <Heart className="w-6 h-6" />
               </button>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Swipe Up to Buy</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+              Swipe Up to Buy
+            </span>
           </div>
         </div>
       </main>
 
-      {/* Desktop Watchlist */}
+      {/* Desktop Sidebar */}
       <aside className="hidden md:flex w-[320px] h-full bg-card border-l overflow-y-auto">
         <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
       </aside>
 
-      {/* Mobile Watchlist */}
+      {/* Mobile Drawer */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
