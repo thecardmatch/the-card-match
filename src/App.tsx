@@ -7,11 +7,10 @@ import { SettingsDialog } from "@/components/SettingsDialog";
 import { AuthDialog } from "@/components/AuthDialog";
 import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
-import type { TradingCard, Preferences } from "@/data/pokemon";
-import { DEFAULT_PREFS, SORT_OPTIONS, buildSearchQuery } from "@/data/pokemon";
+import type { TradingCard } from "@/data/pokemon";
+import { SORT_OPTIONS, buildSearchQuery } from "@/data/pokemon";
 import { searchCards } from "@/services/ebay";
 import { addToWatchlist } from "@/services/watchlist";
-import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
 
 const WATCHLIST_KEY = "cardmatch:watchlist";
 
@@ -102,7 +101,7 @@ export default function App() {
             {/* MOBILE HEART WITH COUNTER */}
             <button 
               onClick={() => setWatchlistOpen(true)}
-              className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center"
+              className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
             >
               <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
               {liked.length > 0 && (
@@ -135,11 +134,13 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative overflow-hidden">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
-            onBuy={(card) => window.open(card.ebayUrl, "_blank", "noopener,noreferrer")}
+            onBuy={(card) => {
+              if (card.ebayUrl) window.location.href = card.ebayUrl;
+            }}
             onNeedMore={handleNeedMore}
             isLoadingMore={loadingMore}
             resetKey={deckResetKey}
@@ -147,25 +148,41 @@ export default function App() {
         </div>
       </main>
 
-      {/* WEB SIDEBAR (Always on right for desktop) */}
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border">
+      {/* DESKTOP SIDEBAR (Scrollable) */}
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden touch-pan-y">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
-      {/* MOBILE DRAWER */}
+      {/* MOBILE WATCHLIST DRAWER (Scrollable) */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25 }} className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex items-center justify-between">
-                <h2 className="font-bold">Watchlist ({liked.length})</h2>
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              onClick={() => setWatchlistOpen(false)} 
+              className="fixed inset-0 bg-black/60 z-[100] md:hidden" 
+            />
+            <motion.div 
+              initial={{ x: "100%" }} 
+              animate={{ x: 0 }} 
+              exit={{ x: "100%" }} 
+              transition={{ type: "spring", damping: 25, stiffness: 200 }} 
+              className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
+                <h2 className="font-bold text-foreground">Watchlist ({liked.length})</h2>
                 <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent transition-colors">
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto">
-                <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
+              <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y">
+                <Sidebar 
+                  liked={liked} 
+                  onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} 
+                  onClearAll={() => setLiked([])} 
+                />
               </div>
             </motion.div>
           </>

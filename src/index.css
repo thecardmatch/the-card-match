@@ -157,3 +157,39 @@
     background-color: var(--elevate-2);
   }
 }
+/* ADD THIS TO THE BOTTOM OF INDEX.CSS */
+
+@layer base {
+  html, body {
+    /* Prevents the 'pull-to-refresh' and 'bounce' on mobile */
+    overscroll-behavior-y: none;
+
+    /* Prevents the browser from hijacking vertical swipes */
+    touch-action: none; 
+
+    /* Fixes height issues on mobile browsers */
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    position: fixed;
+  }
+
+  #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+/* Allow scrolling only inside the Sidebar/Watchlist */
+aside, 
+[class*="fixed inset-y-0 right-0"] { /* This targets the mobile drawer */
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch; /* Makes scrolling smooth on iPhone */
+  touch-action: pan-y; /* Allows vertical scrolling inside this box */
+}
+
+/* Ensure the sidebar content actually has height to scroll */
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  height: 100%;
+}
