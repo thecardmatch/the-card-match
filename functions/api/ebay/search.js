@@ -8,7 +8,8 @@ export async function onRequest(context) {
   const sortChoice = searchParams.get("sort") || "newlyListed"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
-  const offset = parseInt(searchParams.get("offset") || "0");
+  const offset = searchParams.get("offset") || "0";
+  const CAMP_ID = "5339150952"; 
 
   try {
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
@@ -19,31 +20,29 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE REFINED QUERY
-    let finalQuery = query || "pokemon";
-    if (categories && categories !== "—") finalQuery += ` ${categories}`;
+    // 1. REFINED SEARCH TERMS
+    let baseQuery = query || "pokemon";
+    if (categories && categories !== "—") baseQuery += ` ${categories}`;
 
+    let finalQuery = baseQuery;
     if (conditions.includes("grade 10")) {
-      finalQuery += " 10 (psa,cgc,tag,bgs,sgc,gem,slab)";
+      // We explicitly include 'psa 10' keywords to catch specific high-end auctions
+      finalQuery = `${baseQuery} 10 (psa,cgc,tag,bgs,sgc,gem,mint,slab)`;
     } else if (conditions.includes("raw")) {
-      finalQuery += " (raw,ungraded,nm) -graded -slab";
+      finalQuery = `${baseQuery} (raw,ungraded,nm)`;
     }
 
-    // 2. THE SECRET "FINDING" FILTER
-    // We force buyingOptions to AUCTION ONLY when sorting by endingSoonest
-    // This forces eBay to give us the "Fast" data stream.
+    // 2. THE FILTER (Syntax fix)
     let buyingOptions = "{AUCTION|FIXED_PRICE}";
     if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
 
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:${buyingOptions}`,
-      `listingStatus:{ACTIVE}`
+      `buyingOptions:${buyingOptions}`
     ].join(",");
 
-    // 3. INCREASED RADIUS
-    // We pull 100 items to ensure the cards ending in 10-60 seconds are in the batch.
+    // 3. MAX LIMIT (100) TO CATCH HIDDEN AUCTIONS
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
@@ -57,14 +56,21 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // Precision Grade Detection
+      // FIX: FORCE TAG 1 (Sport)
+      // If the category path contains pokemon OR if we are in our default search, it's Pokemon.
+      let sportTag = "Pokemon";
+      if (title.includes("nba") || title.includes("basketball")) sportTag = "Basketball";
+      else if (title.includes("mlb") || title.includes("baseball")) sportTag = "Baseball";
+      else if (title.includes("nfl") || title.includes("football")) sportTag = "Football";
+
+      // TAG 2: Precision Grade
       let gradeTag = "Raw";
-      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      if (title.includes("psa")) gradeTag = is10 ? "PSA 10" : "PSA Graded";
-      else if (title.includes("cgc")) gradeTag = is10 ? "CGC 10" : "CGC Graded";
-      else if (title.includes("tag")) gradeTag = is10 ? "TAG 10" : "TAG Graded";
-      else if (title.includes("bgs")) gradeTag = is10 ? "BGS 10" : "BGS Graded";
-      else if (title.includes("sgc")) gradeTag = is10 ? "SGC 10" : "SGC Graded";
+      const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+      if (title.includes("psa")) gradeTag = has10 ? "PSA 10" : "PSA Graded";
+      else if (title.includes("cgc")) gradeTag = has10 ? "CGC 10" : "CGC Graded";
+      else if (title.includes("tag")) gradeTag = has10 ? "TAG 10" : "TAG Graded";
+      else if (title.includes("bgs")) gradeTag = has10 ? "BGS 10" : "BGS Graded";
+      else if (title.includes("sgc")) gradeTag = has10 ? "SGC 10" : "SGC Graded";
       else if (title.includes("graded")) gradeTag = "Graded";
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
@@ -72,13 +78,14 @@ export async function onRequest(context) {
       return {
         id: itemId,
         name: item.title,
-        sport: "Pokemon",
-        grade: gradeTag,
+        sport: sportTag,      // First Tag Fixed
+        category: sportTag,   // Backup Field
+        grade: gradeTag,      // Second Tag Fixed
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`
       };
     });
 

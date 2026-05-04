@@ -14,7 +14,8 @@ type Props = {
   resetKey?: number;
 };
 
-const LOAD_MORE_THRESHOLD = 5;
+// Bumping to 10 so the next 100 cards load well before the user hits the end
+const LOAD_MORE_THRESHOLD = 10;
 
 export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, resetKey }: Props) {
   const [index, setIndex] = useState(0);
@@ -170,8 +171,8 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
             </button>
           </div>
 
-          <div className="text-[10px] text-muted-foreground font-mono tracking-wider uppercase flex items-center gap-2">
-            <span>{index + 1} / {cards.length} • Swipe ↑ to buy</span>
+          <div className="text-[10px] text-muted-foreground font-mono tracking-wider uppercase flex items-center justify-center gap-2">
+            <span>Swipe ↑ to buy</span>
             {isLoadingMore && (
               <span className="inline-flex gap-0.5">
                 <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce [animation-delay:0ms]" />
