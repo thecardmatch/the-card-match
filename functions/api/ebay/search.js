@@ -2,6 +2,7 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
+  // 1. GET PARAMETERS
   const query = (searchParams.get("query") || "").trim().toLowerCase();
   const categories = (searchParams.get("categories") || "").toLowerCase();
   const conditions = (searchParams.get("conditions") || "").toLowerCase();
@@ -9,7 +10,6 @@ export async function onRequest(context) {
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
   const offset = searchParams.get("offset") || "0";
-  const CAMP_ID = "5339150952"; 
 
   try {
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
@@ -20,39 +20,38 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. CONSTRUCT THE GLOBAL SEARCH
-    // We combine the user query and the sport/category name.
+    // 2. CONSTRUCT AIRTIGHT QUERY
+    // We combine user text + selected sport name (e.g. "Ohtani" + "Baseball")
     let baseSearch = `${query} ${categories === "—" ? "" : categories}`.trim();
-    if (!baseSearch) baseSearch = "trading card";
+    if (!baseSearch) baseSearch = "card";
 
     let finalQuery = baseSearch;
-
     if (conditions.includes("grade 10")) {
-      // Powerful keyword combo to find slabs across ANY category
+      // Specifically target high-end slabs with multiple keywords
       finalQuery = `${baseSearch} 10 (psa,cgc,tag,bgs,sgc,beckett,slab,graded) -#10 -no.10`;
     } else if (conditions.includes("raw")) {
       finalQuery = `${baseSearch} (raw,ungraded,nm) -psa -bgs -cgc -slab -graded`;
     }
 
-    // 2. UNIVERSAL FILTERS (NO CATEGORY ID)
+    // 3. OPTIMIZED FILTERS
     let buyingOptions = "{AUCTION|FIXED_PRICE}";
-    if (sortChoice === "endingSoonest") {
-      buyingOptions = "{AUCTION}";
-    }
+    if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
 
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:${buyingOptions}`
+      `buyingOptions:${buyingOptions}`,
+      `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // We pull from the root of eBay (no categoryId parameter used)
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
+    // We use category_ids=212 (Trading Cards) as a "Soft Anchor" 
+    // This includes Pokemon, Sports, F1, WWE, etc.
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}&category_ids=212`;
 
     const ebayRes = await fetch(url, {
       headers: { 
-        "Authorization": `Bearer ${access_token}`, 
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" 
+        "Authorization": `Bearer ${access_token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
       }
     });
 
@@ -60,39 +59,42 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // INTELLIGENT TAGGING
-      // We start with the user's selected category, then refine based on title.
-      let displaySport = categories && categories !== "—" ? categories : "Card";
+      // FIX: THE DISAPPEARING SPORT TAG
+      // 1. Start with the setting the user actually chose
+      let sportLabel = categories && categories !== "—" ? categories : "Card";
 
-      if (title.includes("pokemon")) displaySport = "Pokemon";
-      else if (title.includes("f1") || title.includes("formula 1")) displaySport = "Formula 1";
-      else if (title.includes("wwe") || title.includes("wrestling")) displaySport = "WWE";
-      else if (title.includes("soccer")) displaySport = "Soccer";
-      else if (title.includes("baseball")) displaySport = "Baseball";
-      else if (title.includes("basketball")) displaySport = "Basketball";
-      else if (title.includes("football")) displaySport = "Football";
+      // 2. If title has a specific sport, override for accuracy
+      if (title.includes("pokemon")) sportLabel = "Pokemon";
+      else if (title.includes("f1") || title.includes("formula 1")) sportLabel = "Formula 1";
+      else if (title.includes("wwe") || title.includes("wrestling")) sportLabel = "WWE";
+      else if (title.includes("soccer")) sportLabel = "Soccer";
+      else if (title.includes("baseball")) sportLabel = "Baseball";
+      else if (title.includes("basketball")) sportLabel = "Basketball";
+      else if (title.includes("football")) sportLabel = "Football";
+      else if (title.includes("ufc")) sportLabel = "UFC";
 
-      let gradeTag = "Raw";
+      // DETECT GRADE
+      let gradeLabel = "Raw";
       const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      if (title.includes("psa")) gradeTag = has10 ? "PSA 10" : "PSA Graded";
-      else if (title.includes("cgc")) gradeTag = has10 ? "CGC 10" : "CGC Graded";
-      else if (title.includes("tag")) gradeTag = has10 ? "TAG 10" : "TAG Graded";
-      else if (title.includes("bgs")) gradeTag = has10 ? "BGS 10" : "BGS Graded";
-      else if (title.includes("sgc")) gradeTag = has10 ? "SGC 10" : "SGC Graded";
-      else if (title.includes("graded")) gradeTag = has10 ? "Grade 10" : "Graded";
+      if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : "PSA Graded";
+      else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : "CGC Graded";
+      else if (title.includes("tag")) gradeLabel = has10 ? "TAG 10" : "TAG Graded";
+      else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : "BGS Graded";
+      else if (title.includes("sgc")) gradeLabel = has10 ? "SGC 10" : "SGC Graded";
+      else if (title.includes("graded")) gradeLabel = has10 ? "Grade 10" : "Graded";
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: displaySport.charAt(0).toUpperCase() + displaySport.slice(1), 
-        grade: gradeTag,
+        sport: sportLabel.charAt(0).toUpperCase() + sportLabel.slice(1), 
+        grade: gradeLabel,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
       };
     });
 
