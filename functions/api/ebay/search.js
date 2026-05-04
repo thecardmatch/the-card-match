@@ -19,56 +19,47 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. BASE QUERY
-    let baseQuery = queryInput;
+    // 1. CONSTRUCT THE BROADEST POSSIBLE QUERY
+    let baseSearch = queryInput;
     if (sportSetting !== "—" && sportSetting !== "") {
-      baseQuery = `${sportSetting} ${queryInput}`;
+      baseSearch = `${sportSetting} ${queryInput}`;
     }
-    if (!baseQuery.trim()) baseQuery = "card";
+    if (!baseSearch.trim()) baseSearch = "card";
 
-    // 2. THE SECRET SAUCE: ASPECT FILTERS
-    // Instead of putting "PSA 10" in the text (which is unreliable),
-    // we tell the API to look at the "Professional Grader" and "Grade" data fields.
-    let aspectFilter = "";
-    let qSuffix = "";
+    let finalQuery = baseSearch;
 
+    // We use a specific "OR" syntax without spaces inside parentheses.
+    // This is the most powerful way to hit every grader and every title variation.
     if (gradeSetting.includes("10")) {
-      // Look for Grade 10 across all companies
-      aspectFilter = "categoryId:212,Grade:{10|9.5|Gem%20Mint|Pristine}";
-      qSuffix = " graded";
+      finalQuery = `${baseSearch} 10 (psa,cgc,bgs,sgc,tag,slab,graded,gem,mint,pristine)`;
     } else if (gradeSetting.includes("9")) {
-      aspectFilter = "categoryId:212,Grade:{9|Mint}";
-      qSuffix = " graded";
+      finalQuery = `${baseSearch} 9 (psa,cgc,bgs,sgc,tag,slab,graded,mint) -10`;
     } else if (gradeSetting.includes("8")) {
-      aspectFilter = "categoryId:212,Grade:{8|Near%20Mint-Mt}";
-      qSuffix = " graded";
+      finalQuery = `${baseSearch} 8 (psa,cgc,bgs,sgc,tag,slab,graded,nm) -10 -9`;
     } else if (gradeSetting.includes("raw")) {
-      aspectFilter = "categoryId:212,Graded:{No}";
-      qSuffix = " -graded -psa -cgc -bgs";
+      finalQuery = `${baseSearch} (raw,ungraded,nm,lp) -psa -cgc -bgs -sgc -slab -graded`;
     }
 
-    const finalQuery = `${baseQuery}${qSuffix}`;
+    // 2. THE SECRET TO "ENDING SOONEST" ACCURACY
+    // We increase the limit to 200 items so we don't miss the gaps.
+    let buyingOptions = "{AUCTION|FIXED_PRICE}";
+    if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
 
-    // 3. STRIKE FILTERS
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{AUCTION|FIXED_PRICE}`,
+      `buyingOptions:${buyingOptions}`,
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // The key here is adding &aspect_filter to the URL
-    let url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}&category_ids=212`;
-
-    if (aspectFilter) {
-      url += `&aspect_filter=${encodeURIComponent(aspectFilter)}`;
-    }
+    // We use category_ids=212 as a "hint" rather than a hard lock.
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=200&offset=${offset}&category_ids=212`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "User-Agent": "TheCardMatch/1.1",
+        "User-Agent": "TheCardMatch/2.0",
         "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch"
       }
     });
@@ -79,33 +70,36 @@ export async function onRequest(context) {
     const items = rawItems.map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // TAG MAPPING
-      let cat = "Card";
-      if (sportSetting && sportSetting !== "—") cat = sportSetting;
-      if (title.includes("pokemon")) cat = "Pokemon";
-      else if (title.includes("baseball")) cat = "Baseball";
-      else if (title.includes("basketball")) cat = "Basketball";
-      else if (title.includes("f1")) cat = "Formula 1";
+      // AUTO-TAGGING LOGIC
+      let sport = sportSetting !== "—" ? sportSetting : "Card";
+      if (title.includes("pokemon")) sport = "Pokemon";
+      else if (title.includes("baseball")) sport = "Baseball";
+      else if (title.includes("basketball")) sport = "Basketball";
+      else if (title.includes("football")) sport = "Football";
+      else if (title.includes("soccer")) sport = "Soccer";
+      else if (title.includes("f1") || title.includes("formula")) sport = "Formula 1";
 
-      // PRECISE GRADE TAGGING
-      let gTag = "Raw";
-      if (title.includes("10") || title.includes("gem")) gTag = "Grade 10";
-      else if (title.includes("9")) gTag = "Grade 9";
-      else if (title.includes("8")) gTag = "Grade 8";
+      // PRECISION GRADE TAGGING
+      let grade = "Raw";
+      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+      const is9 = title.includes("9") && !is10;
+      const is8 = title.includes("8") && !is10 && !is9;
 
-      // Refine by company if possible
-      if (title.includes("psa")) gTag = gTag.replace("Grade", "PSA");
-      else if (title.includes("cgc")) gTag = gTag.replace("Grade", "CGC");
-      else if (title.includes("bgs")) gTag = gTag.replace("Grade", "BGS");
+      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : (is8 ? "PSA 8" : "PSA Graded"));
+      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : (is8 ? "CGC 8" : "CGC Graded"));
+      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : (is8 ? "BGS 8" : "BGS Graded"));
+      else if (title.includes("sgc")) grade = is10 ? "SGC 10" : (is9 ? "SGC 9" : (is8 ? "SGC 8" : "SGC Graded"));
+      else if (title.includes("tag")) grade = is10 ? "TAG 10" : (is9 ? "TAG 9" : (is8 ? "TAG 8" : "TAG Graded"));
+      else if (title.includes("graded")) grade = is10 ? "Grade 10" : (is9 ? "Grade 9" : (is8 ? "Grade 8" : "Graded"));
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: cat.charAt(0).toUpperCase() + cat.slice(1),
-        category: cat.charAt(0).toUpperCase() + cat.slice(1),
-        grade: gTag,
+        sport: sport.charAt(0).toUpperCase() + sport.slice(1),
+        category: sport.charAt(0).toUpperCase() + sport.slice(1),
+        grade: grade,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
