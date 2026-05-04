@@ -72,6 +72,7 @@ export default function App() {
     } catch (err) { console.warn(err); } finally { setLoadingMore(false); }
   }, [loadingMore, loading, prefs]);
 
+  // Handle saving a card
   async function handleLike(card: TradingCard) {
     setLiked((prev) => {
       const newList = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
@@ -80,6 +81,35 @@ export default function App() {
     });
     if (user) await addToWatchlist(user.id, card);
   }
+
+  // Unified "Buy" handler for Swipe and Watchlist clicks
+  const handleBuyAction = useCallback((card: TradingCard) => {
+    if (!card.ebayUrl) return;
+
+    // Detect if the user is on a mobile device
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      // On mobile, we use location.href. 
+      // If the eBay app is installed, the phone will automatically prompt to open it.
+      window.location.href = card.ebayUrl;
+    } else {
+      // On desktop, open in a new tab so the app stays open.
+      window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
+  // Handler for removing cards and clearing memory
+  const handleRemoveFromWatchlist = (id: string) => {
+    const newList = liked.filter(c => c.id !== id);
+    setLiked(newList);
+    window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(newList));
+  };
+
+  const handleClearWatchlist = () => {
+    setLiked([]);
+    window.localStorage.removeItem(WATCHLIST_KEY);
+  };
 
   const searchQuery = buildSearchQuery(prefs);
 
@@ -98,7 +128,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* MOBILE HEART WITH COUNTER */}
             <button 
               onClick={() => setWatchlistOpen(true)}
               className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
@@ -138,9 +167,7 @@ export default function App() {
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
-            onBuy={(card) => {
-              if (card.ebayUrl) window.location.href = card.ebayUrl;
-            }}
+            onBuy={handleBuyAction}
             onNeedMore={handleNeedMore}
             isLoadingMore={loadingMore}
             resetKey={deckResetKey}
@@ -148,12 +175,17 @@ export default function App() {
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR (Scrollable) */}
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden touch-pan-y">
-        <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
+      {/* DESKTOP SIDEBAR */}
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto sidebar-scroll">
+        <Sidebar 
+          liked={liked} 
+          onRemove={handleRemoveFromWatchlist} 
+          onClearAll={handleClearWatchlist}
+          onBuy={handleBuyAction} 
+        />
       </aside>
 
-      {/* MOBILE WATCHLIST DRAWER (Scrollable) */}
+      {/* MOBILE WATCHLIST DRAWER */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
@@ -172,16 +204,17 @@ export default function App() {
               className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
             >
               <div className="p-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
-                <h2 className="font-bold text-foreground">Watchlist ({liked.length})</h2>
-                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent transition-colors">
+                <h2 className="font-bold">Watchlist ({liked.length})</h2>
+                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent">
                   <X className="w-6 h-6" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y">
+              <div className="flex-1 overflow-y-auto sidebar-scroll">
                 <Sidebar 
                   liked={liked} 
-                  onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} 
-                  onClearAll={() => setLiked([])} 
+                  onRemove={handleRemoveFromWatchlist} 
+                  onClearAll={handleClearWatchlist}
+                  onBuy={handleBuyAction} 
                 />
               </div>
             </motion.div>
