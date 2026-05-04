@@ -49,28 +49,23 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-/* ================================================================
-   LIGHT AESTHETIC — clean white surfaces with red primary accent.
-   This is the *only* theme block; there is no .dark override, so
-   the app is locked to light mode by design.
-   ================================================================ */
 :root {
   --elevate-1: rgba(0, 0, 0, 0.03);
   --elevate-2: rgba(0, 0, 0, 0.06);
 
   /* Surfaces */
-  --background: 0 0% 100%;        /* pure white app background */
-  --foreground: 0 0% 9%;          /* near-black text */
-  --border: 0 0% 90%;             /* subtle gray hairlines */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --border: 0 0% 90%;
 
-  --card: 0 0% 100%;              /* white cards */
+  --card: 0 0% 100%;
   --card-foreground: 0 0% 9%;
   --card-border: 0 0% 90%;
 
-  --sidebar: 0 0% 98%;            /* off-white watchlist panel */
+  --sidebar: 0 0% 98%;
   --sidebar-foreground: 0 0% 9%;
   --sidebar-border: 0 0% 90%;
-  --sidebar-primary: 0 75% 50%;   /* red accent inside sidebar */
+  --sidebar-primary: 0 75% 50%;
   --sidebar-primary-foreground: 0 0% 100%;
   --sidebar-accent: 0 0% 95%;
   --sidebar-accent-foreground: 0 0% 9%;
@@ -81,14 +76,13 @@
   --popover-border: 0 0% 90%;
 
   /* Brand */
-  --primary: 0 75% 50%;           /* The Card Match red (#dc2626-ish) */
+  --primary: 0 75% 50%;
   --primary-foreground: 0 0% 100%;
-
-  --secondary: 45 90% 55%;        /* gold (used for swipe-up BUY accent) */
+  --secondary: 45 90% 55%;
   --secondary-foreground: 0 0% 9%;
 
-  --muted: 0 0% 96%;              /* very light gray fills */
-  --muted-foreground: 0 0% 40%;   /* slate gray for secondary text */
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
 
   --accent: 0 0% 95%;
   --accent-foreground: 0 0% 9%;
@@ -107,67 +101,11 @@
   * {
     @apply border-border;
   }
-  body {
-    @apply font-sans antialiased bg-background text-foreground;
-  }
-}
 
-@layer utilities {
-  /* 3D card flip helpers (used by SwipeCard for the tap-flip back side) */
-  .perspective-1000 {
-    perspective: 1000px;
-  }
-  .preserve-3d {
-    transform-style: preserve-3d;
-  }
-  .backface-hidden {
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-  }
-  .rotate-y-180 {
-    transform: rotateY(180deg);
-  }
-
-  /* Hover/active elevation overlays — paint a translucent layer on top
-     of any element so buttons feel tactile without changing colors. */
-  .hover-elevate,
-  .active-elevate,
-  .hover-elevate-2,
-  .active-elevate-2 {
-    position: relative;
-    z-index: 0;
-  }
-  .hover-elevate::after,
-  .active-elevate::after,
-  .hover-elevate-2::after,
-  .active-elevate-2::after {
-    content: "";
-    pointer-events: none;
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    z-index: 999;
-  }
-  .hover-elevate:hover::after,
-  .active-elevate:active::after {
-    background-color: var(--elevate-1);
-  }
-  .hover-elevate-2:hover::after,
-  .active-elevate-2:active::after {
-    background-color: var(--elevate-2);
-  }
-}
-/* ADD THIS TO THE BOTTOM OF INDEX.CSS */
-
-@layer base {
   html, body {
-    /* Prevents the 'pull-to-refresh' and 'bounce' on mobile */
+    @apply font-sans antialiased bg-background text-foreground;
+    /* Swipe & Scroll Lock */
     overscroll-behavior-y: none;
-
-    /* Prevents the browser from hijacking vertical swipes */
-    touch-action: none; 
-
-    /* Fixes height issues on mobile browsers */
     height: 100%;
     width: 100%;
     overflow: hidden;
@@ -179,17 +117,34 @@
     width: 100%;
     overflow: hidden;
   }
-/* Allow scrolling only inside the Sidebar/Watchlist */
-aside, 
-[class*="fixed inset-y-0 right-0"] { /* This targets the mobile drawer */
-  overflow-y: auto !important;
-  -webkit-overflow-scrolling: touch; /* Makes scrolling smooth on iPhone */
-  touch-action: pan-y; /* Allows vertical scrolling inside this box */
 }
 
-/* Ensure the sidebar content actually has height to scroll */
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  height: 100%;
+@layer utilities {
+  /* Allow scrolling in Watchlist only */
+  .sidebar-scroll {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
+
+  .perspective-1000 { perspective: 1000px; }
+  .preserve-3d { transform-style: preserve-3d; }
+  .backface-hidden {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .rotate-y-180 { transform: rotateY(180deg); }
+
+  .hover-elevate, .active-elevate { position: relative; z-index: 0; }
+  .hover-elevate::after, .active-elevate::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    z-index: 999;
+  }
+  .hover-elevate:hover::after, .active-elevate:active::after {
+    background-color: var(--elevate-1);
+  }
 }
