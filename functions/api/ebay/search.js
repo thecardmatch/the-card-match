@@ -2,10 +2,11 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  const queryInput = (searchParams.get("query") || "").trim().toLowerCase();
+  // 1. COLLECT INPUTS
+  const queryInput = (searchParams.get("query") || "").trim();
   const sportSetting = (searchParams.get("categories") || "").toLowerCase();
   const gradeSetting = (searchParams.get("conditions") || "").toLowerCase();
-  const sortChoice = searchParams.get("sort") || "newlyListed"; 
+  const sortChoice = searchParams.get("sort") || "endingSoonest"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
   const offset = searchParams.get("offset") || "0";
@@ -19,36 +20,38 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE "BOT-FRIENDLY" QUERY
-    // We avoid complex symbols like brackets () which often trigger eBay's security filters
-    let baseSearch = queryInput;
-    if (sportSetting !== "—" && sportSetting !== "") {
-      baseSearch = `${sportSetting} ${queryInput}`;
+    // 2. CONSTRUCT THE BROAD QUERY (The "Wide Net")
+    let qBase = queryInput;
+    if (sportSetting !== "—" && sportSetting !== "" && !qBase.toLowerCase().includes(sportSetting)) {
+      qBase = `${sportSetting} ${qBase}`;
     }
-    if (!baseSearch.trim()) baseSearch = "card";
+    if (!qBase.trim()) qBase = "card";
 
-    let finalQuery = baseSearch;
+    // Standardize the Grader List for the "Net"
+    const graders = "(psa,cgc,bgs,sgc,tag,beckett,slab,graded)";
+    let finalQuery = qBase;
+
     if (gradeSetting.includes("10")) {
-      finalQuery = `${baseSearch} 10 psa cgc bgs sgc tag slab gem mint pristine`;
+      finalQuery = `${qBase} 10 ${graders} (gem,mint,pristine)`;
     } else if (gradeSetting.includes("9")) {
-      finalQuery = `${baseSearch} 9 psa cgc bgs sgc tag slab mint -10`;
+      finalQuery = `${qBase} 9 ${graders} mint -10`;
+    } else if (gradeSetting.includes("8")) {
+      finalQuery = `${qBase} 8 ${graders} nm -10 -9`;
+    } else if (gradeSetting.includes("7")) {
+      finalQuery = `${qBase} 7 ${graders} -10 -9 -8`;
     } else if (gradeSetting.includes("raw")) {
-      finalQuery = `${baseSearch} raw nm -graded -psa -cgc -bgs -slab`;
+      finalQuery = `${qBase} (raw,ungraded,nm,lp) -psa -cgc -bgs -sgc -tag -slab`;
     }
 
-    // 2. SEARCH FILTERS
-    let buyingOptions = "AUCTION"; // Forced for 'Ending Soonest' accuracy
-    if (sortChoice === "newlyListed") buyingOptions = "AUCTION,FIXED_PRICE";
-
+    // 3. BROAD FILTERS
+    // We remove the strict "conditionDescriptors" to ensure we aren't missing lazy sellers
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{${buyingOptions}}`,
+      `buyingOptions:{AUCTION|FIXED_PRICE}`, // Keep both to fill the "gaps"
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // 3. THE "TRUSTED" API CALL
-    // We add more specific marketplace headers to bypass the Captcha/Splash screen
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
@@ -56,8 +59,7 @@ export async function onRequest(context) {
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch",
-        "Content-Language": "en-US",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" 
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
       }
     });
 
@@ -65,34 +67,50 @@ export async function onRequest(context) {
     const rawItems = data.itemSummaries || [];
 
     const items = rawItems.map(item => {
-      const title = (item.title || "").toLowerCase();
+      const title = item.title.toLowerCase();
 
-      // TAG MAPPING
-      let sport = sportSetting !== "—" ? sportSetting : "Card";
-      if (title.includes("pokemon")) sport = "Pokemon";
-      else if (title.includes("baseball")) sport = "Baseball";
-      else if (title.includes("basketball")) sport = "Basketball";
-      else if (title.includes("football")) sport = "Football";
+      // --- DYNAMIC TAG 1: SPORT/CATEGORY ---
+      // This logic applies to EVERY card found
+      let detectedSport = "Card";
+      if (sportSetting && sportSetting !== "—") detectedSport = sportSetting;
 
-      // GRADE MAPPING
-      let grade = "Raw";
-      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      const is9 = title.includes("9") && !is10;
+      const sportKeywords = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "wwe", "ufc", "magic", "yu-gi-oh"];
+      for (const s of sportKeywords) {
+        if (title.includes(s)) {
+          detectedSport = s === "f1" ? "Formula 1" : s;
+          break;
+        }
+      }
 
-      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
-      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
-      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
-      else if (title.includes("tag")) grade = is10 ? "TAG 10" : (is9 ? "TAG 9" : "TAG Graded");
-      else if (title.includes("graded")) grade = is10 ? "Grade 10" : "Graded";
+      // --- DYNAMIC TAG 2: GRADE ---
+      // This maps results for ANY grade level
+      let detectedGrade = "Raw";
+      const graderMap = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
+      let company = "";
+      for (const [key, val] of Object.entries(graderMap)) {
+        if (title.includes(key)) { company = val; break; }
+      }
+
+      if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
+        detectedGrade = company ? `${company} 10` : "Grade 10";
+      } else if (title.includes("9")) {
+        detectedGrade = company ? `${company} 9` : "Grade 9";
+      } else if (title.includes("8")) {
+        detectedGrade = company ? `${company} 8` : "Grade 8";
+      } else if (title.includes("7")) {
+        detectedGrade = company ? `${company} 7` : "Grade 7";
+      } else if (company) {
+        detectedGrade = `${company} Graded`;
+      }
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: sport.charAt(0).toUpperCase() + sport.slice(1),
-        category: sport.charAt(0).toUpperCase() + sport.slice(1),
-        grade: grade,
+        sport: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
+        category: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
+        grade: detectedGrade,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
@@ -101,7 +119,7 @@ export async function onRequest(context) {
       };
     });
 
-    return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "json" } });
 
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message, items: [] }), { status: 500 });
