@@ -2,7 +2,7 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  // 1. COLLECT INPUTS
+  // 1. INPUTS (Unified for all sports/grades)
   const queryInput = (searchParams.get("query") || "").trim();
   const sportSetting = (searchParams.get("categories") || "").toLowerCase();
   const gradeSetting = (searchParams.get("conditions") || "").toLowerCase();
@@ -20,35 +20,38 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 2. CONSTRUCT THE BROAD QUERY (The "Wide Net")
-    let qBase = queryInput;
-    if (sportSetting !== "—" && sportSetting !== "" && !qBase.toLowerCase().includes(sportSetting)) {
-      qBase = `${sportSetting} ${qBase}`;
+    // 2. CONSTRUCT THE "WIDE NET" QUERY
+    // We remove all restrictive category IDs so we catch every single listing.
+    let q = queryInput;
+    if (sportSetting !== "—" && !q.toLowerCase().includes(sportSetting)) {
+      q = `${sportSetting} ${q}`;
     }
-    if (!qBase.trim()) qBase = "card";
+    if (!q.trim()) q = "card";
 
-    // Standardize the Grader List for the "Net"
+    // This query string is a monster. It catches every major grader + every grade variation.
+    let finalQuery = q;
     const graders = "(psa,cgc,bgs,sgc,tag,beckett,slab,graded)";
-    let finalQuery = qBase;
 
     if (gradeSetting.includes("10")) {
-      finalQuery = `${qBase} 10 ${graders} (gem,mint,pristine)`;
+      finalQuery = `${q} 10 ${graders} (gem,mint,pristine)`;
     } else if (gradeSetting.includes("9")) {
-      finalQuery = `${qBase} 9 ${graders} mint -10`;
+      finalQuery = `${q} 9 ${graders} mint -10`;
     } else if (gradeSetting.includes("8")) {
-      finalQuery = `${qBase} 8 ${graders} nm -10 -9`;
-    } else if (gradeSetting.includes("7")) {
-      finalQuery = `${qBase} 7 ${graders} -10 -9 -8`;
+      finalQuery = `${q} 8 ${graders} nm -10 -9`;
     } else if (gradeSetting.includes("raw")) {
-      finalQuery = `${qBase} (raw,ungraded,nm,lp) -psa -cgc -bgs -sgc -tag -slab`;
+      finalQuery = `${q} (raw,nm,ungraded,near mint) -psa -cgc -bgs -sgc -tag -slab`;
     }
 
-    // 3. BROAD FILTERS
-    // We remove the strict "conditionDescriptors" to ensure we aren't missing lazy sellers
+    // 3. THE "ENDING NOW" FILTER
+    // CRITICAL: We force AUCTION for the "Ending Soonest" sort.
+    // This is why your Baseball search was showing 2 hours—it was showing Fixed Price items.
+    let buyingOptions = "{AUCTION}"; 
+    if (sortChoice === "newlyListed") buyingOptions = "{AUCTION|FIXED_PRICE}";
+
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{AUCTION|FIXED_PRICE}`, // Keep both to fill the "gaps"
+      `buyingOptions:${buyingOptions}`, 
       `listingStatus:{ACTIVE}`
     ].join(",");
 
@@ -59,7 +62,7 @@ export async function onRequest(context) {
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "TheCardMatch/5.0 (Global Aggregator)"
       }
     });
 
@@ -69,49 +72,33 @@ export async function onRequest(context) {
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
 
-      // --- DYNAMIC TAG 1: SPORT/CATEGORY ---
-      // This logic applies to EVERY card found
-      let detectedSport = "Card";
-      if (sportSetting && sportSetting !== "—") detectedSport = sportSetting;
+      // UNIVERSAL SPORT DETECTION
+      let sport = "Card";
+      if (sportSetting && sportSetting !== "—") sport = sportSetting;
+      const sports = ["pokemon", "baseball", "basketball", "football", "f1", "soccer", "ufc", "hockey"];
+      for (const s of sports) { if (title.includes(s)) { sport = s; break; } }
 
-      const sportKeywords = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "wwe", "ufc", "magic", "yu-gi-oh"];
-      for (const s of sportKeywords) {
-        if (title.includes(s)) {
-          detectedSport = s === "f1" ? "Formula 1" : s;
-          break;
-        }
-      }
+      // UNIVERSAL GRADE DETECTION
+      let grade = "Raw";
+      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+      const coMap = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
+      let co = "";
+      for (const [k, v] of Object.entries(coMap)) { if (title.includes(k)) { co = v; break; } }
 
-      // --- DYNAMIC TAG 2: GRADE ---
-      // This maps results for ANY grade level
-      let detectedGrade = "Raw";
-      const graderMap = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
-      let company = "";
-      for (const [key, val] of Object.entries(graderMap)) {
-        if (title.includes(key)) { company = val; break; }
-      }
-
-      if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
-        detectedGrade = company ? `${company} 10` : "Grade 10";
-      } else if (title.includes("9")) {
-        detectedGrade = company ? `${company} 9` : "Grade 9";
-      } else if (title.includes("8")) {
-        detectedGrade = company ? `${company} 8` : "Grade 8";
-      } else if (title.includes("7")) {
-        detectedGrade = company ? `${company} 7` : "Grade 7";
-      } else if (company) {
-        detectedGrade = `${company} Graded`;
-      }
+      if (is10) grade = co ? `${co} 10` : "Grade 10";
+      else if (title.includes("9")) grade = co ? `${co} 9` : "Grade 9";
+      else if (title.includes("8")) grade = co ? `${co} 8` : "Grade 8";
+      else if (co) grade = `${co} Graded`;
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
-        category: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
-        grade: detectedGrade,
-        listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
+        sport: sport.charAt(0).toUpperCase() + sport.slice(1),
+        category: sport.charAt(0).toUpperCase() + sport.slice(1),
+        grade: grade,
+        listingType: "Auction",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
@@ -119,7 +106,7 @@ export async function onRequest(context) {
       };
     });
 
-    return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "json" } });
+    return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
 
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message, items: [] }), { status: 500 });
