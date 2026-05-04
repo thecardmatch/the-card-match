@@ -19,26 +19,26 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE POWER QUERY
-    // We combine the user query + the sport setting
-    let searchBase = query;
+    // 1. THE REVERTED "POWER QUERY"
+    // We are removing all the "-" exclusions and complex symbols that broke it.
+    let baseSearch = query;
     if (sportSetting !== "—" && sportSetting !== "") {
-      searchBase = `${sportSetting} ${query}`;
+      baseSearch = `${sportSetting} ${query}`;
     }
-    if (!searchBase.trim()) searchBase = "trading card";
+    if (!baseSearch.trim()) baseSearch = "card";
 
-    let finalQuery = searchBase;
+    let finalQuery = baseSearch;
 
-    // Apply the aggressive keyword list that worked for Pokemon but for ALL sports
+    // Use the exact comma-separated logic that gave us the best results earlier
     if (gradeSetting.includes("10")) {
-      finalQuery = `${searchBase} 10 (psa,cgc,tag,bgs,sgc,beckett,slab,graded,gem,mint) -#10 -no.10`;
+      finalQuery = `${baseSearch} 10 psa cgc tag bgs sgc`; 
     } else if (gradeSetting.includes("9")) {
-      finalQuery = `${searchBase} 9 (psa,cgc,tag,bgs,sgc,slab,graded) -10 -#9 -no.9`;
+      finalQuery = `${baseSearch} 9 psa cgc tag bgs sgc`;
     } else if (gradeSetting.includes("raw")) {
-      finalQuery = `${searchBase} (raw,ungraded,nm,mint) -psa -cgc -bgs -sgc -slab -graded`;
+      finalQuery = `${baseSearch} raw nm`;
     }
 
-    // 2. BROADEST POSSIBLE FILTERS
+    // 2. STABLE FILTERS
     let buyingOptions = "{AUCTION|FIXED_PRICE}";
     if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
 
@@ -48,8 +48,8 @@ export async function onRequest(context) {
       `buyingOptions:${buyingOptions}`
     ].join(",");
 
-    // We pull from Trading Cards (212) but don't limit the query further
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}&category_ids=212`;
+    // Removing category_ids temporarily to see if it's the bottleneck
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
       headers: { 
@@ -64,49 +64,36 @@ export async function onRequest(context) {
     const items = rawItems.map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // --- TAG 1: SPORT (CRITICAL FIX) ---
-      // We force this to be 'sport' so the card UI can see it
+      // TAG 1: SPORT (Fixed variable name for SwipeCard.tsx)
       let sport = "Card";
-
-      // Priority 1: Use the setting the user picked
-      if (sportSetting && sportSetting !== "—") {
-        sport = sportSetting;
-      }
-
-      // Priority 2: Title keyword override (accurate detection)
+      if (sportSetting && sportSetting !== "—") sport = sportSetting;
       if (title.includes("pokemon")) sport = "Pokemon";
       else if (title.includes("baseball")) sport = "Baseball";
       else if (title.includes("basketball")) sport = "Basketball";
       else if (title.includes("football")) sport = "Football";
-      else if (title.includes("soccer")) sport = "Soccer";
       else if (title.includes("f1") || title.includes("formula")) sport = "Formula 1";
-      else if (title.includes("wwe") || title.includes("wrestling")) sport = "WWE";
-      else if (title.includes("ufc") || title.includes("mma")) sport = "UFC";
 
-      // --- TAG 2: GRADE ---
+      // TAG 2: GRADE
       let grade = "Raw";
-      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      const is9 = title.includes("9") && !is10;
-
-      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
-      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
-      else if (title.includes("bgs") || title.includes("beckett")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
-      else if (title.includes("sgc")) grade = is10 ? "SGC 10" : (is9 ? "SGC 9" : "SGC Graded");
-      else if (title.includes("tag")) grade = is10 ? "TAG 10" : (is9 ? "TAG 9" : "TAG Graded");
-      else if (title.includes("graded")) grade = is10 ? "Grade 10" : "Graded";
+      const is10 = title.includes("10") || title.includes("gem") || title.includes("mint");
+      if (title.includes("psa")) grade = is10 ? "PSA 10" : "PSA Graded";
+      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : "CGC Graded";
+      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : "BGS Graded";
+      else if (title.includes("sgc")) grade = is10 ? "SGC 10" : "SGC Graded";
+      else if (title.includes("tag")) grade = is10 ? "TAG 10" : "TAG Graded";
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: sport.charAt(0).toUpperCase() + sport.slice(1), // Key 'sport' is fixed
+        sport: sport.charAt(0).toUpperCase() + sport.slice(1), 
         grade: grade,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&toolid=10001&mkevt=1`
       };
     });
 
