@@ -2,14 +2,11 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  // 1. INPUTS
   const queryInput = (searchParams.get("query") || "").trim();
   const sportSetting = (searchParams.get("categories") || "").toLowerCase();
   const gradeSetting = (searchParams.get("conditions") || "").toLowerCase();
-  const sortChoice = searchParams.get("sort") || "endingSoonest"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
-  const offset = searchParams.get("offset") || "0";
 
   try {
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
@@ -20,94 +17,82 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 2. THE UNIVERSAL QUERY (Broad & General)
-    // We treat every sport and category exactly the same.
-    let baseQuery = queryInput;
-    if (sportSetting !== "—" && sportSetting !== "" && !baseQuery.toLowerCase().includes(sportSetting)) {
-      baseQuery = `${sportSetting} ${baseQuery}`;
-    }
-    if (!baseQuery.trim()) baseQuery = "trading card";
-
-    // Broadest possible keyword groups to catch "Mystery Lots", "Singles", and "Sets"
-    const graders = "(psa,cgc,bgs,sgc,tag,beckett,slab,graded)";
-    let finalSearch = baseQuery;
-
-    if (gradeSetting.includes("10")) {
-      finalSearch = `${baseQuery} 10 ${graders} (gem,mint,pristine)`;
-    } else if (gradeSetting.includes("9")) {
-      finalSearch = `${baseQuery} 9 ${graders} mint -10`;
-    } else if (gradeSetting.includes("8")) {
-      finalQuery = `${baseQuery} 8 ${graders} nm -10 -9`;
-    } else if (gradeSetting.includes("raw")) {
-      finalSearch = `${baseQuery} (raw,ungraded,nm,lp) -psa -cgc -bgs -sgc -tag -slab`;
+    // 1. THE "NO-FRILLS" UNIVERSAL QUERY
+    // Complex queries trigger eBay's "smart" search, which skips recent listings.
+    // We use a dead-simple string to force the most basic database hit.
+    let q = queryInput;
+    if (sportSetting !== "—" && sportSetting !== "") {
+      q = `${sportSetting} ${q}`;
     }
 
-    // 3. THE "IMMEDIATE" FILTER
-    // To fix the "2 hour gap", we MUST exclude Fixed Price items when sorting by Ending Soonest.
-    let buyingOptions = "AUCTION"; 
-    if (sortChoice === "newlyListed") buyingOptions = "AUCTION,FIXED_PRICE";
+    let finalQuery = q || "card";
+    if (gradeSetting.includes("10")) finalQuery += " 10 graded gem";
+    else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
+    else if (gradeSetting.includes("8")) finalQuery += " 8 graded nm";
 
-    const filter = [
+    // 2. THE LIVE-CLOCK FILTER
+    // We remove almost ALL filters except the price and format.
+    // "buyingOptions:AUCTION" is the only way to get the true ending-now clock.
+    const filters = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{${buyingOptions}}`,
+      `buyingOptions:{AUCTION}`,
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // We REMOVE category_ids. This makes the search site-wide and inclusive.
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalSearch)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
+    // We pull the maximum (200) to ensure we catch those "under 1 minute" cards.
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filters)}&sort=endingSoonest&limit=200`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch",
-        "User-Agent": "TheCardMatch/6.0 (Universal Aggregator)"
+        "User-Agent": "TheCardMatch/7.0 (Live-Sync)"
       }
     });
 
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
+    // 3. THE "ALL-CATEGORY" IDENTIFIER
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
 
-      // --- COMPREHENSIVE IDENTIFICATION ---
-      // This applies to ALL sports and ALL categories automatically.
-      let displaySport = "Card";
-      if (sportSetting && sportSetting !== "—") displaySport = sportSetting;
+      // DYNAMIC SPORT RECOGNITION (Universal)
+      let detectedSport = "Card";
+      if (sportSetting && sportSetting !== "—") detectedSport = sportSetting;
 
-      const masterSports = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey", "wrestling", "ufc", "magic", "yu-gi-oh"];
-      for (const s of masterSports) {
+      // Broad check for ANY sport/game
+      const sportsList = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey", "magic", "yu-gi-oh", "ufc", "wwe"];
+      for (const s of sportsList) {
         if (title.includes(s)) {
-          displaySport = s;
+          detectedSport = s;
           break;
         }
       }
 
-      // UNIVERSAL GRADE MAPPING
-      let displayGrade = "Raw";
+      // DYNAMIC GRADE RECOGNITION (Universal)
+      let detectedGrade = "Raw";
       const graderMap = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
       let company = "";
       for (const [k, v] of Object.entries(graderMap)) { if (title.includes(k)) { company = v; break; } }
 
       const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
       const is9 = title.includes("9") && !is10;
-      const is8 = title.includes("8") && !is10 && !is9;
 
-      if (is10) displayGrade = company ? `${company} 10` : "Grade 10";
-      else if (is9) displayGrade = company ? `${company} 9` : "Grade 9";
-      else if (is8) displayGrade = company ? `${company} 8` : "Grade 8";
-      else if (company) displayGrade = `${company} Graded`;
+      if (is10) detectedGrade = company ? `${company} 10` : "Grade 10";
+      else if (is9) detectedGrade = company ? `${company} 9` : "Grade 9";
+      else if (company) detectedGrade = `${company} Graded`;
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: displaySport.charAt(0).toUpperCase() + displaySport.slice(1),
-        category: displaySport.charAt(0).toUpperCase() + displaySport.slice(1),
-        grade: displayGrade,
+        sport: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
+        category: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
+        grade: detectedGrade,
         listingType: "Auction",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
@@ -115,6 +100,9 @@ export async function onRequest(context) {
         ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
       };
     });
+
+    // CRITICAL: Manual Re-Sort to fix API latency/caching issues
+    items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
 
