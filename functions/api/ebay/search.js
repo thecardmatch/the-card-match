@@ -2,10 +2,9 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  // 1. GET PARAMETERS
   const query = (searchParams.get("query") || "").trim().toLowerCase();
-  const categories = (searchParams.get("categories") || "").toLowerCase();
-  const conditions = (searchParams.get("conditions") || "").toLowerCase();
+  const sportSetting = (searchParams.get("categories") || "").toLowerCase();
+  const gradeSetting = (searchParams.get("conditions") || "").toLowerCase();
   const sortChoice = searchParams.get("sort") || "newlyListed"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
@@ -13,27 +12,32 @@ export async function onRequest(context) {
 
   try {
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
-    const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    const tokenRes = await fetch("https://identity.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Basic ${auth}` },
       body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
     });
     const { access_token } = await tokenRes.json();
 
-    // 2. CONSTRUCT AIRTIGHT QUERY
-    // We combine user text + selected sport name (e.g. "Ohtani" + "Baseball")
-    let baseSearch = `${query} ${categories === "—" ? "" : categories}`.trim();
-    if (!baseSearch) baseSearch = "card";
+    // 1. DYNAMIC KEYWORD BUILDER
+    // If sport is "—", we don't add it. Otherwise, we add it to the start.
+    let searchSubject = (sportSetting === "—" || !sportSetting) ? query : `${sportSetting} ${query}`;
+    if (!searchSubject.trim()) searchSubject = "trading card";
 
-    let finalQuery = baseSearch;
-    if (conditions.includes("grade 10")) {
-      // Specifically target high-end slabs with multiple keywords
-      finalQuery = `${baseSearch} 10 (psa,cgc,tag,bgs,sgc,beckett,slab,graded) -#10 -no.10`;
-    } else if (conditions.includes("raw")) {
-      finalQuery = `${baseSearch} (raw,ungraded,nm) -psa -bgs -cgc -slab -graded`;
+    let finalQuery = searchSubject;
+
+    // 2. THE "AIRTIGHT" GRADE FILTER
+    // We use (word,word) syntax which is an "OR" search in eBay's engine.
+    if (gradeSetting.includes("10")) {
+      finalQuery = `${searchSubject} (psa,cgc,tag,bgs,sgc,slab) 10 -#10 -no.10`;
+    } else if (gradeSetting.includes("9")) {
+      // Specifically target 9s while excluding 10s to prevent crossover
+      finalQuery = `${searchSubject} (psa,cgc,tag,bgs,sgc,slab) 9 -10 -#9 -no.9`;
+    } else if (gradeSetting.includes("raw")) {
+      finalQuery = `${searchSubject} (raw,ungraded,nm) -graded -slab -psa -cgc -bgs`;
     }
 
-    // 3. OPTIMIZED FILTERS
+    // 3. BROAD-NET FILTERS
     let buyingOptions = "{AUCTION|FIXED_PRICE}";
     if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
 
@@ -44,52 +48,46 @@ export async function onRequest(context) {
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // We use category_ids=212 (Trading Cards) as a "Soft Anchor" 
-    // This includes Pokemon, Sports, F1, WWE, etc.
+    // Pull 100 results from the most broad category possible (Trading Cards)
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}&category_ids=212`;
 
     const ebayRes = await fetch(url, {
-      headers: { 
-        "Authorization": `Bearer ${access_token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
-      }
+      headers: { "Authorization": `Bearer ${access_token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" }
     });
 
     const data = await ebayRes.json();
     const items = (data.itemSummaries || []).map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // FIX: THE DISAPPEARING SPORT TAG
-      // 1. Start with the setting the user actually chose
-      let sportLabel = categories && categories !== "—" ? categories : "Card";
+      // TAG 1: SPORT DETECTION (Hardcoded priority)
+      let sportTag = sportSetting !== "—" ? sportSetting : "Card";
+      if (title.includes("pokemon")) sportTag = "Pokemon";
+      else if (title.includes("baseball")) sportTag = "Baseball";
+      else if (title.includes("basketball")) sportTag = "Basketball";
+      else if (title.includes("football")) sportTag = "Football";
+      else if (title.includes("soccer")) sportTag = "Soccer";
+      else if (title.includes("f1") || title.includes("formula")) sportTag = "Formula 1";
+      else if (title.includes("wwe") || title.includes("wrestling")) sportTag = "WWE";
 
-      // 2. If title has a specific sport, override for accuracy
-      if (title.includes("pokemon")) sportLabel = "Pokemon";
-      else if (title.includes("f1") || title.includes("formula 1")) sportLabel = "Formula 1";
-      else if (title.includes("wwe") || title.includes("wrestling")) sportLabel = "WWE";
-      else if (title.includes("soccer")) sportLabel = "Soccer";
-      else if (title.includes("baseball")) sportLabel = "Baseball";
-      else if (title.includes("basketball")) sportLabel = "Basketball";
-      else if (title.includes("football")) sportLabel = "Football";
-      else if (title.includes("ufc")) sportLabel = "UFC";
+      // TAG 2: GRADE DETECTION (Precision logic)
+      let gradeTag = "Raw";
+      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+      const is9 = title.includes("9") && !is10;
 
-      // DETECT GRADE
-      let gradeLabel = "Raw";
-      const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : "PSA Graded";
-      else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : "CGC Graded";
-      else if (title.includes("tag")) gradeLabel = has10 ? "TAG 10" : "TAG Graded";
-      else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : "BGS Graded";
-      else if (title.includes("sgc")) gradeLabel = has10 ? "SGC 10" : "SGC Graded";
-      else if (title.includes("graded")) gradeLabel = has10 ? "Grade 10" : "Graded";
+      if (title.includes("psa")) gradeTag = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
+      else if (title.includes("cgc")) gradeTag = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
+      else if (title.includes("bgs")) gradeTag = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
+      else if (title.includes("sgc")) gradeTag = is10 ? "SGC 10" : (is9 ? "SGC 9" : "SGC Graded");
+      else if (title.includes("tag")) gradeTag = is10 ? "TAG 10" : (is9 ? "TAG 9" : "TAG Graded");
+      else if (title.includes("graded")) gradeTag = is10 ? "Grade 10" : (is9 ? "Grade 9" : "Graded");
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: sportLabel.charAt(0).toUpperCase() + sportLabel.slice(1), 
-        grade: gradeLabel,
+        sport: sportTag.charAt(0).toUpperCase() + sportTag.slice(1),
+        grade: gradeTag,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
@@ -99,7 +97,6 @@ export async function onRequest(context) {
     });
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
-
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
