@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X } from "lucide-react";
+import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X, LogIn, LogOut } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
@@ -25,7 +25,7 @@ function loadLocalWatchlist(): TradingCard[] {
 }
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { prefs, setPrefs, hasOnboarded } = usePreferences();
   const [liked, setLiked] = useState<TradingCard[]>(() => loadLocalWatchlist());
   const [cards, setCards] = useState<TradingCard[]>([]);
@@ -33,6 +33,7 @@ export default function App() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const sortBtnRef = useRef<HTMLDivElement>(null);
 
@@ -72,7 +73,6 @@ export default function App() {
     } catch (err) { console.warn(err); } finally { setLoadingMore(false); }
   }, [loadingMore, loading, prefs]);
 
-  // Handle saving a card
   async function handleLike(card: TradingCard) {
     setLiked((prev) => {
       const newList = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
@@ -82,24 +82,16 @@ export default function App() {
     if (user) await addToWatchlist(user.id, card);
   }
 
-  // Unified "Buy" handler for Swipe and Watchlist clicks
   const handleBuyAction = useCallback((card: TradingCard) => {
     if (!card.ebayUrl) return;
-
-    // Detect if the user is on a mobile device
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
     if (isMobile) {
-      // On mobile, we use location.href. 
-      // If the eBay app is installed, the phone will automatically prompt to open it.
       window.location.href = card.ebayUrl;
     } else {
-      // On desktop, open in a new tab so the app stays open.
       window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
     }
   }, []);
 
-  // Handler for removing cards and clearing memory
   const handleRemoveFromWatchlist = (id: string) => {
     const newList = liked.filter(c => c.id !== id);
     setLiked(newList);
@@ -128,6 +120,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* MOBILE WATCHLIST BUTTON */}
             <button 
               onClick={() => setWatchlistOpen(true)}
               className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
@@ -140,6 +133,7 @@ export default function App() {
               )}
             </button>
 
+            {/* SHARED SORT BUTTON */}
             <div ref={sortBtnRef} className="relative">
               <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center">
                 <ArrowUpDown className="w-4 h-4" />
@@ -157,6 +151,29 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            {/* AUTH BUTTON (Icon on mobile, Text+Icon on desktop) */}
+            <div className="flex items-center">
+              {user ? (
+                <button 
+                  onClick={() => signOut()} 
+                  className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full border hover:bg-accent transition-colors text-sm font-medium"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden md:inline">Sign Out</span>
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setAuthOpen(true)} 
+                  className="flex items-center justify-center gap-2 h-10 px-3 md:px-4 rounded-full bg-primary text-primary-foreground hover:opacity-90 transition-opacity text-sm font-medium"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span className="hidden md:inline">Sign In</span>
+                </button>
+              )}
+            </div>
+
+            {/* SETTINGS BUTTON */}
             <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
               <SettingsIcon className="w-5 h-5" />
             </button>
@@ -223,7 +240,7 @@ export default function App() {
       </AnimatePresence>
 
       <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
-      <AuthDialog open={false} onClose={() => {}} /> 
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
     </div>
   );
 }
