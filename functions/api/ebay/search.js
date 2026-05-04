@@ -17,30 +17,29 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE "NO-FRILLS" UNIVERSAL QUERY
-    // Complex queries trigger eBay's "smart" search, which skips recent listings.
-    // We use a dead-simple string to force the most basic database hit.
+    // 1. UNIVERSAL KEYWORD MAPPING
     let q = queryInput;
     if (sportSetting !== "—" && sportSetting !== "") {
       q = `${sportSetting} ${q}`;
     }
 
     let finalQuery = q || "card";
+    // We keep the keywords simple to ensure we don't trigger "smart" filtering
     if (gradeSetting.includes("10")) finalQuery += " 10 graded gem";
     else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
     else if (gradeSetting.includes("8")) finalQuery += " 8 graded nm";
 
-    // 2. THE LIVE-CLOCK FILTER
-    // We remove almost ALL filters except the price and format.
-    // "buyingOptions:AUCTION" is the only way to get the true ending-now clock.
+    // 2. THE ZERO-BID UNLOCK (CRITICAL FIX)
+    // We explicitly add bidCount:[0..] to the filter. 
+    // This tells eBay: "Do not hide the cards that have no bids yet."
     const filters = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
       `buyingOptions:{AUCTION}`,
+      `bidCount:[0..]`, // <--- This is the fix for the missing "Ending Now" cards
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    // We pull the maximum (200) to ensure we catch those "under 1 minute" cards.
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filters)}&sort=endingSoonest&limit=200`;
 
     const ebayRes = await fetch(url, {
@@ -48,60 +47,48 @@ export async function onRequest(context) {
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "affiliateCampaignId=5339150952,affiliateReferenceId=thecardmatch",
-        "User-Agent": "TheCardMatch/7.0 (Live-Sync)"
+        "User-Agent": "TheCardMatch/8.0 (Zero-Bid-Unlock)"
       }
     });
 
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. THE "ALL-CATEGORY" IDENTIFIER
+    // 3. UNIVERSAL TAGGING LOGIC
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
 
-      // DYNAMIC SPORT RECOGNITION (Universal)
-      let detectedSport = "Card";
-      if (sportSetting && sportSetting !== "—") detectedSport = sportSetting;
+      let sport = sportSetting && sportSetting !== "—" ? sportSetting : "Card";
+      const sports = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey", "ufc", "wrestling"];
+      for (const s of sports) { if (title.includes(s)) { sport = s; break; } }
 
-      // Broad check for ANY sport/game
-      const sportsList = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey", "magic", "yu-gi-oh", "ufc", "wwe"];
-      for (const s of sportsList) {
-        if (title.includes(s)) {
-          detectedSport = s;
-          break;
-        }
-      }
-
-      // DYNAMIC GRADE RECOGNITION (Universal)
-      let detectedGrade = "Raw";
-      const graderMap = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
-      let company = "";
-      for (const [k, v] of Object.entries(graderMap)) { if (title.includes(k)) { company = v; break; } }
-
+      let grade = "Raw";
       const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      const is9 = title.includes("9") && !is10;
+      const graders = { psa: "PSA", cgc: "CGC", bgs: "BGS", sgc: "SGC", tag: "TAG" };
+      let co = "";
+      for (const [k, v] of Object.entries(graders)) { if (title.includes(k)) { co = v; break; } }
 
-      if (is10) detectedGrade = company ? `${company} 10` : "Grade 10";
-      else if (is9) detectedGrade = company ? `${company} 9` : "Grade 9";
-      else if (company) detectedGrade = `${company} Graded`;
-
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      if (is10) grade = co ? `${co} 10` : "Grade 10";
+      else if (title.includes("9")) grade = co ? `${co} 9` : "Grade 9";
+      else if (title.includes("8")) grade = co ? `${co} 8` : "Grade 8";
+      else if (co) grade = `${co} Graded`;
 
       return {
-        id: itemId,
+        id: item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId,
         name: item.title,
-        sport: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
-        category: detectedSport.charAt(0).toUpperCase() + detectedSport.slice(1),
-        grade: detectedGrade,
+        sport: sport.charAt(0).toUpperCase() + sport.slice(1),
+        category: sport.charAt(0).toUpperCase() + sport.slice(1),
+        grade: grade,
         listingType: "Auction",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
+        bidCount: item.bidCount || 0, // Adding this to the object for your UI
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: `https://www.ebay.com/itm/${item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId}`
       };
     });
 
-    // CRITICAL: Manual Re-Sort to fix API latency/caching issues
+    // Final sort to ensure the true "Ending Now" is at the very top
     items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
