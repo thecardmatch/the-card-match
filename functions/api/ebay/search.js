@@ -3,7 +3,7 @@ export async function onRequest(context) {
   const { searchParams } = new URL(request.url);
 
   const query = (searchParams.get("query") || "").trim().toLowerCase();
-  const categories = searchParams.get("categories") || "";
+  const categories = (searchParams.get("categories") || "").toLowerCase();
   const conditions = (searchParams.get("conditions") || "").toLowerCase();
   const sortChoice = searchParams.get("sort") || "newlyListed"; 
   const minPrice = searchParams.get("minPrice") || "0";
@@ -20,21 +20,25 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. REFINED SEARCH TERMS
-    let baseQuery = query || "pokemon";
-    if (categories && categories !== "—") baseQuery += ` ${categories}`;
+    // 1. CONSTRUCT THE GLOBAL SEARCH
+    // We combine the user query and the sport/category name.
+    let baseSearch = `${query} ${categories === "—" ? "" : categories}`.trim();
+    if (!baseSearch) baseSearch = "trading card";
 
-    let finalQuery = baseQuery;
+    let finalQuery = baseSearch;
+
     if (conditions.includes("grade 10")) {
-      // We explicitly include 'psa 10' keywords to catch specific high-end auctions
-      finalQuery = `${baseQuery} 10 (psa,cgc,tag,bgs,sgc,gem,mint,slab)`;
+      // Powerful keyword combo to find slabs across ANY category
+      finalQuery = `${baseSearch} 10 (psa,cgc,tag,bgs,sgc,beckett,slab,graded) -#10 -no.10`;
     } else if (conditions.includes("raw")) {
-      finalQuery = `${baseQuery} (raw,ungraded,nm)`;
+      finalQuery = `${baseSearch} (raw,ungraded,nm) -psa -bgs -cgc -slab -graded`;
     }
 
-    // 2. THE FILTER (Syntax fix)
+    // 2. UNIVERSAL FILTERS (NO CATEGORY ID)
     let buyingOptions = "{AUCTION|FIXED_PRICE}";
-    if (sortChoice === "endingSoonest") buyingOptions = "{AUCTION}";
+    if (sortChoice === "endingSoonest") {
+      buyingOptions = "{AUCTION}";
+    }
 
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
@@ -42,13 +46,13 @@ export async function onRequest(context) {
       `buyingOptions:${buyingOptions}`
     ].join(",");
 
-    // 3. MAX LIMIT (100) TO CATCH HIDDEN AUCTIONS
+    // We pull from the root of eBay (no categoryId parameter used)
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
       headers: { 
-        "Authorization": `Bearer ${access_token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
+        "Authorization": `Bearer ${access_token}`, 
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" 
       }
     });
 
@@ -56,14 +60,18 @@ export async function onRequest(context) {
     const items = (data.itemSummaries || []).map(item => {
       const title = (item.title || "").toLowerCase();
 
-      // FIX: FORCE TAG 1 (Sport)
-      // If the category path contains pokemon OR if we are in our default search, it's Pokemon.
-      let sportTag = "Pokemon";
-      if (title.includes("nba") || title.includes("basketball")) sportTag = "Basketball";
-      else if (title.includes("mlb") || title.includes("baseball")) sportTag = "Baseball";
-      else if (title.includes("nfl") || title.includes("football")) sportTag = "Football";
+      // INTELLIGENT TAGGING
+      // We start with the user's selected category, then refine based on title.
+      let displaySport = categories && categories !== "—" ? categories : "Card";
 
-      // TAG 2: Precision Grade
+      if (title.includes("pokemon")) displaySport = "Pokemon";
+      else if (title.includes("f1") || title.includes("formula 1")) displaySport = "Formula 1";
+      else if (title.includes("wwe") || title.includes("wrestling")) displaySport = "WWE";
+      else if (title.includes("soccer")) displaySport = "Soccer";
+      else if (title.includes("baseball")) displaySport = "Baseball";
+      else if (title.includes("basketball")) displaySport = "Basketball";
+      else if (title.includes("football")) displaySport = "Football";
+
       let gradeTag = "Raw";
       const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
       if (title.includes("psa")) gradeTag = has10 ? "PSA 10" : "PSA Graded";
@@ -71,16 +79,15 @@ export async function onRequest(context) {
       else if (title.includes("tag")) gradeTag = has10 ? "TAG 10" : "TAG Graded";
       else if (title.includes("bgs")) gradeTag = has10 ? "BGS 10" : "BGS Graded";
       else if (title.includes("sgc")) gradeTag = has10 ? "SGC 10" : "SGC Graded";
-      else if (title.includes("graded")) gradeTag = "Graded";
+      else if (title.includes("graded")) gradeTag = has10 ? "Grade 10" : "Graded";
 
       const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
       return {
         id: itemId,
         name: item.title,
-        sport: sportTag,      // First Tag Fixed
-        category: sportTag,   // Backup Field
-        grade: gradeTag,      // Second Tag Fixed
+        sport: displaySport.charAt(0).toUpperCase() + displaySport.slice(1), 
+        grade: gradeTag,
         listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
