@@ -108,9 +108,10 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-col md:flex-row">
-      <main className="flex-1 flex flex-col order-1 min-h-screen md:min-h-0">
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3">
+    <div className="relative min-h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
+      {/* Main UI Layer */}
+      <main className="flex-1 flex flex-col order-1 min-h-screen md:min-h-0 relative z-10">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background/80 backdrop-blur-md z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
@@ -125,20 +126,25 @@ export default function App() {
             <div ref={sortBtnRef} className="relative">
               <button
                 onClick={() => setSortOpen((v) => !v)}
-                className={`w-10 h-10 rounded-full border flex items-center justify-center ${
-                  prefs.sort === "endingSoonest" ? "bg-primary text-primary-foreground" : "bg-card text-foreground"
+                className={`w-10 h-10 rounded-full border flex items-center justify-center transition-colors ${
+                  prefs.sort === "endingSoonest" ? "bg-primary text-primary-foreground" : "bg-card text-foreground hover:bg-accent"
                 }`}
               >
                 <ArrowUpDown className="w-4 h-4" />
               </button>
               <AnimatePresence>
                 {sortOpen && (
-                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-50">
+                  <motion.div 
+                    initial={{ opacity: 0, y: -6 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    exit={{ opacity: 0, y: -6 }} 
+                    className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-50 overflow-hidden"
+                  >
                     {SORT_OPTIONS.map((opt) => (
                       <button
                         key={opt.value}
                         onClick={() => { setPrefs({ ...prefs, sort: opt.value }); setSortOpen(false); }}
-                        className={`w-full flex items-center justify-between px-4 py-2.5 text-sm ${prefs.sort === opt.value ? "font-bold text-primary" : "text-foreground"}`}
+                        className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-colors hover:bg-accent ${prefs.sort === opt.value ? "font-bold text-primary" : "text-foreground"}`}
                       >
                         {opt.label}
                         {prefs.sort === opt.value && <Check className="w-4 h-4" />}
@@ -148,7 +154,10 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
+            <button 
+              onClick={() => setSettingsOpen(true)} 
+              className="w-10 h-10 rounded-full bg-card border flex items-center justify-center hover:bg-accent transition-colors"
+            >
               <SettingsIcon className="w-5 h-5 text-foreground" />
             </button>
           </div>
@@ -157,15 +166,31 @@ export default function App() {
         <SwipeDeck
           cards={cards}
           onLike={handleLike}
-          onBuy={(card) => window.open(card.ebayUrl, "_blank")}
+          onBuy={(card) => {
+            console.log("Swipe Up detected, opening eBay link:", card.ebayUrl);
+            window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
+          }}
           onNeedMore={handleNeedMore}
           isLoadingMore={loadingMore}
           resetKey={deckResetKey}
         />
       </main>
 
-      <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
-      <SettingsDialog open={settingsOpen || showOnboarding} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
+      {/* Sidebar / Watchlist Layer - Higher z-index for mobile */}
+      <div className="z-40 md:z-auto">
+        <Sidebar 
+          liked={liked} 
+          onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} 
+          onClearAll={() => setLiked([])} 
+        />
+      </div>
+
+      <SettingsDialog 
+        open={settingsOpen || showOnboarding} 
+        prefs={prefs} 
+        onClose={() => setSettingsOpen(false)} 
+        onSave={setPrefs} 
+      />
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
