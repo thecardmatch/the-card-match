@@ -2,99 +2,96 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  const query = searchParams.get("query") || "";
-  const categories = searchParams.get("categories") || "";
-  const conditions = searchParams.get("conditions") || "";
-  const sortChoice = searchParams.get("sort") || "endingSoonest";
+  const query = (searchParams.get("query") || "").toLowerCase();
+  const categories = (searchParams.get("categories") || "");
+  const conditions = (searchParams.get("conditions") || "").toLowerCase();
+  const sortChoice = searchParams.get("sort") || "newlyListed"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "10000";
   const offset = searchParams.get("offset") || "0";
   const CAMP_ID = "5339150952"; 
 
   try {
-    const clientId = env.EBAY_CLIENT_ID;
-    const clientSecret = env.EBAY_CLIENT_SECRET;
-    const authHeader = btoa(`${clientId}:${clientSecret}`);
-    const tokenResponse = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
+    const tokenRes = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": `Basic ${authHeader}`,
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Authorization": `Basic ${auth}` },
       body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope",
     });
+    const { access_token } = await tokenRes.json();
 
-    const tokenData = await tokenResponse.json();
-    const token = tokenData.access_token;
-
-    // Build Search Query
-    let searchTerms = query;
-    if (categories && categories !== "—") searchTerms += ` ${categories}`;
-    if (conditions && conditions.toLowerCase().includes("raw")) {
-      searchTerms += " -psa -bgs -sgc -cgc -graded -slab";
-    } else if (conditions && conditions !== "—") {
-      searchTerms += ` ${conditions}`;
+    // 1. ADVANCED QUERY BUILDING
+    let searchTerms = `${query} ${categories === "—" ? "" : categories}`.trim();
+    if (conditions.includes("grade 10")) {
+      // Force 10s but exclude card #10 and "raw" bait
+      searchTerms += " 10 (psa,tag,bgs,sgc,cgc,slab,graded) -raw -#10 -no.10 -reprint -estimate";
+    } else if (conditions.includes("raw")) {
+      searchTerms += " -graded -psa -bgs -sgc -cgc -tag -slab";
     }
     searchTerms += " card";
 
-    // Build Filters
-    let filterParts = ["buyingOptions:{AUCTION|FIXED_PRICE}"]; // Allow both so we can label them
-    if (minPrice || maxPrice) {
-      filterParts.push(`price:[${minPrice}..${maxPrice}],priceCurrency:USD`);
-    }
-    const filterString = filterParts.join(",");
-    const sortParam = sortChoice === "endingSoonest" ? "&sort=endingSoonest" : "";
-
-    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms.trim())}&filter=${encodeURIComponent(filterString)}${sortParam}&limit=20&offset=${offset}`;
+    const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(searchTerms)}&filter=buyingOptions:{AUCTION|FIXED_PRICE},price:[${minPrice}..${maxPrice}],priceCurrency:USD&sort=${sortChoice}&limit=20&offset=${offset}`;
 
     const ebayRes = await fetch(ebayUrl, {
-      headers: { "Authorization": `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+      headers: { "Authorization": `Bearer ${access_token}`, "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
     });
 
     const data = await ebayRes.json();
     const items = (data.itemSummaries || []).map((item) => {
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
       const title = (item.title || "").toLowerCase();
+      const catPath = (item.categoryPath || "").toLowerCase();
+      const catId = String(item.categoryId);
 
-      // 1. SMART SPORT DETECTION
-      let displayCategory = "Card";
-      if (title.includes("pokemon") || item.categoryId === "2610") displayCategory = "Pokemon";
-      else if (title.includes("basketball") || item.categoryId === "212") displayCategory = "Basketball";
-      else if (title.includes("baseball") || item.categoryId === "213") displayCategory = "Baseball";
-      else if (title.includes("football") || item.categoryId === "214") displayCategory = "Football";
-      else if (title.includes("soccer") || item.categoryId === "216") displayCategory = "Soccer";
-      else if (title.includes("hockey") || item.categoryId === "215") displayCategory = "Hockey";
+      // 2. TAG 1: SPORT DETECTION (Ensures it's never "Card" or Blank)
+      let sportTag = "Pokemon"; // Smart default for your app
+      if (catId === "213" || catPath.includes("baseball") || title.includes("mlb") || title.includes("topps")) sportTag = "Baseball";
+      else if (catId === "212" || catPath.includes("basketball") || title.includes("nba") || title.includes("prizm")) sportTag = "Basketball";
+      else if (catId === "214" || catPath.includes("football") || title.includes("nfl") || title.includes("panini")) sportTag = "Football";
+      else if (catPath.includes("soccer") || title.includes("soccer")) sportTag = "Soccer";
+      else if (catPath.includes("hockey") || title.includes("hockey")) sportTag = "Hockey";
+      else if (catPath.includes("pokemon") || title.includes("pokemon")) sportTag = "Pokemon";
 
-      // 2. SMART GRADE DETECTION
-      let gradeLabel = "Raw";
-      if (title.includes("psa 10")) gradeLabel = "PSA 10";
-      else if (title.includes("psa 9")) gradeLabel = "PSA 9";
-      else if (title.includes("bgs")) gradeLabel = "BGS";
-      else if (title.includes("sgc")) gradeLabel = "SGC";
-      else if (title.includes("graded") || title.includes("slab")) gradeLabel = "Graded";
+      // 3. TAG 2: PRECISION GRADE DETECTION
+      let gradeTag = "Raw";
+      const isSlab = title.includes("psa") || title.includes("tag") || title.includes("bgs") || title.includes("sgc") || title.includes("cgc") || title.includes("graded") || title.includes("slab");
+      const isCardNum = title.includes("#10") || title.includes("no.10") || title.includes("no. 10");
 
-      // 3. LISTING TYPE DETECTION
-      const isAuction = item.buyingOptions?.includes("AUCTION");
-      const listingLabel = isAuction ? "Auction" : "Buy It Now";
+      if (isSlab && !isCardNum) {
+        if (title.includes("10") || title.includes("gem") || title.includes("pristine")) {
+          if (title.includes("tag")) gradeTag = "TAG 10";
+          else if (title.includes("psa")) gradeTag = "PSA 10";
+          else if (title.includes("bgs")) gradeTag = "BGS 10";
+          else if (title.includes("sgc")) gradeTag = "SGC 10";
+          else if (title.includes("cgc")) gradeTag = "CGC 10";
+          else gradeTag = "Grade 10";
+        } else if (title.includes("9") || title.includes("mint")) {
+          gradeTag = title.includes("psa") ? "PSA 9" : "Grade 9";
+        } else {
+          gradeTag = "Graded";
+        }
+      }
+
+      // 4. GENERATE VITAL AFFILIATE LINK
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      const affLink = `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`;
 
       return {
         id: itemId,
         name: item.title,
-        // COMBINED TAG: "Pokemon • PSA 10 • Auction"
-        category: `${displayCategory} • ${gradeLabel} • ${listingLabel}`,
+        sport: sportTag,      // Maps to first tag
+        category: sportTag,   // Maps to first tag (redundancy)
+        grade: gradeTag,      // Maps to second tag
+        listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
-        currency: "USD",
         endTime: item.itemEndDate || null,
-        condition: gradeLabel,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&customid=thecardmatch&toolid=10001&mkevt=1`,
+        ebayUrl: affLink,     // Used for the Swipe-Up window.open
       };
     });
 
     return new Response(JSON.stringify({ items, total: data.total || 0 }), {
       headers: { "Content-Type": "application/json" },
     });
-
   } catch (error) {
     return new Response(JSON.stringify({ error: error.message, items: [] }), { status: 200 });
   }
