@@ -52,7 +52,10 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
     const card = cards[index];
     if (!card) return;
     if (direction === "right") onLike(card);
-    if (direction === "up") onBuy(card);
+    if (direction === "up") {
+      console.log("Deck: Swiped UP, calling onBuy for", card.name);
+      onBuy(card);
+    }
     setIndex((i) => i + 1);
   }
 

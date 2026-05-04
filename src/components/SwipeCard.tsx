@@ -32,19 +32,32 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
   const hasMultiple  = allImages.length > 1;
 
   function handleDragEnd(_: unknown, info: PanInfo) {
-    const SWIPE_HORIZ = 100, SWIPE_UP = 75, VEL = 450;
+    const SWIPE_HORIZ = 100, SWIPE_UP = 80, VEL = 450;
     const { offset: { x: ax, y: ay }, velocity: { x: vx, y: vy } } = info;
-    // Up swipe gets a lower threshold — the most deliberate gesture on mobile.
-    if ((-ay > SWIPE_UP && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { onSwipe("up");    return; }
+
+    // Logic: If moving up significantly more than sideways, or high upward velocity
+    if ((ay < -SWIPE_UP && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { 
+      onSwipe("up");    
+      return; 
+    }
     if (ax > SWIPE_HORIZ  || vx > VEL)  { onSwipe("right"); return; }
     if (ax < -SWIPE_HORIZ || vx < -VEL) { onSwipe("left");  return; }
   }
 
   function getExitAnimation() {
     const cx = x.get(), cy = y.get();
-    if (cy < -80 && Math.abs(cy) > Math.abs(cx)) return { y: -1000, opacity: 0, transition: { duration: 0.3 } };
-    if (cx > 80)  return { x:  1000, rotate:  30, opacity: 0, transition: { duration: 0.3 } };
-    if (cx < -80) return { x: -1000, rotate: -30, opacity: 0, transition: { duration: 0.3 } };
+    // Fly off top
+    if (cy < -50 && Math.abs(cy) > Math.abs(cx)) {
+      return { y: -1000, opacity: 0, transition: { duration: 0.3 } };
+    }
+    // Fly off right
+    if (cx > 50) {
+      return { x: 1000, rotate: 30, opacity: 0, transition: { duration: 0.3 } };
+    }
+    // Fly off left
+    if (cx < -50) {
+      return { x: -1000, rotate: -30, opacity: 0, transition: { duration: 0.3 } };
+    }
     return { opacity: 0, transition: { duration: 0.2 } };
   }
 
@@ -77,7 +90,8 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       animate={{ scale: 1 - offset * 0.04, y: offset * 12 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       drag={isTop}
-      dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+      // Increased vertical drag constraints to allow the 'Up' swipe to happen physically
+      dragConstraints={{ left: 0, right: 0, top: -500, bottom: 0 }}
       dragElastic={0.9}
       onDragEnd={handleDragEnd}
       exit={getExitAnimation()}
@@ -111,7 +125,7 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             </div>
           )}
 
-          {/* Left/right hint chevrons (decorative) */}
+          {/* Left/right hint chevrons */}
           {isTop && hasMultiple && (
             <>
               <div className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/20 flex items-center justify-center pointer-events-none opacity-50">
@@ -135,7 +149,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
         {/* ── Info area ──────────────────────────────────────────────── */}
         <div className="p-5 bg-card">
-          {/* Category / Grade / Listing Type badges */}
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">
               {card.category}
@@ -150,10 +163,8 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             )}
           </div>
 
-          {/* Title */}
           <h2 className="text-lg font-bold text-card-foreground leading-tight">{card.name}</h2>
 
-          {/* Price + live countdown in one prominent row */}
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-0.5">
