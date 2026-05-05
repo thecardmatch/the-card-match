@@ -223,7 +223,10 @@ function WatchlistBody({
         )}
       </div>
 
-      <div className="border-t border-sidebar-border">
+      <div className="border-t border-sidebar-border bg-sidebar shrink-0">
+        <p className="text-[9px] text-center px-6 py-3 font-medium text-muted-foreground uppercase tracking-tight leading-tight opacity-70">
+          As an eBay Associate, we may earn a small commission from qualifying purchases made through our links.
+        </p>
         <InstallPrompt />
       </div>
     </>
