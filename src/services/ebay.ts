@@ -25,7 +25,6 @@ export async function searchCards(prefs: UserPreferences, offset: number = 0): P
 
     return items.map((item: any) => {
       const rawUrl = item.viewItemURL[0];
-      // Professional Affiliate link construction
       const affiliateUrl = `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&toolid=10001&mkevt=1`;
 
       return {
@@ -42,7 +41,7 @@ export async function searchCards(prefs: UserPreferences, offset: number = 0): P
       };
     });
   } catch (error) {
-    console.error("eBay API Error:", error);
+    console.error("eBay Fetch Error:", error);
     return [];
   }
 }

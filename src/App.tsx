@@ -25,7 +25,9 @@ export default function App() {
 
   useEffect(() => {
     const raw = window.localStorage.getItem(WATCHLIST_KEY);
-    if (raw) setLiked(JSON.parse(raw));
+    if (raw) {
+      try { setLiked(JSON.parse(raw)); } catch(e) { console.error(e); }
+    }
   }, []);
 
   useEffect(() => {
@@ -34,16 +36,20 @@ export default function App() {
 
   useEffect(() => {
     if (!prefs) return;
+    let active = true;
     setLoading(true);
     ebayOffset.current = 0;
     seenIds.current = new Set();
+
     searchCards(prefs, 0).then((results) => {
+      if (!active) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
       fresh.forEach((c) => seenIds.current.add(c.id));
       setCards(fresh);
       setDeckResetKey(k => k + 1);
       setLoading(false);
     });
+    return () => { active = false; };
   }, [prefs]);
 
   const handleNeedMore = useCallback(async () => {
@@ -86,7 +92,14 @@ export default function App() {
 
         <div className="flex-1 flex flex-col items-center justify-center p-4 bg-gray-50 relative">
           <div className="w-full max-w-[400px] aspect-[2.8/4] relative z-10">
-            <SwipeDeck cards={cards} onLike={(c: any) => setLiked(p => [c, ...p])} onBuy={(c: any) => window.open(c.ebayUrl, "_blank")} onNeedMore={handleNeedMore} isLoadingMore={loadingMore} resetKey={deckResetKey} />
+            <SwipeDeck 
+              cards={cards} 
+              onLike={(c) => setLiked(p => [c, ...p])} 
+              onBuy={(c) => window.open(c.ebayUrl, "_blank")} 
+              onNeedMore={handleNeedMore} 
+              isLoadingMore={loadingMore} 
+              resetKey={deckResetKey} 
+            />
           </div>
           <div className="mt-8 flex items-center gap-10 z-20">
             <button onClick={() => triggerManualSwipe("left")} className="w-16 h-16 rounded-full bg-white border-2 text-red-500 shadow-xl flex items-center justify-center active:scale-90 transition-transform"><X className="w-8 h-8" /></button>

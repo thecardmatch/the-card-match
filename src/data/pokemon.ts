@@ -19,13 +19,7 @@ export interface TradingCard {
 }
 
 export const CATEGORIES = [
-  "Pokemon",
-  "Baseball",
-  "Football",
-  "Basketball",
-  "Hockey",
-  "WWE",
-  "Lorcana"
+  "Pokemon", "Baseball", "Football", "Basketball", "Hockey", "WWE", "Lorcana"
 ];
 
 export const GRADES = [
