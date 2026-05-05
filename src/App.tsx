@@ -41,10 +41,12 @@ export default function App() {
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
 
+  // Persist Watchlist
   useEffect(() => {
     window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked));
   }, [liked]);
 
+  // Card Loading Logic
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -95,43 +97,52 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden font-sans">
-      <main className="flex-1 flex flex-col h-full relative overflow-hidden">
+    <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* HEADER */}
-        <header className="px-4 py-3 border-b flex items-center justify-between bg-background z-30 shrink-0">
+        {/* RESTORED BEAUTIFUL HEADER */}
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-30 shrink-0">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" className="w-9 h-9 rounded-lg" alt="Logo" />
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg shadow-sm" />
             <div className="hidden sm:block">
-              <h1 className="text-md font-black tracking-tight">The Card Match</h1>
-              <p className="text-[10px] text-muted-foreground uppercase">{loading ? "Searching..." : searchQuery}</p>
+              <h1 className="text-lg font-black leading-none tracking-tight">The Card Match</h1>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
+                {loading ? "Searching..." : searchQuery}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border flex items-center justify-center">
-              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : ""}`} />
+            {/* Notification Badge on Heart */}
+            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border border-border flex items-center justify-center">
+              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : "text-muted-foreground"}`} />
               {liked.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-primary text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
                   {liked.length}
                 </span>
               )}
             </button>
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border flex items-center justify-center bg-card">
-              <SettingsIcon className="w-5 h-5" />
+
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border border-border flex items-center justify-center bg-card">
+              <SettingsIcon className="w-5 h-5 text-muted-foreground" />
             </button>
+
             {user ? (
-              <button onClick={() => signOut()} className="h-9 px-4 rounded-full border text-[10px] font-bold uppercase">Sign Out</button>
+              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border border-border text-xs font-bold uppercase tracking-widest">
+                <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
+              </button>
             ) : (
-              <button onClick={() => setAuthOpen(true)} className="h-9 px-4 rounded-full bg-primary text-white text-[10px] font-bold uppercase">Sign In</button>
+              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-widest">
+                <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
+              </button>
             )}
           </div>
         </header>
 
-        {/* SWIPE SECTION */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 overflow-hidden">
-          {/* Deck Container - Keeps proportions for Bubbles/Photos */}
-          <div className="w-full max-w-[380px] h-full max-h-[500px] relative pointer-events-auto">
+        {/* RESTORED CARD AREA - EXACT PROPORTIONS */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative">
+          {/* Deck Wrapper - This size ensures Bubbles and Photo Clicking work */}
+          <div className="w-full max-w-[400px] h-full max-h-[540px] relative z-10">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -142,47 +153,59 @@ export default function App() {
             />
           </div>
 
-          {/* ACTION BUTTONS - Clean 3 Circle Layout */}
+          {/* CLEAN ACTION BUTTONS - THREE CIRCLES ONLY */}
           <div className="mt-8 flex flex-col items-center gap-4 shrink-0">
-            <div className="flex items-center gap-8">
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-95 transition-transform">
+            <div className="flex items-center gap-10">
+              <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-red-500 shadow-sm hover:shadow-md active:scale-90 transition-all">
                 <X className="w-6 h-6" />
               </button>
+
               <button 
                 onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-                className="w-16 h-16 rounded-full bg-yellow-500 text-white flex items-center justify-center shadow-lg active:scale-95 transition-transform"
+                className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg hover:shadow-xl active:scale-90 transition-all"
               >
-                <ChevronUp className="w-8 h-8" />
+                <ChevronUp className="w-9 h-9" />
               </button>
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-95 transition-transform">
+
+              <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-green-500 shadow-sm hover:shadow-md active:scale-90 transition-all">
                 <Heart className="w-6 h-6" />
               </button>
             </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/50">Swipe Up to Buy</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground/40">
+              Swipe Up to Buy
+            </span>
           </div>
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR */}
-      <aside className="hidden md:flex w-80 h-full bg-card border-l flex flex-col overflow-hidden">
-        <div className="p-4 border-b flex justify-between items-center">
-          <span className="font-black uppercase text-xs tracking-widest">Watchlist</span>
-          <span className="bg-primary text-white text-[10px] px-2 py-0.5 rounded-full font-bold">{liked.length}</span>
+      {/* DESKTOP SIDEBAR - CLEAN & SCROLLABLE */}
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border flex flex-col overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h2 className="font-black uppercase tracking-tighter text-sm flex items-center gap-2">
+            Watchlist 
+            <span className="bg-primary text-white text-[10px] px-2 py-0.5 rounded-full">{liked.length}</span>
+          </h2>
         </div>
         <div className="flex-1 overflow-y-auto">
           <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
         </div>
       </aside>
 
-      {/* MOBILE SIDEBAR */}
+      {/* MOBILE WATCHLIST - SLIDE IN FROM RIGHT */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25 }} className="fixed inset-y-0 right-0 w-[85%] bg-card z-[110] md:hidden flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex justify-between items-center">
-                <span className="font-black uppercase text-xs">Watchlist ({liked.length})</span>
-                <button onClick={() => setWatchlistOpen(false)}><X className="w-6 h-6" /></button>
+            <motion.div 
+              initial={{ x: "100%" }} 
+              animate={{ x: 0 }} 
+              exit={{ x: "100%" }} 
+              transition={{ type: "spring", damping: 25, stiffness: 200 }} 
+              className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-4 border-b border-border flex items-center justify-between">
+                <h2 className="font-black uppercase tracking-tighter text-sm">Watchlist ({liked.length})</h2>
+                <button onClick={() => setWatchlistOpen(false)} className="p-2"><X className="w-6 h-6 text-muted-foreground" /></button>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
