@@ -31,7 +31,7 @@ export default function App() {
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
 
-  // Persistent Watchlist
+  // 1. WATCHLIST PERSISTENCE
   useEffect(() => {
     const raw = window.localStorage.getItem(WATCHLIST_KEY);
     if (raw) setLiked(JSON.parse(raw));
@@ -41,22 +41,18 @@ export default function App() {
     window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked));
   }, [liked]);
 
-  // Restored Search Builder Logic
-  const buildQueryString = (p: typeof prefs) => {
-    const parts = [p.category];
-    if (p.grade && p.grade !== "Raw") parts.push(p.grade);
-    // This ensures "Pokemon" + "PSA 10" doesn't get muddled with extra words
-    return parts.join(" ");
-  };
+  // 2. BULLETPROOF SEARCH QUERY (The "Pokemon Graded 10" Fix)
+  // We use the category and grade directly. If grade is "Raw", we ignore it to keep the search broad.
+  const searchQuery = `${prefs.category} ${prefs.grade !== "Raw" ? prefs.grade : ""}`.trim();
 
-  const searchQuery = buildQueryString(prefs);
-
-  // Search Engine Fetcher
+  // 3. THE SEARCH ENGINE
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     ebayOffset.current = 0;
     seenIds.current = new Set();
+
+    console.log("Fetching for query:", searchQuery); // Debugging
 
     searchCards(prefs, 0).then((results) => {
       if (cancelled) return;
@@ -66,9 +62,12 @@ export default function App() {
       setCards(fresh);
       setDeckResetKey((k) => k + 1);
       setLoading(false);
-    }).catch(() => { if (!cancelled) setLoading(false); });
+    }).catch((err) => {
+      console.error("Search failed:", err);
+      if (!cancelled) setLoading(false);
+    });
     return () => { cancelled = true; };
-  }, [prefs]);
+  }, [prefs, searchQuery]);
 
   const handleNeedMore = useCallback(async () => {
     if (loadingMore || loading) return;
@@ -103,42 +102,35 @@ export default function App() {
   };
 
   return (
-    <div className="h-[100svh] w-full bg-background flex flex-col md:flex-row overflow-hidden fixed inset-0 font-sans">
-      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-[#fdfdfd]">
+    <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden fixed inset-0">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-white">
 
-        {/* HEADER: Z-50 + stopPropagation fixes the settings button */}
-        <header className="px-4 py-3 border-b flex items-center justify-between bg-background z-50 shrink-0">
+        {/* HEADER */}
+        <header className="px-4 py-3 border-b flex items-center justify-between bg-white z-50 shrink-0">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-8 h-8 md:w-10 md:h-10 rounded-lg" />
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg" />
             <div className="flex flex-col">
-              <h1 className="text-xs md:text-sm font-black uppercase tracking-tighter leading-none">The Card Match</h1>
-              <p className="text-[9px] md:text-[10px] text-primary font-bold uppercase mt-0.5">{loading ? "Searching..." : searchQuery}</p>
+              <h1 className="text-sm font-black uppercase tracking-tighter leading-none">The Card Match</h1>
+              <p className="text-[10px] text-primary font-bold uppercase mt-1">{loading ? "Searching..." : searchQuery}</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="w-9 h-9 rounded-full border flex items-center justify-center bg-card active:bg-muted transition-colors">
-              <ArrowUpDown className="w-4 h-4 text-muted-foreground" />
+            <button className="w-10 h-10 rounded-full border flex items-center justify-center bg-white"><ArrowUpDown className="w-4 h-4 text-muted-foreground" /></button>
+            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border flex items-center justify-center bg-white">
+              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : ""}`} />
             </button>
-
-            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-9 h-9 rounded-full border flex items-center justify-center bg-card">
-              <Heart className={`w-4 h-4 ${liked.length > 0 ? "fill-primary text-primary" : ""}`} />
-            </button>
-
-            <button 
-              onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }} 
-              className="w-9 h-9 rounded-full border flex items-center justify-center bg-card hover:bg-muted cursor-pointer relative z-[60]"
-            >
-              <SettingsIcon className="w-4 h-4 text-muted-foreground" />
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border flex items-center justify-center bg-white z-[60]">
+              <SettingsIcon className="w-5 h-5 text-muted-foreground" />
             </button>
           </div>
         </header>
 
-        {/* SWIPE AREA: 100svh based flex layout means NO scrolling */}
-        <div className="flex-1 flex flex-col items-center justify-center p-3 md:p-6 relative min-h-0">
+        {/* SWIPE DECK AREA */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4 relative min-h-0">
 
-          {/* CARD CONTAINER: Fixed Aspect Ratio for Desktop */}
-          <div className="w-full max-w-[350px] md:max-w-[420px] aspect-[2.8/4] relative z-10 pointer-events-auto">
+          {/* CARD BOX: Tall aspect ratio for both mobile and desktop */}
+          <div className="w-full max-w-[360px] md:max-w-[420px] aspect-[2.6/4] relative z-10">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -149,51 +141,31 @@ export default function App() {
             />
           </div>
 
-          {/* ACTION BUTTONS: Tightened for Mobile fit */}
-          <div className="mt-4 md:mt-8 flex flex-col items-center gap-3 shrink-0 z-20">
+          {/* ACTION BUTTONS */}
+          <div className="mt-6 flex flex-col items-center gap-3 shrink-0 z-20">
             <div className="flex items-center gap-10 md:gap-14">
-              <button onClick={() => triggerManualSwipe("left")} className="w-13 h-13 md:w-16 md:h-16 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-90">
-                <X className="w-6 h-6 md:w-8 md:h-8" />
+              <button onClick={() => triggerManualSwipe("left")} className="w-14 h-14 md:w-16 md:h-16 rounded-full border bg-white flex items-center justify-center text-red-500 shadow-md active:scale-90">
+                <X className="w-8 h-8" />
               </button>
-              <button onClick={() => triggerManualSwipe("up")} className="w-15 h-15 md:w-20 md:h-20 rounded-full bg-yellow-500 text-white flex items-center justify-center shadow-lg active:scale-90">
-                <ChevronUp className="w-9 h-9 md:w-12 md:h-12" />
+              <button onClick={() => triggerManualSwipe("up")} className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-yellow-500 text-white flex items-center justify-center shadow-lg active:scale-90">
+                <ChevronUp className="w-10 h-10 md:w-12 md:h-12" />
               </button>
-              <button onClick={() => triggerManualSwipe("right")} className="w-13 h-13 md:w-16 md:h-16 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-90">
-                <Heart className="w-6 h-6 md:w-8 md:h-8 fill-current" />
+              <button onClick={() => triggerManualSwipe("right")} className="w-14 h-14 md:w-16 md:h-16 rounded-full border bg-white flex items-center justify-center text-green-500 shadow-md active:scale-90">
+                <Heart className="w-8 h-8 fill-current" />
               </button>
             </div>
-            <span className="text-[9px] font-black uppercase tracking-[0.4em] text-muted-foreground/30">Swipe Up to Buy</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground/30">Swipe Up to Buy</span>
           </div>
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR */}
-      <aside className="hidden md:flex w-80 h-full bg-card border-l flex flex-col overflow-hidden">
-        <div className="p-5 border-b font-black text-xs uppercase tracking-widest bg-background/50 backdrop-blur">
-          Watchlist ({liked.length})
-        </div>
+      {/* SIDEBAR */}
+      <aside className="hidden md:flex w-80 h-full bg-white border-l flex flex-col overflow-hidden">
+        <div className="p-5 border-b font-black text-xs uppercase tracking-widest">Watchlist ({liked.length})</div>
         <div className="flex-1 overflow-y-auto">
           <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
         </div>
       </aside>
-
-      {/* MOBILE DRAWER */}
-      <AnimatePresence>
-        {watchlistOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100]" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} className="fixed inset-y-0 right-0 w-[85%] bg-card z-[110] flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex justify-between items-center font-black text-xs uppercase tracking-widest">
-                Watchlist ({liked.length})
-                <button onClick={() => setWatchlistOpen(false)}><X /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
