@@ -85,8 +85,8 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-row relative">
-      <main className="flex-1 flex flex-col min-w-0 h-auto relative z-10">
+    <div className="min-h-screen w-full bg-background flex flex-row relative overflow-y-auto">
+      <main className="flex-1 flex flex-col min-w-0 min-h-screen relative z-10 overflow-visible">
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
@@ -148,7 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 relative flex flex-col p-4 md:p-8 min-h-[900px]">
+        <div className="flex-1 relative flex flex-col p-4 md:p-8 min-h-[1000px] overflow-visible">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
@@ -171,31 +171,23 @@ export default function App() {
         {watchlistOpen && (
           <>
             <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }} 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
               onClick={() => setWatchlistOpen(false)} 
               className="fixed inset-0 bg-black/60 z-[100] md:hidden" 
             />
             <motion.div 
-              initial={{ x: "100%" }} 
-              animate={{ x: 0 }} 
-              exit={{ x: "100%" }} 
+              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} 
               transition={{ type: "spring", damping: 25, stiffness: 200 }} 
               className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
             >
               <div className="p-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
                 <h2 className="font-bold text-foreground">Watchlist ({liked.length})</h2>
-                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent transition-colors">
+                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent">
                   <X className="w-6 h-6" />
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y">
-                <Sidebar 
-                  liked={liked} 
-                  onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} 
-                  onClearAll={() => setLiked([])} 
-                />
+                <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
               </div>
             </motion.div>
           </>
