@@ -107,42 +107,55 @@ export default function App() {
   return (
     <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-background">
+
         {/* Header */}
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-30">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg" />
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg flex-shrink-0" />
             <div className="hidden sm:block">
-              <h1 className="text-lg font-black leading-none">The Card Match</h1>
-              <p className="text-xs text-muted-foreground">{loading ? "Searching..." : searchQuery}</p>
+              <h1 className="text-lg font-black leading-none tracking-tight">The Card Match</h1>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
+                {loading ? "Searching..." : searchQuery}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border flex items-center justify-center">
-              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : ""}`} />
+              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-primary text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                  {liked.length}
+                </span>
+              )}
             </button>
+
             <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center">
               <ArrowUpDown className="w-4 h-4" />
             </button>
+
             {user ? (
-              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border text-sm font-medium">
+              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border text-xs font-bold uppercase tracking-wider">
                 <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
               </button>
             ) : (
-              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-primary-foreground text-sm font-medium">
+              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-wider">
                 <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
               </button>
             )}
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border flex items-center justify-center">
+
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border flex items-center justify-center bg-card">
               <SettingsIcon className="w-5 h-5" />
             </button>
           </div>
         </header>
 
-        {/* Card and Buttons Section */}
-        <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden p-4 md:p-8">
-          {/* Card Container */}
-          <div className="w-full max-w-[400px] flex-1 relative min-h-0">
+        {/* Card & Gallery Section */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative">
+          {/* This wrapper is now exactly sized to allow the SwipeDeck 
+              to handle its own internal click logic (the bubbles and photos) 
+          */}
+          <div className="w-full max-w-[380px] h-full max-h-[500px] relative pointer-events-auto">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -153,58 +166,32 @@ export default function App() {
             />
           </div>
 
-          {/* Action Row - EXACTLY 3 BUTTONS */}
-          <div className="flex flex-col items-center gap-4 mt-6 mb-2">
+          {/* Clean 3-Button Row */}
+          <div className="mt-8 flex flex-col items-center gap-4 z-20">
             <div className="flex items-center gap-8">
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-90 transition-transform">
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-red-500 shadow-sm transition-transform active:scale-90">
                 <X className="w-6 h-6" />
               </button>
 
-              <div className="flex flex-col items-center">
-                <button 
-                  onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-                  className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg active:scale-90 transition-transform"
-                >
-                  <ArrowUp className="w-8 h-8" />
-                </button>
-              </div>
+              <button 
+                onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
+                className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg transition-transform active:scale-90"
+              >
+                <ArrowUp className="w-8 h-8" />
+              </button>
 
-              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-90 transition-transform">
+              <button className="w-14 h-14 rounded-full border bg-card flex items-center justify-center text-green-500 shadow-sm transition-transform active:scale-90">
                 <Heart className="w-6 h-6" />
               </button>
             </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/50">
               Swipe Up to Buy
             </span>
           </div>
         </div>
       </main>
 
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l overflow-y-auto">
-        <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
-      </aside>
-
-      {/* Mobile Drawer */}
-      <AnimatePresence>
-        {watchlistOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25 }} className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-card z-10">
-                <h2 className="font-bold">Watchlist</h2>
-                <button onClick={() => setWatchlistOpen(false)}><X className="w-6 h-6" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                <Sidebar liked={liked} onRemove={handleRemoveFromWatchlist} onClearAll={handleClearWatchlist} onBuy={handleBuyAction} />
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
-      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
-    </div>
-  );
-}
+      {/* Desktop Watchlist */}
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l flex flex-col overflow-hidden">
+        <div className="p-4 border-b flex items-center justify-between">
+          <h
