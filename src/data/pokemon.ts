@@ -45,52 +45,7 @@ export const DEFAULT_PREFS: Preferences = {
   listingType: "Auction",
 };
 
-/**
- * SURGICAL UPDATE: Returns a technical query for the API 
- * and a clean displayLabel for the UI header.
- */
-export function buildSearchQuery(prefs: Preferences): { query: string; displayLabel: string } {
-  const technicalParts: string[] = [];
-  const displayParts: string[] = [];
-
-  // 1. Categories
-  if (prefs.categories.length > 0) {
-    technicalParts.push(`(${prefs.categories.join(",")})`);
-    displayParts.push(prefs.categories.join(", "));
-  } else {
-    displayParts.push("All Categories");
-  }
-
-  // 2. User Text Search
-  if (prefs.query.trim()) {
-    technicalParts.push(prefs.query.trim());
-    displayParts.push(prefs.query.trim());
-  }
-
-  // 3. Condition & Grading Logic
-  if (prefs.conditions.length > 0) {
-    const gradeParts: string[] = [];
-
-    prefs.conditions.forEach(c => {
-      if (c === "Raw") {
-        gradeParts.push("-graded -psa -bgs -cgc -sgc -tag");
-      } else {
-        const num = c.replace("Grade ", "");
-        gradeParts.push(`(PSA,CGC,BGS,SGC,TAG) ${num}`);
-      }
-    });
-
-    if (gradeParts.length > 0) {
-      technicalParts.push(`(${gradeParts.join(",")})`);
-      displayParts.push(prefs.conditions.join(" & "));
-    }
-  }
-
-  // 4. Junk Filters (Technical only - helps exclude trash)
-  technicalParts.push("-proxy -digital -reprint -reproduction");
-
-  return {
-    query: technicalParts.join(" ").trim(),
-    displayLabel: displayParts.filter(Boolean).join(" — ")
-  };
+export function buildSearchQuery(prefs: Preferences): string {
+  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
+  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }
