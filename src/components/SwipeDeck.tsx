@@ -86,8 +86,9 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
   const isDone  = index >= cards.length;
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 w-full">
-      <div className="relative w-full max-w-sm aspect-[3/4]">
+    /* SURGICAL FIX: Removed flex-1 and justify-center. Added pt-4 to keep it off the header. */
+    <div className="flex flex-col items-center p-4 md:p-8 w-full min-h-max overflow-visible pt-6 md:pt-10">
+      <div className="relative w-full max-w-sm aspect-[3/4] flex-shrink-0">
         {isDone ? (
           isLoadingMore ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center rounded-3xl bg-card border border-card-border p-8">
@@ -141,7 +142,7 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col items-center gap-3 mt-8"
+          className="flex flex-col items-center gap-3 mt-8 pb-10"
         >
           <div className="flex items-center justify-center gap-5">
             <button
