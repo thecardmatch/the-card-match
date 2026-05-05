@@ -85,8 +85,9 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-row relative overflow-y-auto">
-      <main className="flex-1 flex flex-col min-w-0 min-h-screen relative z-10 overflow-visible">
+    <div className="min-h-screen w-full bg-background flex flex-row relative">
+      {/* Changed main to display: block on web to ensure natural document flow/scrolling */}
+      <main className="flex-1 block min-w-0 min-h-screen relative z-10">
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
@@ -148,7 +149,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 relative flex flex-col p-4 md:p-8 min-h-[1000px] overflow-visible">
+        {/* Removed flex-col/flex-1 and added overflow-visible to prevent clipping */}
+        <div className="relative p-4 md:p-8 overflow-visible min-h-max">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
@@ -159,11 +161,12 @@ export default function App() {
             isLoadingMore={loadingMore}
             resetKey={deckResetKey}
           />
-          <div className="h-40 w-full flex-shrink-0" />
+          {/* Extra bottom padding to ensure the UI has space to scroll */}
+          <div className="pb-40" />
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[320px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto overflow-x-hidden">
+      <aside className="hidden md:flex w-[320px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
