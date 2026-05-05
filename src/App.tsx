@@ -37,7 +37,6 @@ export default function App() {
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
 
-  // Persist Watchlist
   useEffect(() => {
     const raw = window.localStorage.getItem(WATCHLIST_KEY);
     if (raw) setLiked(JSON.parse(raw));
@@ -47,7 +46,6 @@ export default function App() {
     window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked));
   }, [liked]);
 
-  // Card Loading
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -87,8 +85,7 @@ export default function App() {
 
   const handleBuyAction = useCallback((card: TradingCard) => {
     if (!card?.ebayUrl) return;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
+    if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
       window.location.href = card.ebayUrl;
     } else {
       window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
@@ -99,12 +96,12 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
-      <main className="flex-1 flex flex-col min-w-0 h-full relative">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* HEADER - Clean and Balanced */}
+        {/* HEADER: All controls restored */}
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-30 shrink-0">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg shadow-sm" />
+            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg" />
             <div className="hidden sm:block">
               <h1 className="text-lg font-black leading-none tracking-tight">The Card Match</h1>
               <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
@@ -115,7 +112,7 @@ export default function App() {
 
           <div className="flex items-center gap-2">
             <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border border-border flex items-center justify-center">
-              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : ""}`} />
               {liked.length > 0 && (
                 <span className="absolute -top-1 -right-1 bg-primary text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
                   {liked.length}
@@ -123,30 +120,29 @@ export default function App() {
               )}
             </button>
 
+            <button className="w-10 h-10 rounded-full border border-border flex items-center justify-center">
+              <ArrowUpDown className="w-4 h-4" />
+            </button>
+
             {user ? (
               <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border border-border text-xs font-bold uppercase tracking-widest">
-                <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
+                <LogOut className="w-4 h-4" /> <span className="hidden md:inline">Sign Out</span>
               </button>
             ) : (
               <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-widest">
-                <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
+                <LogIn className="w-4 h-4" /> <span className="hidden md:inline">Sign In</span>
               </button>
             )}
 
             <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border border-border flex items-center justify-center bg-card">
-              <SettingsIcon className="w-5 h-5 text-muted-foreground" />
+              <SettingsIcon className="w-5 h-5" />
             </button>
           </div>
         </header>
 
-        {/* SWIPE DECK AREA - Restored Click Logic */}
+        {/* SWIPE AREA: LARGE CARD size restored */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative">
-          {/* This div wrapper is the secret. 
-              By making it 'pointer-events-auto' and specifically sized, 
-              the SwipeDeck can receive clicks on the left/right 
-              to trigger photo changes and show those bubbles.
-          */}
-          <div className="w-full max-w-[400px] h-full max-h-[520px] relative z-10 pointer-events-auto">
+          <div className="w-full max-w-[420px] h-full max-h-[560px] relative z-10">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -157,20 +153,18 @@ export default function App() {
             />
           </div>
 
-          {/* ACTION BUTTONS - 3 Clean Circles */}
-          <div className="mt-8 flex flex-col items-center gap-4 shrink-0">
+          {/* SHARED BUTTONS: Exactly 3 circles on ALL platforms */}
+          <div className="mt-6 flex flex-col items-center gap-4 shrink-0">
             <div className="flex items-center gap-10">
               <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-red-500 shadow-sm active:scale-90 transition-all">
                 <X className="w-6 h-6" />
               </button>
-
               <button 
                 onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
                 className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg active:scale-90 transition-all"
               >
                 <ChevronUp className="w-9 h-9" />
               </button>
-
               <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-green-500 shadow-sm active:scale-90 transition-all">
                 <Heart className="w-6 h-6" />
               </button>
@@ -182,7 +176,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR */}
+      {/* DESKTOP SIDEBAR: Clean, with Badge count */}
       <aside className="hidden md:flex w-80 h-full bg-card border-l border-border flex flex-col overflow-hidden">
         <div className="p-4 border-b border-border flex items-center justify-between">
           <h2 className="font-black uppercase tracking-tighter text-sm flex items-center gap-2">
@@ -195,15 +189,15 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MOBILE WATCHLIST DRAWER */}
+      {/* MOBILE DRAWER: Slides in from right */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl">
-              <div className="p-4 border-b border-border flex items-center justify-between sticky top-0 bg-card z-10">
+            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25 }} className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl">
+              <div className="p-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-black uppercase tracking-tighter text-sm">Watchlist ({liked.length})</h2>
-                <button onClick={() => setWatchlistOpen(false)} className="p-2"><X className="w-6 h-6 text-muted-foreground" /></button>
+                <button onClick={() => setWatchlistOpen(false)} className="p-2"><X className="w-6 h-6" /></button>
               </div>
               <div className="flex-1 overflow-y-auto">
                 <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
