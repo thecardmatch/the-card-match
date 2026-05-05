@@ -85,15 +85,15 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    /* Added overflow-y-auto to the very top container */
-    <div className="min-h-screen w-full bg-background flex flex-row relative overflow-y-auto">
-      <main className="flex-1 flex flex-col min-w-0 h-auto relative z-10 overflow-visible">
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
+    <div className="h-screen w-full bg-background flex flex-row relative overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden">
+        {/* Tightened header padding for web */}
+        <header className="px-4 md:px-6 py-2 md:py-3 border-b border-border flex items-center justify-between gap-3 bg-background shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 md:w-10 md:h-10 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-lg font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
-              <p className="text-xs text-muted-foreground truncate">
+              <h1 className="text-base md:text-lg font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
+              <p className="text-[10px] md:text-xs text-muted-foreground truncate">
                 {loading ? "Searching..." : `Showing "${searchQuery}"`}
               </p>
             </div>
@@ -102,32 +102,20 @@ export default function App() {
           <div className="flex items-center gap-2 flex-shrink-0">
             <button 
               onClick={() => user ? signOut() : setAuthOpen(true)}
-              className="hidden md:flex px-4 py-2 rounded-full border bg-card hover:bg-accent transition-colors text-xs font-bold items-center gap-2"
+              className="hidden md:flex px-3 py-1.5 rounded-full border bg-card hover:bg-accent transition-colors text-[11px] font-bold items-center gap-2"
             >
               {user ? <><LogOut className="w-3 h-3" /> Sign Out</> : "Sign In"}
             </button>
 
             <button 
-              onClick={() => user ? signOut() : setAuthOpen(true)}
-              className="md:hidden w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
-            >
-              {user ? <LogOut className="w-5 h-5 text-primary" /> : <UserIcon className="w-5 h-5" />}
-            </button>
-
-            <button 
               onClick={() => setWatchlistOpen(true)}
-              className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
+              className="md:hidden relative w-9 h-9 rounded-full bg-card border flex items-center justify-center shadow-sm"
             >
-              <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
-              {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-background">
-                  {liked.length}
-                </span>
-              )}
+              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
             </button>
 
             <div ref={sortBtnRef} className="relative">
-              <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center">
+              <button onClick={() => setSortOpen(!sortOpen)} className="w-9 h-9 rounded-full border flex items-center justify-center">
                 <ArrowUpDown className="w-4 h-4" />
               </button>
               <AnimatePresence>
@@ -143,15 +131,15 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
-              <SettingsIcon className="w-5 h-5" />
+            <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full bg-card border flex items-center justify-center">
+              <SettingsIcon className="w-4 h-4" />
             </button>
           </div>
         </header>
 
-        {/* Removed h-full and flex-1 constraints here to let the content expand */}
-        <div className="relative p-4 md:p-8 min-h-screen overflow-visible flex flex-col items-center">
-          <div className="w-full max-w-sm overflow-visible">
+        {/* Removed p-8 on web to pull everything higher; used justify-start instead of justify-center */}
+        <div className="flex-1 relative flex flex-col items-center justify-start p-2 md:p-4 overflow-hidden mt-[-20px] md:mt-[-40px]">
+          <div className="w-full max-w-sm">
             <SwipeDeck
               cards={cards}
               onLike={handleLike}
@@ -163,12 +151,10 @@ export default function App() {
               resetKey={deckResetKey}
             />
           </div>
-          {/* Large bottom spacer to guarantee scroll room */}
-          <div className="h-64 w-full flex-shrink-0" />
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[320px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto">
+      <aside className="hidden md:flex w-[300px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto overflow-x-hidden">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
