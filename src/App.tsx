@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { 
-  Settings as SettingsIcon, 
-  Heart, 
-  ArrowUpDown, 
-  X, 
-  LogIn, 
-  LogOut, 
-  ChevronUp 
-} from "lucide-react";
+import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
@@ -16,37 +8,38 @@ import { AuthDialog } from "@/components/AuthDialog";
 import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard } from "@/data/pokemon";
-import { buildSearchQuery } from "@/data/pokemon";
+import { SORT_OPTIONS, buildSearchQuery } from "@/data/pokemon";
 import { searchCards } from "@/services/ebay";
 import { addToWatchlist } from "@/services/watchlist";
 
 const WATCHLIST_KEY = "cardmatch:watchlist";
 
-export default function App() {
-  const { user, signOut } = useAuth();
-  const { prefs, setPrefs, hasOnboarded } = usePreferences();
-  const [liked, setLiked] = useState<TradingCard[]>(() => {
-    if (typeof window === "undefined") return [];
+function loadLocalWatchlist(): TradingCard[] {
+  if (typeof window === "undefined") return [];
+  try {
     const raw = window.localStorage.getItem(WATCHLIST_KEY);
-    return raw ? JSON.parse(raw) : [];
-  });
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as TradingCard[]) : [];
+  } catch { return []; }
+}
+
+export default function App() {
+  const { user } = useAuth();
+  const { prefs, setPrefs, hasOnboarded } = usePreferences();
+  const [liked, setLiked] = useState<TradingCard[]>(() => loadLocalWatchlist());
   const [cards, setCards] = useState<TradingCard[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [deckResetKey, setDeckResetKey] = useState(0);
+  const [sortOpen, setSortOpen] = useState(false);
+  const sortBtnRef = useRef<HTMLDivElement>(null);
 
   const ebayOffset = useRef(0);
   const seenIds = useRef(new Set<string>());
+  const [deckResetKey, setDeckResetKey] = useState(0);
 
-  // Persist Watchlist
-  useEffect(() => {
-    window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(liked));
-  }, [liked]);
-
-  // Card Loading Logic
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -79,123 +72,98 @@ export default function App() {
     } catch (err) { console.warn(err); } finally { setLoadingMore(false); }
   }, [loadingMore, loading, prefs]);
 
-  const handleLike = async (card: TradingCard) => {
-    setLiked((prev) => prev.some(c => c.id === card.id) ? prev : [card, ...prev]);
+  async function handleLike(card: TradingCard) {
+    setLiked((prev) => {
+      const newList = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
+      window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(newList));
+      return newList;
+    });
     if (user) await addToWatchlist(user.id, card);
-  };
-
-  const handleBuyAction = useCallback((card: TradingCard) => {
-    if (!card?.ebayUrl) return;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      window.location.href = card.ebayUrl;
-    } else {
-      window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
-    }
-  }, []);
+  }
 
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="h-screen w-full bg-background flex flex-col md:flex-row overflow-hidden">
-      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
-
-        {/* RESTORED BEAUTIFUL HEADER */}
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between bg-background z-30 shrink-0">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg shadow-sm" />
-            <div className="hidden sm:block">
-              <h1 className="text-lg font-black leading-none tracking-tight">The Card Match</h1>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">
-                {loading ? "Searching..." : searchQuery}
+    <div className="h-screen w-full bg-background flex flex-row overflow-hidden relative">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background z-20">
+          <div className="flex items-center gap-3 min-w-0">
+            <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
+            <div className="min-w-0">
+              <h1 className="text-lg font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
+              <p className="text-xs text-muted-foreground truncate">
+                {loading ? "Searching..." : `Showing "${searchQuery}"`}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Notification Badge on Heart */}
-            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full border border-border flex items-center justify-center">
-              <Heart className={`w-5 h-5 ${liked.length > 0 ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* MOBILE HEART WITH COUNTER */}
+            <button 
+              onClick={() => setWatchlistOpen(true)}
+              className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
+            >
+              <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
               {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-background">
                   {liked.length}
                 </span>
               )}
             </button>
 
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full border border-border flex items-center justify-center bg-card">
-              <SettingsIcon className="w-5 h-5 text-muted-foreground" />
+            <div ref={sortBtnRef} className="relative">
+              <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center">
+                <ArrowUpDown className="w-4 h-4" />
+              </button>
+              <AnimatePresence>
+                {sortOpen && (
+                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-50 overflow-hidden">
+                    {SORT_OPTIONS.map((opt) => (
+                      <button key={opt.value} onClick={() => { setPrefs({ ...prefs, sort: opt.value }); setSortOpen(false); }} className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-accent transition-colors">
+                        {opt.label}
+                        {prefs.sort === opt.value && <Check className="w-4 h-4 text-primary" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
+              <SettingsIcon className="w-5 h-5" />
             </button>
-
-            {user ? (
-              <button onClick={() => signOut()} className="flex items-center gap-2 h-10 px-4 rounded-full border border-border text-xs font-bold uppercase tracking-widest">
-                <LogOut className="w-4 h-4" /><span className="hidden md:inline">Sign Out</span>
-              </button>
-            ) : (
-              <button onClick={() => setAuthOpen(true)} className="flex items-center gap-2 h-10 px-4 rounded-full bg-primary text-white text-xs font-bold uppercase tracking-widest">
-                <LogIn className="w-4 h-4" /><span className="hidden md:inline">Sign In</span>
-              </button>
-            )}
           </div>
         </header>
 
-        {/* RESTORED CARD AREA - EXACT PROPORTIONS */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 relative">
-          {/* Deck Wrapper - This size ensures Bubbles and Photo Clicking work */}
-          <div className="w-full max-w-[400px] h-full max-h-[540px] relative z-10">
-            <SwipeDeck
-              cards={cards}
-              onLike={handleLike}
-              onBuy={handleBuyAction}
-              onNeedMore={handleNeedMore}
-              isLoadingMore={loadingMore}
-              resetKey={deckResetKey}
-            />
-          </div>
-
-          {/* CLEAN ACTION BUTTONS - THREE CIRCLES ONLY */}
-          <div className="mt-8 flex flex-col items-center gap-4 shrink-0">
-            <div className="flex items-center gap-10">
-              <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-red-500 shadow-sm hover:shadow-md active:scale-90 transition-all">
-                <X className="w-6 h-6" />
-              </button>
-
-              <button 
-                onClick={() => { if(cards[0]) handleBuyAction(cards[0]); }}
-                className="w-16 h-16 rounded-full bg-[#EAB308] text-white flex items-center justify-center shadow-lg hover:shadow-xl active:scale-90 transition-all"
-              >
-                <ChevronUp className="w-9 h-9" />
-              </button>
-
-              <button className="w-14 h-14 rounded-full border border-border bg-card flex items-center justify-center text-green-500 shadow-sm hover:shadow-md active:scale-90 transition-all">
-                <Heart className="w-6 h-6" />
-              </button>
-            </div>
-            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-muted-foreground/40">
-              Swipe Up to Buy
-            </span>
-          </div>
+        <div className="flex-1 relative overflow-hidden">
+          <SwipeDeck
+            cards={cards}
+            onLike={handleLike}
+            onBuy={(card) => {
+              if (card.ebayUrl) window.location.href = card.ebayUrl;
+            }}
+            onNeedMore={handleNeedMore}
+            isLoadingMore={loadingMore}
+            resetKey={deckResetKey}
+          />
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR - CLEAN & SCROLLABLE */}
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border flex flex-col overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <h2 className="font-black uppercase tracking-tighter text-sm flex items-center gap-2">
-            Watchlist 
-            <span className="bg-primary text-white text-[10px] px-2 py-0.5 rounded-full">{liked.length}</span>
-          </h2>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
-        </div>
+      {/* DESKTOP SIDEBAR (Scrollable) */}
+      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden touch-pan-y">
+        <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
-      {/* MOBILE WATCHLIST - SLIDE IN FROM RIGHT */}
+      {/* MOBILE WATCHLIST DRAWER (Scrollable) */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              onClick={() => setWatchlistOpen(false)} 
+              className="fixed inset-0 bg-black/60 z-[100] md:hidden" 
+            />
             <motion.div 
               initial={{ x: "100%" }} 
               animate={{ x: 0 }} 
@@ -203,12 +171,18 @@ export default function App() {
               transition={{ type: "spring", damping: 25, stiffness: 200 }} 
               className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
             >
-              <div className="p-4 border-b border-border flex items-center justify-between">
-                <h2 className="font-black uppercase tracking-tighter text-sm">Watchlist ({liked.length})</h2>
-                <button onClick={() => setWatchlistOpen(false)} className="p-2"><X className="w-6 h-6 text-muted-foreground" /></button>
+              <div className="p-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
+                <h2 className="font-bold text-foreground">Watchlist ({liked.length})</h2>
+                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent transition-colors">
+                  <X className="w-6 h-6" />
+                </button>
               </div>
-              <div className="flex-1 overflow-y-auto">
-                <Sidebar liked={liked} onRemove={(id) => setLiked(prev => prev.filter(c => c.id !== id))} onClearAll={() => setLiked([])} onBuy={handleBuyAction} />
+              <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y">
+                <Sidebar 
+                  liked={liked} 
+                  onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} 
+                  onClearAll={() => setLiked([])} 
+                />
               </div>
             </motion.div>
           </>
@@ -216,7 +190,7 @@ export default function App() {
       </AnimatePresence>
 
       <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
-      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
+      <AuthDialog open={false} onClose={() => {}} /> 
     </div>
   );
 }
