@@ -35,8 +35,7 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
 
   return (
     <div className="flex flex-col w-full h-full min-h-0 items-center justify-between">
-      {/* The Deck - Shrinkable area */}
-      <div className="relative w-full flex-1 min-h-0 mb-6">
+      <div className="relative w-full flex-1 min-h-0 mb-4">
         {isDone ? (
           <div className="absolute inset-0 flex items-center justify-center text-center p-8 bg-muted/20 rounded-3xl border-2 border-dashed border-muted">
             <p className="text-muted-foreground font-medium">No more cards found.</p>
@@ -60,9 +59,8 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
         )}
       </div>
 
-      {/* Action Buttons - Fixed size at bottom */}
       {!isDone && (
-        <div className="flex flex-col items-center gap-3 py-2 shrink-0">
+        <div className="flex flex-col items-center gap-3 pb-8 shrink-0">
           <div className="flex items-center justify-center gap-8">
             <button onClick={() => handleSwipe("left")} className="w-14 h-14 rounded-full bg-card border shadow-xl flex items-center justify-center active:scale-90 transition-transform">
               <X className="w-8 h-8 text-red-500" />

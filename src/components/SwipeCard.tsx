@@ -47,7 +47,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       onDragEnd={handleDragEnd}
     >
       <div className="h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
-        {/* IMAGE AREA - flex-1 shrinks to fit the screen height */}
         <div 
           className="relative flex-1 bg-muted/30 flex items-center justify-center p-4 min-h-0 cursor-pointer"
           onClick={handleImageClick}
@@ -59,7 +58,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             draggable={false}
           />
 
-          {/* Dots for multi-image */}
           {allImages.length > 1 && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
               {allImages.map((_, i) => (
@@ -68,23 +66,24 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             </div>
           )}
 
-          {/* Overlays */}
           {isTop && (
             <div className="pointer-events-none">
-              <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60">SAVE</motion.div>
-              <motion.div style={{ opacity: passOpacity }} className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[12deg] bg-black/60">PASS</motion.div>
-              <motion.div style={{ opacity: buyOpacity }} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 border-yellow-400 text-yellow-400 text-3xl font-black rounded-xl bg-black/80">BUY NOW</motion.div>
+              <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60 backdrop-blur-sm">SAVE</motion.div>
+              <motion.div style={{ opacity: passOpacity }} className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[12deg] bg-black/60 backdrop-blur-sm">PASS</motion.div>
+              <motion.div style={{ opacity: buyOpacity }} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 border-yellow-400 text-yellow-400 text-3xl font-black rounded-xl bg-black/80 backdrop-blur-md">BUY NOW</motion.div>
             </div>
           )}
         </div>
 
-        {/* INFO FOOTER - Fixed size */}
         <div className="p-4 bg-card border-t border-border shrink-0">
-          <div className="flex gap-2 mb-1.5">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">Pokémon TCG</span>
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-primary/10 text-primary uppercase">{card.grade}</span>
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">{card.listingType}</span>
           </div>
+
           <h2 className="text-base font-black text-card-foreground leading-tight line-clamp-1 mb-2">{card.name}</h2>
+
           <div className="flex justify-between items-end">
             <div>
               <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">Current Bid</p>

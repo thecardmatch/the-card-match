@@ -84,14 +84,13 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="h-screen w-full bg-background flex flex-row overflow-hidden fixed inset-0">
+    <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
-        {/* Header - Fixed height */}
         <header className="h-16 px-4 md:px-6 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-lg shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-base font-black text-foreground leading-tight tracking-tight">THE CARD MATCH</h1>
+              <h1 className="text-base font-black text-foreground leading-tight tracking-tight uppercase">THE CARD MATCH</h1>
               <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest truncate">
                 {loading ? "Searching..." : `Results for "${searchQuery}"`}
               </p>
@@ -99,21 +98,14 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {/* Auth Button */}
-            <button onClick={() => user ? signOut() : setAuthOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm">
+            <button onClick={() => user ? signOut() : setAuthOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm hover:bg-accent transition-colors">
               {user ? <LogOut className="w-5 h-5 text-primary" /> : <UserIcon className="w-5 h-5" />}
             </button>
-
-            {/* Mobile Watchlist Toggle */}
             <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center">
               <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
             </button>
-
-            {/* Sort Dropdown */}
             <div ref={sortBtnRef} className="relative">
-              <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center">
-                <ArrowUpDown className="w-4 h-4" />
-              </button>
+              <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center hover:bg-accent"><ArrowUpDown className="w-4 h-4" /></button>
               <AnimatePresence>
                 {sortOpen && (
                   <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-[60] overflow-hidden">
@@ -126,15 +118,11 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-
-            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center">
-              <SettingsIcon className="w-5 h-5" />
-            </button>
+            <button onClick={() => setSettingsOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center hover:bg-accent"><SettingsIcon className="w-5 h-5" /></button>
           </div>
         </header>
 
-        {/* Main Deck Area - flex-1 takes remaining height */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden relative">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
             <SwipeDeck
               cards={cards}
@@ -148,12 +136,10 @@ export default function App() {
         </div>
       </main>
 
-      {/* Sidebar - Desktop */}
       <aside className="hidden md:block w-[350px] border-l border-border bg-card h-full overflow-y-auto shrink-0">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
-      {/* Mobile Sidebar Overlay */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
