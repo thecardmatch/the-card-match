@@ -101,9 +101,17 @@ export default function App() {
             <button onClick={() => user ? signOut() : setAuthOpen(true)} className="w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm hover:bg-accent transition-colors">
               {user ? <LogOut className="w-5 h-5 text-primary" /> : <UserIcon className="w-5 h-5" />}
             </button>
+
+            {/* RESTORED: Watchlist button with Notification Badge */}
             <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center">
               <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-background">
+                  {liked.length}
+                </span>
+              )}
             </button>
+
             <div ref={sortBtnRef} className="relative">
               <button onClick={() => setSortOpen(!sortOpen)} className="w-10 h-10 rounded-full border flex items-center justify-center hover:bg-accent"><ArrowUpDown className="w-4 h-4" /></button>
               <AnimatePresence>
