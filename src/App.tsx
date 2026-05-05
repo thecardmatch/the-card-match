@@ -85,9 +85,9 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="min-h-screen w-full bg-background flex flex-row relative">
-      {/* Changed main to display: block on web to ensure natural document flow/scrolling */}
-      <main className="flex-1 block min-w-0 min-h-screen relative z-10">
+    /* Added overflow-y-auto to the very top container */
+    <div className="min-h-screen w-full bg-background flex flex-row relative overflow-y-auto">
+      <main className="flex-1 flex flex-col min-w-0 h-auto relative z-10 overflow-visible">
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
@@ -149,20 +149,22 @@ export default function App() {
           </div>
         </header>
 
-        {/* Removed flex-col/flex-1 and added overflow-visible to prevent clipping */}
-        <div className="relative p-4 md:p-8 overflow-visible min-h-max">
-          <SwipeDeck
-            cards={cards}
-            onLike={handleLike}
-            onBuy={(card) => {
-              if (card.ebayUrl) window.location.href = card.ebayUrl;
-            }}
-            onNeedMore={handleNeedMore}
-            isLoadingMore={loadingMore}
-            resetKey={deckResetKey}
-          />
-          {/* Extra bottom padding to ensure the UI has space to scroll */}
-          <div className="pb-40" />
+        {/* Removed h-full and flex-1 constraints here to let the content expand */}
+        <div className="relative p-4 md:p-8 min-h-screen overflow-visible flex flex-col items-center">
+          <div className="w-full max-w-sm overflow-visible">
+            <SwipeDeck
+              cards={cards}
+              onLike={handleLike}
+              onBuy={(card) => {
+                if (card.ebayUrl) window.location.href = card.ebayUrl;
+              }}
+              onNeedMore={handleNeedMore}
+              isLoadingMore={loadingMore}
+              resetKey={deckResetKey}
+            />
+          </div>
+          {/* Large bottom spacer to guarantee scroll room */}
+          <div className="h-64 w-full flex-shrink-0" />
         </div>
       </main>
 
