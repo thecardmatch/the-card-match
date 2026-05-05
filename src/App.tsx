@@ -41,12 +41,17 @@ export default function App() {
   const seenIds = useRef(new Set<string>());
   const [deckResetKey, setDeckResetKey] = useState(0);
 
+  // SURGICAL FIX: Call buildSearchQuery once to get both technical and display versions
+  const searchInfo = buildSearchQuery(prefs);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     ebayOffset.current = 0;
     seenIds.current = new Set();
-    searchCards(prefs, 0).then((results) => {
+
+    // SURGICAL FIX: Use the technical .query for the actual eBay API call
+    searchCards(searchInfo.query, 0).then((results) => {
       if (cancelled) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
       fresh.forEach((c) => seenIds.current.add(c.id));
@@ -56,13 +61,14 @@ export default function App() {
       setLoading(false);
     }).catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [prefs]);
+  }, [prefs, searchInfo.query]); // Added searchInfo.query to dependency array for safety
 
   const handleNeedMore = useCallback(async () => {
     if (loadingMore || loading) return;
     setLoadingMore(true);
     try {
-      const more = await searchCards(prefs, ebayOffset.current);
+      // SURGICAL FIX: Use the technical .query for pagination
+      const more = await searchCards(searchInfo.query, ebayOffset.current);
       const fresh = more.filter((c) => !seenIds.current.has(c.id));
       if (fresh.length > 0) {
         fresh.forEach((c) => seenIds.current.add(c.id));
@@ -70,7 +76,7 @@ export default function App() {
         setCards((prev) => [...prev, ...fresh]);
       }
     } catch (err) { console.warn(err); } finally { setLoadingMore(false); }
-  }, [loadingMore, loading, prefs]);
+  }, [loadingMore, loading, searchInfo.query]);
 
   async function handleLike(card: TradingCard) {
     setLiked((prev) => {
@@ -81,8 +87,6 @@ export default function App() {
     if (user) await addToWatchlist(user.id, card);
   }
 
-  const searchQuery = buildSearchQuery(prefs);
-
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
@@ -92,7 +96,8 @@ export default function App() {
             <div className="min-w-0">
               <h1 className="text-base font-black text-foreground leading-tight tracking-tight uppercase">THE CARD MATCH</h1>
               <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest truncate">
-                {loading ? "Searching..." : `Results for "${searchQuery}"`}
+                {/* SURGICAL FIX: Use .displayLabel for the UI header */}
+                {loading ? "Searching..." : `Results for "${searchInfo.displayLabel}"`}
               </p>
             </div>
           </div>

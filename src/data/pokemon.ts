@@ -46,20 +46,25 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 /**
- * UPDATED: Professional eBay Boolean Search Builder
- * This ensures "Grade 10" finds CGC, BGS, SGC, and PSA specifically.
+ * SURGICAL UPDATE: Returns a technical query for the API 
+ * and a clean displayLabel for the UI header.
  */
-export function buildSearchQuery(prefs: Preferences): string {
-  const parts: string[] = [];
+export function buildSearchQuery(prefs: Preferences): { query: string; displayLabel: string } {
+  const technicalParts: string[] = [];
+  const displayParts: string[] = [];
 
-  // 1. Categories (e.g., "(Pokemon,Basketball)")
+  // 1. Categories
   if (prefs.categories.length > 0) {
-    parts.push(`(${prefs.categories.join(",")})`);
+    technicalParts.push(`(${prefs.categories.join(",")})`);
+    displayParts.push(prefs.categories.join(", "));
+  } else {
+    displayParts.push("All Categories");
   }
 
   // 2. User Text Search
   if (prefs.query.trim()) {
-    parts.push(prefs.query.trim());
+    technicalParts.push(prefs.query.trim());
+    displayParts.push(prefs.query.trim());
   }
 
   // 3. Condition & Grading Logic
@@ -68,23 +73,24 @@ export function buildSearchQuery(prefs: Preferences): string {
 
     prefs.conditions.forEach(c => {
       if (c === "Raw") {
-        // Exclude common grading terms to find raw cards
         gradeParts.push("-graded -psa -bgs -cgc -sgc -tag");
       } else {
-        // Extracts "10" from "Grade 10" and applies to all major slabs
         const num = c.replace("Grade ", "");
         gradeParts.push(`(PSA,CGC,BGS,SGC,TAG) ${num}`);
       }
     });
 
     if (gradeParts.length > 0) {
-      parts.push(`(${gradeParts.join(",")})`);
+      technicalParts.push(`(${gradeParts.join(",")})`);
+      displayParts.push(prefs.conditions.join(" & "));
     }
   }
 
-  // 4. Junk Filters (Subtle but vital for card quality)
-  parts.push("-proxy -digital -reprint -reproduction");
+  // 4. Junk Filters (Technical only - helps exclude trash)
+  technicalParts.push("-proxy -digital -reprint -reproduction");
 
-  // Join with spaces to create a clean "AND" query for eBay
-  return parts.join(" ").trim();
+  return {
+    query: technicalParts.join(" ").trim(),
+    displayLabel: displayParts.filter(Boolean).join(" — ")
+  };
 }
