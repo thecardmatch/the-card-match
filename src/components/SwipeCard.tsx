@@ -80,8 +80,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
   return (
     <motion.div
-      /* SURGICAL CHANGE: Removed 'inset-0' and added 'w-full'. 
-         This allows the card to have its own natural height. */
       className="absolute top-0 left-0 w-full select-none"
       style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
       initial={false}
@@ -93,13 +91,8 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       onDragEnd={handleDragEnd}
       exit={getExitAnimation()}
     >
-      /* SURGICAL CHANGE: Removed 'h-full' and 'overflow-hidden'. 
-         Added 'min-h-[500px]' to ensure it looks like a card even with little text. */
       <div className="min-h-[500px] w-full rounded-3xl bg-card border border-card-border shadow-2xl flex flex-col">
-
-        {/* ── Image area ─── */}
         <div
-          /* SURGICAL CHANGE: Changed aspect ratio to ensure image doesn't take up the whole screen height */
           className="relative aspect-square bg-muted overflow-hidden rounded-t-3xl flex items-center justify-center p-4 cursor-pointer"
           onPointerDown={handleImageAreaPointerDown}
           onClick={handleImageAreaClick}
@@ -133,7 +126,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
           )}
         </div>
 
-        {/* ── Info area ──────────────────────────────────────────────── */}
         <div className="p-5 bg-card rounded-b-3xl">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">
