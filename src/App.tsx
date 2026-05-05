@@ -85,10 +85,8 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    /* Changed h-screen to min-h-screen to allow vertical expansion on web */
     <div className="min-h-screen w-full bg-background flex flex-row relative">
-      {/* Changed h-full to h-auto on web so it doesn't crop the bottom */}
-      <main className="flex-1 flex flex-col min-w-0 h-auto md:min-h-screen relative z-10">
+      <main className="flex-1 flex flex-col min-w-0 h-auto relative z-10">
         <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
@@ -150,8 +148,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* This container now allows the deck to take its required space */}
-        <div className="flex-1 relative flex flex-col p-4 md:p-8 overflow-visible">
+        <div className="flex-1 relative flex flex-col p-4 md:p-8 min-h-[900px]">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
@@ -162,12 +159,11 @@ export default function App() {
             isLoadingMore={loadingMore}
             resetKey={deckResetKey}
           />
-          {/* Large bottom spacer to ensure scrolling past the card deck elements */}
-          <div className="h-32 w-full flex-shrink-0" />
+          <div className="h-40 w-full flex-shrink-0" />
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[320px] sticky top-0 h-screen bg-card border-l border-border overflow-y-auto overflow-x-hidden">
+      <aside className="hidden md:flex w-[320px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto overflow-x-hidden">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
