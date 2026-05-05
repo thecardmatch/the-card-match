@@ -4,6 +4,11 @@ const API_BASE = "https://svcs.ebay.com/services/search/FindingService/v1";
 const APP_ID = "JosephPe-TheCardM-PRD-a84c0e5fe-2341975d";
 const CAMP_ID = "5339062325"; 
 
+// This is what the Sidebar was missing!
+export function getAffiliateUrl(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&toolid=10001&mkevt=1`;
+}
+
 export async function searchCards(prefs: UserPreferences, offset: number = 0): Promise<TradingCard[]> {
   const gradeQuery = prefs.grade && prefs.grade !== "Raw" ? prefs.grade : "";
   const query = `${prefs.category} ${gradeQuery}`.trim();
@@ -25,8 +30,6 @@ export async function searchCards(prefs: UserPreferences, offset: number = 0): P
 
     return items.map((item: any) => {
       const rawUrl = item.viewItemURL[0];
-      const affiliateUrl = `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=${CAMP_ID}&toolid=10001&mkevt=1`;
-
       return {
         id: item.itemId[0],
         name: item.title[0],
@@ -37,11 +40,10 @@ export async function searchCards(prefs: UserPreferences, offset: number = 0): P
         category: prefs.category,
         grade: prefs.grade || "Raw",
         listingType: item.listingInfo[0].listingType[0],
-        ebayUrl: affiliateUrl
+        ebayUrl: getAffiliateUrl(rawUrl)
       };
     });
   } catch (error) {
-    console.error("eBay Fetch Error:", error);
     return [];
   }
 }

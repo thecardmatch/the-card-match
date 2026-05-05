@@ -38,8 +38,15 @@ export function SwipeCard({ card, isTop, offset, onSwipe }: SwipeCardProps) {
 
   return (
     <motion.div
-      style={{ x, y, rotate, scale: 1 - offset * 0.05, y: offset * 15, zIndex: isTop ? 50 : 0 }}
-      drag={isTop} dragConstraints={{ left: 0, right: 0, top: -1000, bottom: 0 }}
+      style={{ 
+        x, 
+        rotate, 
+        scale: 1 - offset * 0.05, 
+        y: y.get() + (offset * 15), // Combined the offset into one logic
+        zIndex: isTop ? 50 : 0 
+      }}
+      drag={isTop} 
+      dragConstraints={{ left: 0, right: 0, top: -1000, bottom: 0 }}
       onDragEnd={handleDragEnd}
       className="absolute inset-0 bg-white border rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col cursor-grab active:cursor-grabbing"
     >
@@ -47,7 +54,7 @@ export function SwipeCard({ card, isTop, offset, onSwipe }: SwipeCardProps) {
         <img src={card.images[imgIndex]} className="w-full h-full object-contain pointer-events-none drop-shadow-md" alt={card.name} />
         <motion.div style={{ opacity: buyOverlay }} className="absolute inset-0 bg-blue-600/20 flex flex-col items-center justify-center text-blue-600 font-black z-30 pointer-events-none">
           <ExternalLink className="w-12 h-12 mb-2" />
-          <span className="text-2xl uppercase">View on eBay</span>
+          <span className="text-2xl uppercase font-black">View on eBay</span>
         </motion.div>
         <div className="absolute bottom-4 flex gap-1.5">
           {card.images.map((_, i) => (
