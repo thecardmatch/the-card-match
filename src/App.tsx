@@ -34,7 +34,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false); // Surgical addition
+  const [authOpen, setAuthOpen] = useState(false);
   const sortBtnRef = useRef<HTMLDivElement>(null);
 
   const ebayOffset = useRef(0);
@@ -85,10 +85,11 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
-    <div className="h-screen w-full bg-background flex flex-row overflow-hidden relative">
-      {/* WEB SCROLL FIX: Added overflow-y-auto to main container */}
-      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10 overflow-y-auto md:overflow-hidden">
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 md:static z-20">
+    /* Changed h-screen to min-h-screen to allow vertical expansion on web */
+    <div className="min-h-screen w-full bg-background flex flex-row relative">
+      {/* Changed h-full to h-auto on web so it doesn't crop the bottom */}
+      <main className="flex-1 flex flex-col min-w-0 h-auto md:min-h-screen relative z-10">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
@@ -100,7 +101,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* WEB AUTH BUTTON */}
             <button 
               onClick={() => user ? signOut() : setAuthOpen(true)}
               className="hidden md:flex px-4 py-2 rounded-full border bg-card hover:bg-accent transition-colors text-xs font-bold items-center gap-2"
@@ -108,7 +108,6 @@ export default function App() {
               {user ? <><LogOut className="w-3 h-3" /> Sign Out</> : "Sign In"}
             </button>
 
-            {/* MOBILE AUTH BUTTON */}
             <button 
               onClick={() => user ? signOut() : setAuthOpen(true)}
               className="md:hidden w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
@@ -151,8 +150,8 @@ export default function App() {
           </div>
         </header>
 
-        {/* WEB SCROLL FIX: Removed overflow-hidden from deck container */}
-        <div className="flex-1 relative md:p-8">
+        {/* This container now allows the deck to take its required space */}
+        <div className="flex-1 relative flex flex-col p-4 md:p-8 overflow-visible">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
@@ -163,12 +162,12 @@ export default function App() {
             isLoadingMore={loadingMore}
             resetKey={deckResetKey}
           />
-          {/* Spacer to ensure scroll clearance for buttons */}
-          <div className="h-24 md:hidden" />
+          {/* Large bottom spacer to ensure scrolling past the card deck elements */}
+          <div className="h-32 w-full flex-shrink-0" />
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden touch-pan-y">
+      <aside className="hidden md:flex w-[320px] sticky top-0 h-screen bg-card border-l border-border overflow-y-auto overflow-x-hidden">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
