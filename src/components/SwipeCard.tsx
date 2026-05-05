@@ -35,7 +35,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
     const SWIPE_HORIZ = 100, SWIPE_UP = 80, VEL = 450;
     const { offset: { x: ax, y: ay }, velocity: { x: vx, y: vy } } = info;
 
-    // Logic: If moving up significantly more than sideways, or high upward velocity
     if ((ay < -SWIPE_UP && Math.abs(ay) > Math.abs(ax)) || vy < -VEL) { 
       onSwipe("up");    
       return; 
@@ -46,15 +45,12 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
   function getExitAnimation() {
     const cx = x.get(), cy = y.get();
-    // Fly off top
     if (cy < -50 && Math.abs(cy) > Math.abs(cx)) {
       return { y: -1000, opacity: 0, transition: { duration: 0.3 } };
     }
-    // Fly off right
     if (cx > 50) {
       return { x: 1000, rotate: 30, opacity: 0, transition: { duration: 0.3 } };
     }
-    // Fly off left
     if (cx < -50) {
       return { x: -1000, rotate: -30, opacity: 0, transition: { duration: 0.3 } };
     }
@@ -84,23 +80,27 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
   return (
     <motion.div
-      className="absolute inset-0 select-none"
+      /* SURGICAL CHANGE: Removed 'inset-0' and added 'w-full'. 
+         This allows the card to have its own natural height. */
+      className="absolute top-0 left-0 w-full select-none"
       style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
       initial={false}
       animate={{ scale: 1 - offset * 0.04, y: offset * 12 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
       drag={isTop}
-      // Increased vertical drag constraints to allow the 'Up' swipe to happen physically
       dragConstraints={{ left: 0, right: 0, top: -500, bottom: 0 }}
       dragElastic={0.9}
       onDragEnd={handleDragEnd}
       exit={getExitAnimation()}
     >
-      <div className="h-full w-full rounded-3xl bg-card border border-card-border shadow-2xl overflow-hidden flex flex-col">
+      /* SURGICAL CHANGE: Removed 'h-full' and 'overflow-hidden'. 
+         Added 'min-h-[500px]' to ensure it looks like a card even with little text. */
+      <div className="min-h-[500px] w-full rounded-3xl bg-card border border-card-border shadow-2xl flex flex-col">
 
-        {/* ── Image area — tap left half = prev, right half = next ─── */}
+        {/* ── Image area ─── */}
         <div
-          className="relative flex-1 bg-muted overflow-hidden flex items-center justify-center p-4 cursor-pointer"
+          /* SURGICAL CHANGE: Changed aspect ratio to ensure image doesn't take up the whole screen height */
+          className="relative aspect-square bg-muted overflow-hidden rounded-t-3xl flex items-center justify-center p-4 cursor-pointer"
           onPointerDown={handleImageAreaPointerDown}
           onClick={handleImageAreaClick}
         >
@@ -111,7 +111,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             draggable={false}
           />
 
-          {/* Dot indicators */}
           {hasMultiple && (
             <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 pointer-events-none">
               {allImages.map((_, i) => (
@@ -125,19 +124,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             </div>
           )}
 
-          {/* Left/right hint chevrons */}
-          {isTop && hasMultiple && (
-            <>
-              <div className="absolute left-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/20 flex items-center justify-center pointer-events-none opacity-50">
-                <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="15 18 9 12 15 6" /></svg>
-              </div>
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/20 flex items-center justify-center pointer-events-none opacity-50">
-                <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="9 18 15 12 9 6" /></svg>
-              </div>
-            </>
-          )}
-
-          {/* Swipe feedback overlays */}
           {isTop && (
             <>
               <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-15deg] bg-black/70 backdrop-blur pointer-events-none">SAVE</motion.div>
@@ -148,7 +134,7 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
         </div>
 
         {/* ── Info area ──────────────────────────────────────────────── */}
-        <div className="p-5 bg-card">
+        <div className="p-5 bg-card rounded-b-3xl">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span className="text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">
               {card.category}
