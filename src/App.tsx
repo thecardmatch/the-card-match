@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X } from "lucide-react";
+import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X, User as UserIcon, LogOut } from "lucide-react"; // Added User icons
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
@@ -25,7 +25,7 @@ function loadLocalWatchlist(): TradingCard[] {
 }
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth(); // Added signOut
   const { prefs, setPrefs, hasOnboarded } = usePreferences();
   const [liked, setLiked] = useState<TradingCard[]>(() => loadLocalWatchlist());
   const [cards, setCards] = useState<TradingCard[]>([]);
@@ -34,6 +34,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false); // New state for Auth
   const sortBtnRef = useRef<HTMLDivElement>(null);
 
   const ebayOffset = useRef(0);
@@ -84,9 +85,11 @@ export default function App() {
   const searchQuery = buildSearchQuery(prefs);
 
   return (
+    /* Changed overflow-hidden to allow main scrolling on web if needed */
     <div className="h-screen w-full bg-background flex flex-row overflow-hidden relative">
-      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10">
-        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background z-20">
+      {/* Added overflow-y-auto to main to fix web scrolling */}
+      <main className="flex-1 flex flex-col min-w-0 h-full relative z-10 overflow-y-auto md:overflow-hidden">
+        <header className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between gap-3 bg-background sticky top-0 md:static z-20">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-lg flex-shrink-0" />
             <div className="min-w-0">
@@ -98,7 +101,22 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* MOBILE HEART WITH COUNTER */}
+            {/* AUTH BUTTON - WEB VERSION (Shows Sign Out icon if logged in) */}
+            <button 
+              onClick={() => user ? signOut() : setAuthOpen(true)}
+              className="hidden md:flex px-4 py-2 rounded-full border bg-card hover:bg-accent transition-colors text-xs font-bold items-center gap-2"
+            >
+              {user ? <><LogOut className="w-3 h-3" /> Sign Out</> : "Sign In"}
+            </button>
+
+            {/* AUTH BUTTON - MOBILE VERSION (Circle Icon) */}
+            <button 
+              onClick={() => user ? signOut() : setAuthOpen(true)}
+              className="md:hidden w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
+            >
+              {user ? <LogOut className="w-5 h-5 text-primary" /> : <UserIcon className="w-5 h-5" />}
+            </button>
+
             <button 
               onClick={() => setWatchlistOpen(true)}
               className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center shadow-sm"
@@ -134,7 +152,8 @@ export default function App() {
           </div>
         </header>
 
-        <div className="flex-1 relative overflow-hidden">
+        {/* Content area: remains flex-1, but the wrapper above allows it to be seen if it grows */}
+        <div className="flex-1 relative overflow-hidden min-h-[600px] md:min-h-0">
           <SwipeDeck
             cards={cards}
             onLike={handleLike}
@@ -148,12 +167,10 @@ export default function App() {
         </div>
       </main>
 
-      {/* DESKTOP SIDEBAR (Scrollable) */}
       <aside className="hidden md:flex w-[320px] h-full bg-card border-l border-border overflow-y-auto overflow-x-hidden touch-pan-y">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
 
-      {/* MOBILE WATCHLIST DRAWER (Scrollable) */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
@@ -190,7 +207,8 @@ export default function App() {
       </AnimatePresence>
 
       <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
-      <AuthDialog open={false} onClose={() => {}} /> 
+      {/* AuthDialog is now controlled by authOpen state */}
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
     </div>
   );
 }
