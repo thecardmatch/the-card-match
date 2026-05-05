@@ -46,7 +46,6 @@ export default function App() {
     setLoading(true);
     ebayOffset.current = 0;
     seenIds.current = new Set();
-
     searchCards(prefs, 0).then((results) => {
       if (cancelled) return;
       const fresh = results.filter((c) => !seenIds.current.has(c.id));
@@ -82,35 +81,28 @@ export default function App() {
     if (user) await addToWatchlist(user.id, card);
   }
 
-  const searchQuery = buildSearchQuery(prefs);
-
   return (
-    <div className="h-screen w-full bg-background flex flex-row relative overflow-hidden">
-      <main className="flex-1 flex flex-col min-w-0 relative z-10 overflow-hidden">
-        {/* Tightened header padding for web */}
-        <header className="px-4 md:px-6 py-2 md:py-3 border-b border-border flex items-center justify-between gap-3 bg-background shrink-0">
+    <div className="h-screen w-full bg-background flex flex-row overflow-hidden fixed inset-0">
+      <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
+        <header className="px-4 py-3 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <img src="/logo.png" alt="Logo" className="w-9 h-9 md:w-10 md:h-10 rounded-lg flex-shrink-0" />
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg shrink-0" />
             <div className="min-w-0">
-              <h1 className="text-base md:text-lg font-black tracking-tight text-foreground leading-tight">The Card Match</h1>
-              <p className="text-[10px] md:text-xs text-muted-foreground truncate">
-                {loading ? "Searching..." : `Showing "${searchQuery}"`}
-              </p>
+              <h1 className="text-base font-black text-foreground leading-tight">The Card Match</h1>
+              <p className="text-[10px] text-muted-foreground truncate">{loading ? "Searching..." : "Swipe to Match"}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            {/* RESTORED MOBILE AUTH BUTTON */}
             <button 
               onClick={() => user ? signOut() : setAuthOpen(true)}
-              className="hidden md:flex px-3 py-1.5 rounded-full border bg-card hover:bg-accent transition-colors text-[11px] font-bold items-center gap-2"
+              className="w-9 h-9 rounded-full bg-card border flex items-center justify-center shadow-sm"
             >
-              {user ? <><LogOut className="w-3 h-3" /> Sign Out</> : "Sign In"}
+              {user ? <LogOut className="w-4 h-4 text-primary" /> : <UserIcon className="w-4 h-4" />}
             </button>
 
-            <button 
-              onClick={() => setWatchlistOpen(true)}
-              className="md:hidden relative w-9 h-9 rounded-full bg-card border flex items-center justify-center shadow-sm"
-            >
+            <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-9 h-9 rounded-full bg-card border flex items-center justify-center">
               <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
             </button>
 
@@ -120,70 +112,35 @@ export default function App() {
               </button>
               <AnimatePresence>
                 {sortOpen && (
-                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-50 overflow-hidden">
+                  <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-[60] overflow-hidden">
                     {SORT_OPTIONS.map((opt) => (
                       <button key={opt.value} onClick={() => { setPrefs({ ...prefs, sort: opt.value }); setSortOpen(false); }} className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-accent transition-colors">
-                        {opt.label}
-                        {prefs.sort === opt.value && <Check className="w-4 h-4 text-primary" />}
+                        {opt.label} {prefs.sort === opt.value && <Check className="w-4 h-4 text-primary" />}
                       </button>
                     ))}
                   </motion.div>
                 )}
               </AnimatePresence>
             </div>
-            <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full bg-card border flex items-center justify-center">
-              <SettingsIcon className="w-4 h-4" />
-            </button>
+            <button onClick={() => setSettingsOpen(true)} className="w-9 h-9 rounded-full bg-card border flex items-center justify-center"><SettingsIcon className="w-4 h-4" /></button>
           </div>
         </header>
 
-        {/* Removed p-8 on web to pull everything higher; used justify-start instead of justify-center */}
-        <div className="flex-1 relative flex flex-col items-center justify-start p-2 md:p-4 overflow-hidden mt-[-20px] md:mt-[-40px]">
-          <div className="w-full max-w-sm">
-            <SwipeDeck
-              cards={cards}
-              onLike={handleLike}
-              onBuy={(card) => {
-                if (card.ebayUrl) window.location.href = card.ebayUrl;
-              }}
-              onNeedMore={handleNeedMore}
-              isLoadingMore={loadingMore}
-              resetKey={deckResetKey}
-            />
-          </div>
+        <div className="flex-1 flex flex-col items-center justify-center p-2 md:p-6 overflow-hidden">
+          <SwipeDeck
+            cards={cards}
+            onLike={handleLike}
+            onBuy={(card) => { if (card.ebayUrl) window.location.href = card.ebayUrl; }}
+            onNeedMore={handleNeedMore}
+            isLoadingMore={loadingMore}
+            resetKey={deckResetKey}
+          />
         </div>
       </main>
 
-      <aside className="hidden md:flex w-[300px] bg-card border-l border-border sticky top-0 h-screen overflow-y-auto overflow-x-hidden">
+      <aside className="hidden md:flex w-[320px] bg-card border-l border-border h-full overflow-y-auto shrink-0">
         <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
       </aside>
-
-      <AnimatePresence>
-        {watchlistOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
-              onClick={() => setWatchlistOpen(false)} 
-              className="fixed inset-0 bg-black/60 z-[100] md:hidden" 
-            />
-            <motion.div 
-              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} 
-              transition={{ type: "spring", damping: 25, stiffness: 200 }} 
-              className="fixed inset-y-0 right-0 w-[85%] max-w-[320px] bg-card z-[110] md:hidden flex flex-col shadow-2xl"
-            >
-              <div className="p-4 border-b flex items-center justify-between bg-card sticky top-0 z-10">
-                <h2 className="font-bold text-foreground">Watchlist ({liked.length})</h2>
-                <button onClick={() => setWatchlistOpen(false)} className="p-2 rounded-full hover:bg-accent">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y">
-                <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
       <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} /> 
