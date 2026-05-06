@@ -24,10 +24,10 @@ export const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 ];
 
 /**
- * SURGICAL ADDITION: eBay Category ID Mapper
- * Maps eBay's numerical IDs back to your Category types for adaptive UI tags.
+ * EBAY CATEGORY MAP
+ * Used to translate eBay IDs to your UI labels
  */
-export const EBAY_CATEGORY_IDS: Record<string, Category> = {
+export const EBAY_CATEGORY_MAP: Record<string, Category> = {
   "183454": "Pokemon",
   "261328": "Basketball",
   "212": "Baseball",
@@ -37,13 +37,6 @@ export const EBAY_CATEGORY_IDS: Record<string, Category> = {
   "183446": "Formula 1",
   "183452": "WWE",
 };
-
-/**
- * Helper to determine category from eBay ID
- */
-export function getCategoryFromId(id: string | number): Category {
-  return EBAY_CATEGORY_IDS[id.toString()] || "Pokemon";
-}
 
 export type Preferences = {
   categories: Category[];
@@ -68,51 +61,33 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 /**
- * SURGICAL UPDATE: Returns a technical query for the API 
- * and a clean displayLabel for the UI header.
+ * RESTORED TO STRING: This prevents the white screen.
+ * Adds (PSA,CGC,BGS) secretly so you find the cards.
  */
-export function buildSearchQuery(prefs: Preferences): { query: string; displayLabel: string } {
-  const technicalParts: string[] = [];
-  const displayParts: string[] = [];
+export function buildSearchQuery(prefs: Preferences): string {
+  const parts: string[] = [];
 
-  // 1. Categories
   if (prefs.categories.length > 0) {
-    technicalParts.push(`(${prefs.categories.join(",")})`);
-    displayParts.push(prefs.categories.join(", "));
-  } else {
-    displayParts.push("All Categories");
+    parts.push(`(${prefs.categories.join(",")})`);
   }
 
-  // 2. User Text Search
   if (prefs.query.trim()) {
-    technicalParts.push(prefs.query.trim());
-    displayParts.push(prefs.query.trim());
+    parts.push(prefs.query.trim());
   }
 
-  // 3. Condition & Grading Logic
   if (prefs.conditions.length > 0) {
     const gradeParts: string[] = [];
-
     prefs.conditions.forEach(c => {
       if (c === "Raw") {
-        gradeParts.push("-graded -psa -bgs -cgc -sgc -tag");
+        gradeParts.push("-graded -psa -bgs -cgc -sgc");
       } else {
         const num = c.replace("Grade ", "");
         gradeParts.push(`(PSA,CGC,BGS,SGC,TAG) ${num}`);
       }
     });
-
-    if (gradeParts.length > 0) {
-      technicalParts.push(`(${gradeParts.join(",")})`);
-      displayParts.push(prefs.conditions.join(" & "));
-    }
+    if (gradeParts.length > 0) parts.push(`(${gradeParts.join(",")})`);
   }
 
-  // 4. Junk Filters
-  technicalParts.push("-proxy -digital -reprint -reproduction");
-
-  return {
-    query: technicalParts.join(" ").trim(),
-    displayLabel: displayParts.filter(Boolean).join(" — ")
-  };
+  parts.push("-proxy -digital -reprint");
+  return parts.join(" ").trim();
 }
