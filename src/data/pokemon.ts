@@ -46,34 +46,6 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 export function buildSearchQuery(prefs: Preferences): string {
-  const parts: string[] = [];
-
-  // 1. Mandatory Sport Keywords
-  if (prefs.categories.length > 0) {
-    parts.push(`(${prefs.categories.join(",")})`);
-  }
-
-  // 2. Main Search Term
-  if (prefs.query.trim()) {
-    parts.push(prefs.query.trim());
-  }
-
-  // 3. AGGRESSIVE CONDITION NET (The "Konnor Griffin" Finder)
-  if (prefs.conditions.length > 0) {
-    const conditionQueries: string[] = [];
-    prefs.conditions.forEach(c => {
-      if (c === "Raw") {
-        conditionQueries.push("-graded -psa -bgs -cgc -sgc -tag -hga -csg");
-      } else {
-        const num = c.replace("Grade ", "");
-        // This is the specific magic string that catches the big listings
-        conditionQueries.push(`(PSA,BGS,CGC,SGC,TAG,HGA,CSG,Graded,Mint) ${num}`);
-      }
-    });
-    if (conditionQueries.length > 0) parts.push(`(${conditionQueries.join(",")})`);
-  }
-
-  // 4. Junk Filter
-  parts.push("-proxy -digital -reprint -reproduction");
-  return parts.join(" ").trim();
+  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
+  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }
