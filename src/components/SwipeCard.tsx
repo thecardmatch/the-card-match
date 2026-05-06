@@ -77,10 +77,7 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
         <div className="p-4 bg-card border-t border-border shrink-0">
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {/* SURGICAL FIX: Labels now adapt based on card data */}
-            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
-              {card.category === "Pokemon" ? "Pokémon TCG" : card.category}
-            </span>
+            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">Pokémon TCG</span>
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-primary/10 text-primary uppercase">{card.grade}</span>
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">{card.listingType}</span>
           </div>

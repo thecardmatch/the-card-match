@@ -46,36 +46,6 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 export function buildSearchQuery(prefs: Preferences): string {
-  const parts: string[] = [];
-
-  // 1. Broad Sport Scope (Use keywords, not category IDs)
-  if (prefs.categories.length > 0) {
-    parts.push(`(${prefs.categories.join(",")})`);
-  }
-
-  // 2. The Player Name
-  if (prefs.query.trim()) {
-    parts.push(prefs.query.trim());
-  }
-
-  // 3. THE SURGICAL FIX FOR "GRADED 10"
-  if (prefs.conditions.length > 0) {
-    const conditionParts: string[] = [];
-    prefs.conditions.forEach(c => {
-      if (c === "Raw") {
-        conditionParts.push("-graded -psa -bgs -cgc -sgc -tag -hga -csg");
-      } else {
-        const num = c.replace("Grade ", "");
-        // We now look for the number 10 AND the word "Graded" or "Mint" 
-        // without forcing a brand name like PSA. This catches "Other 10" listings.
-        conditionParts.push(`(PSA,BGS,CGC,SGC,TAG,HGA,Graded,Mint,Gem) ${num}`);
-      }
-    });
-    if (conditionParts.length > 0) parts.push(`(${conditionParts.join(",")})`);
-  }
-
-  // 4. Quality Control
-  parts.push("-proxy -digital -reprint -reproduction");
-
-  return parts.join(" ").trim();
+  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
+  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }

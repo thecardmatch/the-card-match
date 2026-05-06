@@ -1,11 +1,8 @@
-import { buildSearchQuery } from "@/data/pokemon";
 import type { Preferences, TradingCard } from "@/data/pokemon";
 
 export async function searchCards(prefs: Preferences, offset: number): Promise<TradingCard[]> {
   const params = new URLSearchParams({
-    // SURGICAL CHANGE: Using the aggressive logic from pokemon.ts
-    query: buildSearchQuery(prefs), 
-
+    query: prefs.query || "",
     categories: (prefs.categories || []).join(","),
     conditions: (prefs.conditions || []).join(","),
     sort: prefs.sort || "endingSoonest",
@@ -26,8 +23,7 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
 }
 
 export function getAffiliateUrl(name: string): string {
-  // MONETIZATION FIX: Added your campaign ID and tracking parameters
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}&mkcid=1&mkrid=711-53200-19255-0&campid=5339150952&toolid=10001&customid=thecardmatch&mkevt=1`;
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}`;
 }
 
 export function buildEbayQuery(prefs: Preferences): string {
