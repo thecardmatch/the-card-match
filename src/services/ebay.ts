@@ -1,5 +1,4 @@
 import type { Preferences, TradingCard } from "@/data/pokemon";
-import { getCategoryFromId } from "@/data/pokemon"; // Added this import
 
 export async function searchCards(prefs: Preferences, offset: number): Promise<TradingCard[]> {
   const params = new URLSearchParams({
@@ -16,16 +15,7 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
     const response = await fetch(`/api/ebay/search?${params.toString()}`);
     if (!response.ok) return [];
     const data = await response.json();
-
-    // SURGICAL FIX: Map the category dynamically from the eBay data
-    const items = (data.items || []).map((item: any) => ({
-      ...item,
-      // If the backend doesn't provide a category name, 
-      // we derive it from the ID using our helper
-      category: item.category || getCategoryFromId(item.categoryId || "")
-    }));
-
-    return items;
+    return data.items || [];
   } catch (err) {
     console.error("Search failed:", err);
     return [];
