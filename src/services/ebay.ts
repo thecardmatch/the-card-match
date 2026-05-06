@@ -1,8 +1,10 @@
 import { buildSearchQuery, type Preferences, type TradingCard } from "@/data/pokemon";
 
 export async function searchCards(prefs: Preferences, offset: number): Promise<TradingCard[]> {
+  const fullQuery = buildSearchQuery(prefs);
+
   const params = new URLSearchParams({
-    q: buildSearchQuery(prefs), // The aggressive string
+    q: fullQuery, 
     sort: prefs.sort || "endingSoonest",
     minPrice: (prefs.minPrice || 0).toString(),
     maxPrice: (prefs.maxPrice || 10000).toString(),
@@ -19,4 +21,9 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
     console.error("Search failed:", err);
     return [];
   }
+}
+
+// THIS WAS THE MISSING PIECE CAUSING THE BUILD FAILURE
+export function getAffiliateUrl(name: string): string {
+  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}`;
 }
