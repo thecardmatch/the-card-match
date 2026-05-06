@@ -46,6 +46,39 @@ export const DEFAULT_PREFS: Preferences = {
 };
 
 export function buildSearchQuery(prefs: Preferences): string {
-  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
-  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
+  const parts: string[] = [];
+
+  // 1. Broaden the sport scope: 
+  // Instead of a label like "Baseball —", we send "(Baseball, Card)"
+  if (prefs.categories.length > 0) {
+    parts.push(`(${prefs.categories.join(",")})`);
+  }
+
+  // 2. The specific player/card name
+  if (prefs.query.trim()) {
+    parts.push(prefs.query.trim());
+  }
+
+  // 3. The "Broad Net" for Graded cards
+  // This allows us to catch PSA, BGS, and SGC listings without changing the bridge
+  if (prefs.conditions.length > 0) {
+    const conditionParts: string[] = [];
+    prefs.conditions.forEach(c => {
+      if (c === "Raw") {
+        conditionParts.push("-graded -psa -bgs -cgc -sgc");
+      } else {
+        const num = c.replace("Grade ", "");
+        // This catches "PSA 10", "SGC 10", "Graded 10", etc.
+        conditionParts.push(`(PSA,BGS,CGC,SGC,TAG,Graded,Mint) ${num}`);
+      }
+    });
+    if (conditionParts.length > 0) {
+      parts.push(`(${conditionParts.join(",")})`);
+    }
+  }
+
+  // 4. Global Junk Filter to keep the quality high
+  parts.push("-proxy -digital -reprint -reproduction");
+
+  return parts.join(" ").trim();
 }
