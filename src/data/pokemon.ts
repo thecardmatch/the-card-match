@@ -48,36 +48,33 @@ export const DEFAULT_PREFS: Preferences = {
 export function buildSearchQuery(prefs: Preferences): string {
   const parts: string[] = [];
 
-  // 1. Broaden the sport scope: 
-  // Instead of a label like "Baseball —", we send "(Baseball, Card)"
+  // 1. Broad Sport Scope (Use keywords, not category IDs)
   if (prefs.categories.length > 0) {
     parts.push(`(${prefs.categories.join(",")})`);
   }
 
-  // 2. The specific player/card name
+  // 2. The Player Name
   if (prefs.query.trim()) {
     parts.push(prefs.query.trim());
   }
 
-  // 3. The "Broad Net" for Graded cards
-  // This allows us to catch PSA, BGS, and SGC listings without changing the bridge
+  // 3. THE SURGICAL FIX FOR "GRADED 10"
   if (prefs.conditions.length > 0) {
     const conditionParts: string[] = [];
     prefs.conditions.forEach(c => {
       if (c === "Raw") {
-        conditionParts.push("-graded -psa -bgs -cgc -sgc");
+        conditionParts.push("-graded -psa -bgs -cgc -sgc -tag -hga -csg");
       } else {
         const num = c.replace("Grade ", "");
-        // This catches "PSA 10", "SGC 10", "Graded 10", etc.
-        conditionParts.push(`(PSA,BGS,CGC,SGC,TAG,Graded,Mint) ${num}`);
+        // We now look for the number 10 AND the word "Graded" or "Mint" 
+        // without forcing a brand name like PSA. This catches "Other 10" listings.
+        conditionParts.push(`(PSA,BGS,CGC,SGC,TAG,HGA,Graded,Mint,Gem) ${num}`);
       }
     });
-    if (conditionParts.length > 0) {
-      parts.push(`(${conditionParts.join(",")})`);
-    }
+    if (conditionParts.length > 0) parts.push(`(${conditionParts.join(",")})`);
   }
 
-  // 4. Global Junk Filter to keep the quality high
+  // 4. Quality Control
   parts.push("-proxy -digital -reprint -reproduction");
 
   return parts.join(" ").trim();
