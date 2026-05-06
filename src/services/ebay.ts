@@ -1,14 +1,13 @@
-import type { Preferences, TradingCard } from "@/data/pokemon";
+import { buildSearchQuery, type Preferences, type TradingCard } from "@/data/pokemon";
 
 export async function searchCards(prefs: Preferences, offset: number): Promise<TradingCard[]> {
   const params = new URLSearchParams({
-    query: prefs.query || "",
-    categories: (prefs.categories || []).join(","),
-    conditions: (prefs.conditions || []).join(","),
+    q: buildSearchQuery(prefs), // The aggressive string
     sort: prefs.sort || "endingSoonest",
     minPrice: (prefs.minPrice || 0).toString(),
     maxPrice: (prefs.maxPrice || 10000).toString(),
     offset: offset.toString(),
+    listingType: prefs.listingType || "All"
   });
 
   try {
@@ -20,13 +19,4 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
     console.error("Search failed:", err);
     return [];
   }
-}
-
-export function getAffiliateUrl(name: string): string {
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}`;
-}
-
-export function buildEbayQuery(prefs: Preferences): string {
-  const catsStr = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All";
-  return [catsStr, prefs.query.trim()].filter(Boolean).join(" — ");
 }

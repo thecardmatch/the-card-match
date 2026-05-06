@@ -2,12 +2,12 @@ export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
 
-  const queryInput = (searchParams.get("query") || "").trim();
-  const sportSetting = (searchParams.get("categories") || "").toLowerCase();
-  const gradeSetting = (searchParams.get("conditions") || "").toLowerCase();
+  // We take the "Pro" query exactly as the frontend built it
+  const q = searchParams.get("q") || "card";
   const sortChoice = searchParams.get("sort") || "endingSoonest"; 
   const minPrice = searchParams.get("minPrice") || "0";
   const maxPrice = searchParams.get("maxPrice") || "20000";
+  const listingType = searchParams.get("listingType") || "All";
 
   try {
     const auth = btoa(`${env.EBAY_CLIENT_ID}:${env.EBAY_CLIENT_SECRET}`);
@@ -18,81 +18,52 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE SIMPLEST KEYWORD STRING (The Broad Net)
-    // We avoid parentheses and company names to stay on the "Fast" API track.
-    let q = queryInput;
-    if (sportSetting !== "—" && sportSetting !== "") {
-      q = `${sportSetting} ${q}`;
-    }
-    if (!q.trim()) q = "card";
-
-    let finalQuery = q;
-    if (gradeSetting.includes("10")) finalQuery += " 10 graded gem mint";
-    else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
-    else if (gradeSetting.includes("raw")) finalQuery += " nm raw -graded";
-
-    // 2. THE STRICT AUCTION FILTER
-    // We MUST use AUCTION only to see cards ending in seconds.
-    // If we include FIXED_PRICE, the 2-hour items return.
-    const filter = [
+    // 1. DYNAMIC LISTING FILTER
+    const filterParts = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{AUCTION}`,
       `listingStatus:{ACTIVE}`
-    ].join(",");
+    ];
 
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100`;
+    if (listingType === "Auction") filterParts.push(`buyingOptions:{AUCTION}`);
+    else if (listingType === "BuyItNow") filterParts.push(`buyingOptions:{FIXED_PRICE}`);
+    // If "All", we don't add a buyingOptions filter, catching everything!
+
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(q)}&filter=${encodeURIComponent(filterParts.join(","))}&sort=${sortChoice === "endingSoonest" ? "ending_soonest" : "newly_listed"}&limit=50&offset=${searchParams.get("offset") || "0"}`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"
       }
     });
 
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. THE "UNIVERSAL" IDENTIFIER
     const items = rawItems.map(item => {
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
       const title = item.title.toLowerCase();
 
-      // Categorize any sport automatically
-      let sport = sportSetting !== "—" ? sportSetting : "Card";
-      const list = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey"];
-      for (const s of list) { if (title.includes(s)) { sport = s; break; } }
-
-      // Identify any grade automatically
+      // Adaptive UI tagging
       let grade = "Raw";
-      const is10 = title.includes("10") || title.includes("gem");
-      const is9 = title.includes("9") && !is10;
-
-      if (title.includes("psa")) grade = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
-      else if (title.includes("cgc")) grade = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
-      else if (title.includes("bgs")) grade = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
-      else if (is10) grade = "Grade 10";
-      else if (title.includes("graded")) grade = "Graded";
-
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      if (title.includes("psa 10") || title.includes("gem mint 10")) grade = "PSA 10";
+      else if (title.includes("psa 9")) grade = "PSA 9";
+      else if (title.includes("bgs 10")) grade = "BGS 10";
+      else if (title.includes("cgc 10")) grade = "CGC 10";
+      else if (title.includes("graded") || title.includes("psa") || title.includes("bgs")) grade = "Graded";
 
       return {
         id: itemId,
         name: item.title,
-        sport: sport.charAt(0).toUpperCase() + sport.slice(1),
-        category: sport.charAt(0).toUpperCase() + sport.slice(1),
+        category: "Card", // This gets overwritten by SwipeCard adaptive logic
         grade: grade,
-        listingType: "Auction",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-        currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
+        currentBid: parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: `https://www.ebay.com/itm/${itemId}`
       };
     });
-
-    // RE-SORT: The API often has 5-10 seconds of "latency jitter." 
-    // This manual sort forces the true winner to the top.
-    items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
 
