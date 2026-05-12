@@ -9,11 +9,11 @@ import { useCountdown } from "@/hooks/useCountdown";
 type WatchlistSort = "newest" | "oldest" | "endingSoonest" | "priceDesc" | "priceAsc";
 
 const SORT_LABELS: Record<WatchlistSort, string> = {
-  newest:        "Newest Added",
-  oldest:        "Oldest Added",
+  newest:         "Newest Added",
+  oldest:         "Oldest Added",
   endingSoonest: "Ending Soonest",
-  priceDesc:     "Price: High → Low",
-  priceAsc:      "Price: Low → High",
+  priceDesc:      "Price: High → Low",
+  priceAsc:       "Price: Low → High",
 };
 
 type Props = {
@@ -224,9 +224,19 @@ function WatchlistBody({
       </div>
 
       <div className="border-t border-sidebar-border bg-sidebar shrink-0">
-        <p className="text-[9px] text-center px-6 py-3 font-medium text-muted-foreground uppercase tracking-tight leading-tight opacity-70">
-          As an eBay Associate, we may earn a small commission from qualifying purchases made through our links.
-        </p>
+        <div className="flex flex-col items-center gap-1 px-6 py-3">
+          <p className="text-[9px] text-center font-medium text-muted-foreground uppercase tracking-tight leading-tight opacity-70">
+            As an eBay Associate, we may earn a small commission from qualifying purchases made through our links.
+          </p>
+          <a 
+            href="/privacy.html" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="text-[9px] text-primary hover:underline font-bold uppercase tracking-tight"
+          >
+            Privacy Policy
+          </a>
+        </div>
         <InstallPrompt />
       </div>
     </>
