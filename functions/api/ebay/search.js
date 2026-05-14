@@ -19,7 +19,6 @@ export async function onRequest(context) {
     const { access_token } = await tokenRes.json();
 
     // 1. THE SIMPLEST KEYWORD STRING (The Broad Net)
-    // We avoid parentheses and company names to stay on the "Fast" API track.
     let q = queryInput;
     if (sportSetting !== "—" && sportSetting !== "") {
       q = `${sportSetting} ${q}`;
@@ -32,8 +31,6 @@ export async function onRequest(context) {
     else if (gradeSetting.includes("raw")) finalQuery += " nm raw -graded";
 
     // 2. THE STRICT AUCTION FILTER
-    // We MUST use AUCTION only to see cards ending in seconds.
-    // If we include FIXED_PRICE, the 2-hour items return.
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
@@ -47,6 +44,8 @@ export async function onRequest(context) {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        // FORCED LOCATION FIX: Prevents results from being filtered out based on local IP/Shipping
+        "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS%2Czip%3D10001",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
       }
     });
@@ -58,12 +57,10 @@ export async function onRequest(context) {
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
 
-      // Categorize any sport automatically
       let sport = sportSetting !== "—" ? sportSetting : "Card";
       const list = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey"];
       for (const s of list) { if (title.includes(s)) { sport = s; break; } }
 
-      // Identify any grade automatically
       let grade = "Raw";
       const is10 = title.includes("10") || title.includes("gem");
       const is9 = title.includes("9") && !is10;
@@ -90,8 +87,6 @@ export async function onRequest(context) {
       };
     });
 
-    // RE-SORT: The API often has 5-10 seconds of "latency jitter." 
-    // This manual sort forces the true winner to the top.
     items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
