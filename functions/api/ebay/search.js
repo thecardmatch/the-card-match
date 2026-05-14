@@ -18,19 +18,22 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE SIMPLEST KEYWORD STRING (The Broad Net)
-    let q = queryInput;
-    if (sportSetting !== "—" && sportSetting !== "") {
-      q = `${sportSetting} ${q}`;
+    // 1. THE LOGICAL "OR" FIX
+    // This turns "pokemon,baseball" into "(pokemon,baseball)" so eBay finds BOTH
+    let categoryQuery = "";
+    if (sportSetting && sportSetting !== "—") {
+      const cats = sportSetting.split(",").map(c => c.trim()).filter(Boolean);
+      categoryQuery = cats.length > 1 ? `(${cats.join(",")})` : cats[0];
     }
-    if (!q.trim()) q = "card";
 
-    let finalQuery = q;
+    let finalQuery = [categoryQuery, queryInput].filter(Boolean).join(" ");
+    if (!finalQuery.trim()) finalQuery = "card";
+
     if (gradeSetting.includes("10")) finalQuery += " 10 graded gem mint";
     else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
     else if (gradeSetting.includes("raw")) finalQuery += " nm raw -graded";
 
-    // 2. THE STRICT AUCTION FILTER
+    // 2. THE FILTERS
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
@@ -38,15 +41,13 @@ export async function onRequest(context) {
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100`;
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&category_ids=183454`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        // FORCED LOCATION: Ensures US results for everyone
         "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS%2Czip%3D10001",
-        // IDENTITY FIX: Tells eBay each user is a different person to prevent throttling
         "X-EBAY-C-ENDUSER-IP": request.headers.get("CF-Connecting-IP") || "127.0.0.1",
         "X-EBAY-C-REQUEST-ID": Math.random().toString(36).substring(7),
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
@@ -56,11 +57,10 @@ export async function onRequest(context) {
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. THE "UNIVERSAL" IDENTIFIER
+    // 3. THE MAPPING
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
-
-      let sport = sportSetting !== "—" ? sportSetting : "Card";
+      let sport = "Card";
       const list = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey"];
       for (const s of list) { if (title.includes(s)) { sport = s; break; } }
 
@@ -90,7 +90,6 @@ export async function onRequest(context) {
       };
     });
 
-    // RE-SORT
     items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
