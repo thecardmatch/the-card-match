@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard } from "@/data/pokemon";
 import { SORT_OPTIONS, buildSearchQuery } from "@/data/pokemon";
 import { searchCards } from "@/services/ebay";
-import { addToWatchlist } from "@/services/watchlist";
+import { addToWatchlist, removeFromWatchlist, fetchWatchlist } from "@/services/watchlist";
 
 const WATCHLIST_KEY = "cardmatch:watchlist";
 
@@ -58,6 +58,18 @@ export default function App() {
     return () => { cancelled = true; };
   }, [prefs]);
 
+  // SYNC: Load fresh watchlist from Supabase when user logs in to overwrite local stale data
+  useEffect(() => {
+    if (user) {
+      fetchWatchlist().then((dbCards) => {
+        if (dbCards && dbCards.length > 0) {
+          setLiked(dbCards);
+          window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(dbCards));
+        }
+      });
+    }
+  }, [user]);
+
   const handleNeedMore = useCallback(async () => {
     if (loadingMore || loading) return;
     setLoadingMore(true);
@@ -81,6 +93,18 @@ export default function App() {
     if (user) await addToWatchlist(user.id, card);
   }
 
+  // SURGICAL FIX: Centralized removal to clean up both LocalStorage and Supabase
+  async function handleRemove(cardId: string) {
+    setLiked((prev) => {
+      const newList = prev.filter((c) => c.id !== cardId);
+      window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(newList));
+      return newList;
+    });
+    if (user) {
+      await removeFromWatchlist(user.id, cardId);
+    }
+  }
+
   const searchQuery = buildSearchQuery(prefs);
 
   return (
@@ -102,7 +126,6 @@ export default function App() {
               {user ? <LogOut className="w-5 h-5 text-primary" /> : <UserIcon className="w-5 h-5" />}
             </button>
 
-            {/* RESTORED: Watchlist button with Notification Badge */}
             <button onClick={() => setWatchlistOpen(true)} className="md:hidden relative w-10 h-10 rounded-full bg-card border flex items-center justify-center">
               <Heart className={`w-5 h-5 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
               {liked.length > 0 && (
@@ -145,7 +168,7 @@ export default function App() {
       </main>
 
       <aside className="hidden md:block w-[350px] border-l border-border bg-card h-full overflow-y-auto shrink-0">
-        <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
+        <Sidebar liked={liked} onRemove={handleRemove} onClearAll={() => { setLiked([]); window.localStorage.removeItem(WATCHLIST_KEY); }} />
       </aside>
 
       <AnimatePresence>
@@ -153,7 +176,7 @@ export default function App() {
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setWatchlistOpen(false)} className="fixed inset-0 bg-black/60 z-[100] md:hidden" />
             <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 25 }} className="fixed inset-y-0 right-0 w-[85%] bg-card z-[110] md:hidden shadow-2xl overflow-y-auto">
-              <Sidebar liked={liked} onRemove={(id) => setLiked(l => l.filter(c => c.id !== id))} onClearAll={() => setLiked([])} />
+              <Sidebar liked={liked} onRemove={handleRemove} onClearAll={() => { setLiked([]); window.localStorage.removeItem(WATCHLIST_KEY); }} />
             </motion.div>
           </>
         )}
