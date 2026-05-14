@@ -23,11 +23,19 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
   const countdown = useCountdown(card.endTime);
   const allImages = card.images?.length ? card.images : [card.image];
 
+  // FIXED: Added velocity to handle quick "flicks" and threshold for intentional swipes
   const handleDragEnd = (_: any, info: PanInfo) => {
     const threshold = 100;
-    if (info.offset.y < -threshold) onSwipe("up");
-    else if (info.offset.x > threshold) onSwipe("right");
-    else if (info.offset.x < -threshold) onSwipe("left");
+    const velocityThreshold = 500;
+
+    if (info.offset.y < -threshold || info.velocity.y < -velocityThreshold) {
+      onSwipe("up");
+    } else if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
+      onSwipe("right");
+    } else if (info.offset.x < -threshold || info.velocity.x < -velocityThreshold) {
+      onSwipe("left");
+    }
+    // No "else" needed: dragSnapToOrigin (below) handles the snap-back to 0,0
   };
 
   const handleImageClick = (e: React.MouseEvent) => {
@@ -43,8 +51,12 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
       animate={{ scale: 1 - offset * 0.04, y: offset * 10 }}
       drag={isTop}
-      dragConstraints={{ left: 0, right: 0, top: -500, bottom: 0 }}
+      // FIXED: dragConstraints and dragSnapToOrigin prevent the "free floating" mode
+      dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
+      dragSnapToOrigin={true}
+      dragElastic={0.15}
       onDragEnd={handleDragEnd}
+      transition={{ type: "spring", stiffness: 300, damping: 25 }}
     >
       <div className="h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
         <div 
@@ -77,7 +89,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
 
         <div className="p-4 bg-card border-t border-border shrink-0">
           <div className="flex flex-wrap gap-1.5 mb-2">
-            {/* SURGICAL FIX: Labels now adapt based on card data */}
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
               {card.category === "Pokemon" ? "Pokémon TCG" : card.category}
             </span>
