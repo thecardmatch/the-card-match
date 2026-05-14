@@ -18,22 +18,23 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. THE LOGICAL "OR" FIX
-    // This turns "pokemon,baseball" into "(pokemon,baseball)" so eBay finds BOTH
+    // 1. THE UNIVERSAL CATEGORY MIXER
+    // This logic handles 1 category, 5 categories, or 0 categories.
     let categoryQuery = "";
     if (sportSetting && sportSetting !== "—") {
       const cats = sportSetting.split(",").map(c => c.trim()).filter(Boolean);
+      // We use the (A,B,C) syntax which is the ONLY way eBay allows OR across keywords
       categoryQuery = cats.length > 1 ? `(${cats.join(",")})` : cats[0];
     }
 
+    // We add "card" as a mandatory keyword to ensure we don't get random items
     let finalQuery = [categoryQuery, queryInput].filter(Boolean).join(" ");
-    if (!finalQuery.trim()) finalQuery = "card";
+    if (!finalQuery.includes("card")) finalQuery += " card";
 
-    if (gradeSetting.includes("10")) finalQuery += " 10 graded gem mint";
-    else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
-    else if (gradeSetting.includes("raw")) finalQuery += " nm raw -graded";
+    if (gradeSetting.includes("10")) finalQuery += " 10 gem";
+    else if (gradeSetting.includes("9")) finalQuery += " 9 mint";
+    else if (gradeSetting.includes("raw")) finalQuery += " raw -graded";
 
-    // 2. THE FILTERS
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
@@ -41,7 +42,10 @@ export async function onRequest(context) {
       `listingStatus:{ACTIVE}`
     ].join(",");
 
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&category_ids=183454`;
+    // THE KEY CHANGE: 
+    // We removed &category_ids entirely. 
+    // This allows the (A,B,C) query to find items across BOTH Sports and TCG categories simultaneously.
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100`;
 
     const ebayRes = await fetch(url, {
       headers: { 
@@ -57,11 +61,11 @@ export async function onRequest(context) {
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. THE MAPPING
+    // 2. THE TIMER & DATA MAPPING (Preserved exactly)
     const items = rawItems.map(item => {
       const title = item.title.toLowerCase();
       let sport = "Card";
-      const list = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey"];
+      const list = ["pokemon", "baseball", "basketball", "football", "soccer", "f1", "hockey", "magic", "yu-gi-oh"];
       for (const s of list) { if (title.includes(s)) { sport = s; break; } }
 
       let grade = "Raw";
@@ -90,6 +94,7 @@ export async function onRequest(context) {
       };
     });
 
+    // Final Sort: Ensures the mix is truly based on time, not category bias
     items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
 
     return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
