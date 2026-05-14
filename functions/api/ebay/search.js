@@ -30,11 +30,11 @@ export async function onRequest(context) {
     else if (gradeSetting.includes("9")) finalQuery += " 9 graded mint";
     else if (gradeSetting.includes("raw")) finalQuery += " nm raw -graded";
 
-    // 2. THE STRICT AUCTION FILTER
+    // 2. THE STRICT FILTER (Updated to include FIXED_PRICE so your brother sees all results)
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
       `priceCurrency:USD`,
-      `buyingOptions:{AUCTION}`,
+      `buyingOptions:{AUCTION|FIXED_PRICE}`,
       `listingStatus:{ACTIVE}`
     ].join(",");
 
@@ -79,7 +79,7 @@ export async function onRequest(context) {
         sport: sport.charAt(0).toUpperCase() + sport.slice(1),
         category: sport.charAt(0).toUpperCase() + sport.slice(1),
         grade: grade,
-        listingType: "Auction",
+        listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
