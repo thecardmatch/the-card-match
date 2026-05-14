@@ -40,7 +40,17 @@ export async function addToWatchlist(
   return { ok: true };
 }
 
-export async function removeFromWatchlist(cardId: string): Promise<void> {
+// CHANGED: Added userId to ensure the delete is authorized and sticks in the DB
+export async function removeFromWatchlist(userId: string, cardId: string): Promise<void> {
   if (!isSupabaseReady) return;
-  await supabase.from("watchlist").delete().eq("card_id", cardId);
+
+  const { error } = await supabase
+    .from("watchlist")
+    .delete()
+    .eq("user_id", userId)
+    .eq("card_id", cardId);
+
+  if (error) {
+    console.warn("[watchlist] remove failed", error.message);
+  }
 }
