@@ -26,17 +26,18 @@ export async function onRequest(context) {
       categoryQuery = cats.length > 1 ? `(${cats.join(",")})` : cats[0];
     }
 
-    // 2. STRICT GRADING UMBRELLA
+    // 2. STRICT GRADING UMBRELLA (Covers all major graders)
     let gradeTerms = "";
     if (gradeSetting.includes("10")) {
-      gradeTerms = `("psa 10","bgs 10","sgc 10","cgc 10","gem mint","pristine 10")`;
+      // Use quotes for exact phrase matching and negative keywords to filter junk
+      gradeTerms = `("psa 10","bgs 10","sgc 10","cgc 10","gem mint","pristine 10") -lot -set -bundle -anniversary -digital`;
     } else if (gradeSetting.includes("9")) {
-      gradeTerms = `("psa 9","bgs 9","sgc 9","cgc 9","mint 9")`;
+      gradeTerms = `("psa 9","bgs 9","sgc 9","cgc 9","mint 9") -lot -set -bundle`;
     } else if (gradeSetting.includes("raw")) {
-      gradeTerms = "raw -graded -psa -bgs -sgc -cgc";
+      gradeTerms = "raw -graded -psa -bgs -sgc -cgc -lot -set";
     }
 
-    let finalQuery = [categoryQuery, queryInput, gradeTerms].filter(Boolean).join(" ");
+    let finalQuery = [queryInput, categoryQuery, gradeTerms].filter(Boolean).join(" ");
     if (!finalQuery.toLowerCase().includes("card")) finalQuery += " card";
 
     const filter = [
@@ -62,7 +63,7 @@ export async function onRequest(context) {
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. DATA MAPPING
+    // 3. DATA MAPPING & VALIDATION
     let items = rawItems.map(item => {
       const title = item.title.toLowerCase();
       let sport = "Card";
@@ -73,6 +74,7 @@ export async function onRequest(context) {
       const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
       const has9 = title.includes("9") && !has10;
 
+      // Logic to assign the correct label based on the title
       if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : (has9 ? "PSA 9" : "PSA Graded");
       else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : (has9 ? "CGC 9" : "CGC Graded");
       else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : (has9 ? "BGS 9" : "BGS Graded");
@@ -96,7 +98,8 @@ export async function onRequest(context) {
       };
     });
 
-    // 4. SURGICAL FAIL-SAFE FILTER
+    // 4. FINAL CLEANUP FILTER
+    // Only keep items that actually match the requested grade to remove junk "lots"
     if (gradeSetting.includes("10")) {
       items = items.filter(i => i.grade.includes("10") || i.grade.toLowerCase().includes("gem") || i.grade.toLowerCase().includes("pristine"));
     } else if (gradeSetting.includes("9")) {
@@ -104,6 +107,9 @@ export async function onRequest(context) {
     } else if (gradeSetting.includes("raw")) {
       items = items.filter(i => i.grade === "Raw");
     }
+
+    // Secondary filter: Remove any listings that are missing images
+    items = items.filter(i => i.image !== "");
 
     if (sortChoice === "endingSoonest") {
       items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
