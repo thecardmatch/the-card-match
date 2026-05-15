@@ -26,8 +26,7 @@ export async function onRequest(context) {
       categoryQuery = cats.length > 1 ? `(${cats.join(",")})` : cats[0];
     }
 
-    // 2. STRICT GRADING UMBRELLA (The Fix)
-    // We use quotes ("") to force eBay to find EXACT grade matches.
+    // 2. STRICT GRADING UMBRELLA
     let gradeTerms = "";
     if (gradeSetting.includes("10")) {
       gradeTerms = `("psa 10","bgs 10","sgc 10","cgc 10","gem mint","pristine 10")`;
@@ -71,7 +70,6 @@ export async function onRequest(context) {
       for (const s of list) { if (title.includes(s)) { sport = s; break; } }
 
       let gradeLabel = "Raw";
-      // Stricter logic for determining the label
       const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
       const has9 = title.includes("9") && !has10;
 
@@ -98,8 +96,7 @@ export async function onRequest(context) {
       };
     });
 
-    // 4. SURGICAL FAIL-SAFE FILTER (The vital part)
-    // If a user selected Grade 10, but the card doesn't have 10/Gem/Pristine in the title, we kill it.
+    // 4. SURGICAL FAIL-SAFE FILTER
     if (gradeSetting.includes("10")) {
       items = items.filter(i => i.grade.includes("10") || i.grade.toLowerCase().includes("gem") || i.grade.toLowerCase().includes("pristine"));
     } else if (gradeSetting.includes("9")) {
@@ -109,4 +106,12 @@ export async function onRequest(context) {
     }
 
     if (sortChoice === "endingSoonest") {
-      items.sort((a, b) => new Date(a.endTime) - new
+      items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
+    }
+
+    return new Response(JSON.stringify({ items }), { headers: { "Content-Type": "application/json" } });
+
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message, items: [] }), { status: 500 });
+  }
+}
