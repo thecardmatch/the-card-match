@@ -10,7 +10,7 @@ export async function onRequest(context) {
   const maxPrice = searchParams.get("maxPrice") || "20000";
   const offset = searchParams.get("offset") || "0";
 
-  // eBay Official Category IDs
+  // Official eBay Category IDs - This is the "Secret Sauce" to stop Sport Bleed
   const categoryMap = {
     "pokemon": "183454",
     "baseball": "213",
@@ -31,11 +31,9 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    const categoryId = categoryMap[sportSetting] || "";
+    const targetCat = categoryMap[sportSetting] || "";
 
-    // 1. THE STRIKE-ZONE QUERY
-    // We remove the sport name from the query string and put it in category_ids
-    // This stops eBay from "guessing" what category we want.
+    // 1. STRICT GRADING + NEGATIVE MATCHING
     let gradeTerms = "";
     if (gradeSetting.includes("10")) {
       gradeTerms = `("psa 10","bgs 10","sgc 10","cgc 10","gem mint") -lot -set -bundle -digital`;
@@ -45,73 +43,84 @@ export async function onRequest(context) {
       gradeTerms = "raw -graded -psa -bgs -sgc -cgc -lot -set";
     }
 
-    // We build a very specific query: [Card Name] + [Grade]
-    const finalQuery = `${queryInput} ${gradeTerms}`.trim();
+    // We DO NOT put the sport name in the query. We use the Category ID instead.
+    // This stops eBay from "guessing" and showing other sports.
+    const finalQuery = `${queryInput} ${gradeTerms}`.trim() || "card";
 
-    // 2. THE FILTER (Auctions + BIN + Status)
-    const filter = [
+    // 2. THE FILTER STRING
+    const filterParts = [
       `price:[${minPrice}..${maxPrice}]`,
+      `priceCurrency:USD`,
       `buyingOptions:{AUCTION|FIXED_PRICE}`, 
-      `listingStatus:{ACTIVE}`,
-      categoryId ? `categoryId:{${categoryId}}` : "" // Strict Category Locking
-    ].filter(Boolean).join(",");
+      `listingStatus:{ACTIVE}`
+    ];
+    const filter = filterParts.join(",");
 
-    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
+    // Build the URL with category_ids as a TOP LEVEL parameter (STRICT MODE)
+    let url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
+
+    if (targetCat) {
+      url += `&category_ids=${targetCat}`;
+    }
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS%2Czip%3D10001",
-        "User-Agent": "TheCardMatch/1.1" 
+        "User-Agent": "TheCardMatch/1.2" 
       }
     });
 
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. THE "PURGE" FILTER
-    // We map AND filter in one go to ensure only 100% matches get through
-    const items = rawItems
-      .map(item => {
-        const title = item.title.toLowerCase();
+    // 3. THE "SPORT GUARD" VALIDATION LOGIC
+    let items = rawItems.map(item => {
+      const title = item.title.toLowerCase();
 
-        // Is it actually the grade we want?
-        const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-        const has9 = title.includes("9") && !has10;
+      // Determine Grade Label
+      let gradeLabel = "Raw";
+      const is10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+      const is9 = title.includes("9") && !is10;
 
-        let gradeLabel = "Raw";
-        if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : (has9 ? "PSA 9" : "PSA Graded");
-        else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : (has9 ? "CGC 9" : "CGC Graded");
-        else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : (has9 ? "BGS 9" : "BGS Graded");
-        else if (has10) gradeLabel = "Grade 10";
+      if (title.includes("psa")) gradeLabel = is10 ? "PSA 10" : (is9 ? "PSA 9" : "PSA Graded");
+      else if (title.includes("cgc")) gradeLabel = is10 ? "CGC 10" : (is9 ? "CGC 9" : "CGC Graded");
+      else if (title.includes("bgs")) gradeLabel = is10 ? "BGS 10" : (is9 ? "BGS 9" : "BGS Graded");
+      else if (is10) gradeLabel = "Grade 10";
+      else if (title.includes("graded")) gradeLabel = "Graded";
 
-        const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
+      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-        return {
-          id: itemId,
-          name: item.title,
-          sport: sportSetting.charAt(0).toUpperCase() + sportSetting.slice(1),
-          grade: gradeLabel,
-          listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
-          image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-          currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
-          endTime: item.itemEndDate,
-          ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
-        };
-      })
-      .filter(item => {
-        // FINAL VALIDATION:
-        // 1. If looking for 10, it MUST have a 10 grade label.
-        if (gradeSetting.includes("10") && !item.grade.includes("10")) return false;
-        // 2. It must have an image.
-        if (!item.image) return false;
-        // 3. Avoid obvious non-card items.
-        const title = item.name.toLowerCase();
-        if (title.includes("lot") || title.includes("pack") || title.includes("box")) return false;
+      return {
+        id: itemId,
+        name: item.title,
+        sport: sportSetting.charAt(0).toUpperCase() + sportSetting.slice(1),
+        grade: gradeLabel,
+        listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
+        image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
+        currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
+        endTime: item.itemEndDate,
+        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+      };
+    });
 
-        return true;
-      });
+    // 4. THE KILL-SWITCH FILTER (Final Defense)
+    items = items.filter(item => {
+      const title = item.name.toLowerCase();
+
+      // A) If we want Graded 10, the card MUST be graded 10.
+      if (gradeSetting.includes("10") && !item.grade.includes("10")) return false;
+
+      // B) If it's Pokemon, but the title has "baseball" or "football", kill it.
+      // This catches the "Cam Ward" outliers that sneak through Category IDs.
+      if (sportSetting === "pokemon") {
+        const sportLeaks = ["baseball", "football", "basketball", "soccer", "hockey", "f1", "nascar"];
+        if (sportLeaks.some(leak => title.includes(leak))) return false;
+      }
+
+      return item.image !== ""; // Must have image
+    });
 
     if (sortChoice === "endingSoonest") {
       items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
