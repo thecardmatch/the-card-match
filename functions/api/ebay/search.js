@@ -10,7 +10,7 @@ export async function onRequest(context) {
   const maxPrice = searchParams.get("maxPrice") || "20000";
   const offset = searchParams.get("offset") || "0";
 
-  // Mapping string names to eBay's hardcoded Category IDs to prevent "Sport Bleed"
+  // eBay Official Category IDs
   const categoryMap = {
     "pokemon": "183454",
     "baseball": "213",
@@ -31,14 +31,11 @@ export async function onRequest(context) {
     });
     const { access_token } = await tokenRes.json();
 
-    // 1. HARD CATEGORY FILTER
-    // Instead of putting "Pokemon" in the keywords, we use the category_ids parameter
-    let categoryId = "";
-    if (sportSetting && categoryMap[sportSetting]) {
-      categoryId = categoryMap[sportSetting];
-    }
+    const categoryId = categoryMap[sportSetting] || "";
 
-    // 2. STRICT GRADING UMBRELLA
+    // 1. THE STRIKE-ZONE QUERY
+    // We remove the sport name from the query string and put it in category_ids
+    // This stops eBay from "guessing" what category we want.
     let gradeTerms = "";
     if (gradeSetting.includes("10")) {
       gradeTerms = `("psa 10","bgs 10","sgc 10","cgc 10","gem mint") -lot -set -bundle -digital`;
@@ -48,77 +45,73 @@ export async function onRequest(context) {
       gradeTerms = "raw -graded -psa -bgs -sgc -cgc -lot -set";
     }
 
-    // We keep the query focused ONLY on the specific card and the grade
-    let finalQuery = [queryInput, gradeTerms].filter(Boolean).join(" ");
-    if (!finalQuery.toLowerCase().includes("card") && !categoryId) finalQuery += " card";
+    // We build a very specific query: [Card Name] + [Grade]
+    const finalQuery = `${queryInput} ${gradeTerms}`.trim();
 
+    // 2. THE FILTER (Auctions + BIN + Status)
     const filter = [
       `price:[${minPrice}..${maxPrice}]`,
-      `priceCurrency:USD`,
       `buyingOptions:{AUCTION|FIXED_PRICE}`, 
-      `listingStatus:{ACTIVE}`
-    ].join(",");
+      `listingStatus:{ACTIVE}`,
+      categoryId ? `categoryId:{${categoryId}}` : "" // Strict Category Locking
+    ].filter(Boolean).join(",");
 
-    // We add &category_ids=${categoryId} which is the ultimate shield against Cam Ward appearing in Pokemon
-    let url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
-    if (categoryId) {
-      url += `&category_ids=${categoryId}`;
-    }
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(finalQuery)}&filter=${encodeURIComponent(filter)}&sort=${sortChoice}&limit=100&offset=${offset}`;
 
     const ebayRes = await fetch(url, {
       headers: { 
         "Authorization": `Bearer ${access_token}`,
         "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
         "X-EBAY-C-ENDUSERCTX": "contextualLocation=country%3DUS%2Czip%3D10001",
-        "X-EBAY-C-ENDUSER-IP": request.headers.get("CF-Connecting-IP") || "127.0.0.1",
-        "X-EBAY-C-REQUEST-ID": Math.random().toString(36).substring(7),
-        "User-Agent": "TheCardMatch/1.0" 
+        "User-Agent": "TheCardMatch/1.1" 
       }
     });
 
     const data = await ebayRes.json();
     const rawItems = data.itemSummaries || [];
 
-    // 3. DATA MAPPING
-    let items = rawItems.map(item => {
-      const title = item.title.toLowerCase();
-      let sport = sportSetting.charAt(0).toUpperCase() + sportSetting.slice(1) || "Card";
+    // 3. THE "PURGE" FILTER
+    // We map AND filter in one go to ensure only 100% matches get through
+    const items = rawItems
+      .map(item => {
+        const title = item.title.toLowerCase();
 
-      let gradeLabel = "Raw";
-      const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
-      const has9 = title.includes("9") && !has10;
+        // Is it actually the grade we want?
+        const has10 = title.includes("10") || title.includes("gem") || title.includes("pristine");
+        const has9 = title.includes("9") && !has10;
 
-      if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : (has9 ? "PSA 9" : "PSA Graded");
-      else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : (has9 ? "CGC 9" : "CGC Graded");
-      else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : (has9 ? "BGS 9" : "BGS Graded");
-      else if (has10) gradeLabel = "Grade 10";
-      else if (title.includes("graded")) gradeLabel = "Graded";
+        let gradeLabel = "Raw";
+        if (title.includes("psa")) gradeLabel = has10 ? "PSA 10" : (has9 ? "PSA 9" : "PSA Graded");
+        else if (title.includes("cgc")) gradeLabel = has10 ? "CGC 10" : (has9 ? "CGC 9" : "CGC Graded");
+        else if (title.includes("bgs")) gradeLabel = has10 ? "BGS 10" : (has9 ? "BGS 9" : "BGS Graded");
+        else if (has10) gradeLabel = "Grade 10";
 
-      const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
-      const isAuction = item.buyingOptions?.includes("AUCTION");
+        const itemId = item.itemId.includes("|") ? item.itemId.split("|")[1] : item.itemId;
 
-      return {
-        id: itemId,
-        name: item.title,
-        sport: sport,
-        category: sport,
-        grade: gradeLabel,
-        listingType: isAuction ? "Auction" : "Buy It Now",
-        image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
-        currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
-        endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
-      };
-    });
+        return {
+          id: itemId,
+          name: item.title,
+          sport: sportSetting.charAt(0).toUpperCase() + sportSetting.slice(1),
+          grade: gradeLabel,
+          listingType: item.buyingOptions?.includes("AUCTION") ? "Auction" : "Buy It Now",
+          image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
+          currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
+          endTime: item.itemEndDate,
+          ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        };
+      })
+      .filter(item => {
+        // FINAL VALIDATION:
+        // 1. If looking for 10, it MUST have a 10 grade label.
+        if (gradeSetting.includes("10") && !item.grade.includes("10")) return false;
+        // 2. It must have an image.
+        if (!item.image) return false;
+        // 3. Avoid obvious non-card items.
+        const title = item.name.toLowerCase();
+        if (title.includes("lot") || title.includes("pack") || title.includes("box")) return false;
 
-    // 4. THE FAIL-SAFE GRADE FILTER
-    if (gradeSetting.includes("10")) {
-      items = items.filter(i => i.grade.includes("10") || i.grade.toLowerCase().includes("gem") || i.grade.toLowerCase().includes("pristine"));
-    } else if (gradeSetting.includes("9")) {
-      items = items.filter(i => i.grade.includes("9") && !i.grade.includes("10"));
-    } else if (gradeSetting.includes("raw")) {
-      items = items.filter(i => i.grade === "Raw");
-    }
+        return true;
+      });
 
     if (sortChoice === "endingSoonest") {
       items.sort((a, b) => new Date(a.endTime) - new Date(b.endTime));
