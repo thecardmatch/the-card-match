@@ -1,7 +1,8 @@
 import express from "express";
 import cors from "cors";
+import { createClient } from "@supabase/supabase-js";
 
-const app = express();
+const app  = express();
 const PORT = 3001;
 
 app.use(cors({ origin: true }));
@@ -9,44 +10,117 @@ app.use(express.json());
 
 const EPN_CAMP_ID = "5339150952";
 
+// ─── Supabase admin client (server-side caching) ──────────────────────────────
+// Requires SUPABASE_SERVICE_ROLE_KEY in Replit Secrets.
+// If not set the app degrades gracefully — no caching, direct eBay calls.
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = (SUPABASE_URL && SUPABASE_SRK)
+  ? createClient(SUPABASE_URL, SUPABASE_SRK)
+  : null;
+if (!supabase) console.warn("[cache] SUPABASE_SERVICE_ROLE_KEY not set — caching disabled");
+
+// ─── Cache TTLs ───────────────────────────────────────────────────────────────
+const ENTITY_TTL_MS = 30 * 60 * 1000;  // 30 min — entity-specific deck
+const BROAD_TTL_MS  = 15 * 60 * 1000;  // 15 min — broad category deck
+
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+async function getEntityCache(entityId) {
+  if (!supabase) return null;
+  try {
+    const { data } = await supabase
+      .from("entity_card_cache")
+      .select("cards")
+      .eq("entity_id", entityId)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    return data?.cards ?? null;
+  } catch { return null; }
+}
+
+async function setEntityCache(entityId, cards) {
+  if (!supabase) return;
+  try {
+    await supabase.from("entity_card_cache").upsert({
+      entity_id:  entityId,
+      cards,
+      fetched_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + ENTITY_TTL_MS).toISOString(),
+    }, { onConflict: "entity_id" });
+  } catch (e) { console.warn("[cache] entity write failed:", e.message); }
+}
+
+async function getBroadCache(cacheKey) {
+  if (!supabase) return null;
+  try {
+    const { data } = await supabase
+      .from("broad_category_cache")
+      .select("cards")
+      .eq("cache_key", cacheKey)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+    return data?.cards ?? null;
+  } catch { return null; }
+}
+
+async function setBroadCache(cacheKey, cards) {
+  if (!supabase) return;
+  try {
+    await supabase.from("broad_category_cache").upsert({
+      cache_key:  cacheKey,
+      cards,
+      fetched_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + BROAD_TTL_MS).toISOString(),
+    }, { onConflict: "cache_key" });
+  } catch (e) { console.warn("[cache] broad write failed:", e.message); }
+}
+
+function buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk) {
+  return [
+    [...cats].sort().join(",") || "all",
+    sort,
+    [...conds].sort().join(",") || "none",
+    listingType,
+    String(min),
+    String(max),
+    String(showBulk),
+  ].join("|");
+}
+
 // ─── eBay OAuth token cache ───────────────────────────────────────────────────
 let _token = null;
 let _tokenExpiry = 0;
 
 async function getEbayToken() {
   if (_token && Date.now() < _tokenExpiry) return _token;
-  const id = process.env.EBAY_CLIENT_ID;
+  const id     = process.env.EBAY_CLIENT_ID;
   const secret = process.env.EBAY_CLIENT_SECRET;
   if (!id || !secret) throw new Error("Missing EBAY_CLIENT_ID / EBAY_CLIENT_SECRET");
   const creds = Buffer.from(`${id}:${secret}`).toString("base64");
   const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    method: "POST",
+    method:  "POST",
     headers: { Authorization: `Basic ${creds}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+    body:    "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
   });
   if (!res.ok) throw new Error(`eBay token error ${res.status}: ${await res.text()}`);
   const json = await res.json();
-  _token = json.access_token;
+  _token       = json.access_token;
   _tokenExpiry = Date.now() + (json.expires_in - 120) * 1000;
   return _token;
 }
 
-// ─── Category → eBay categoryId (Browse API category_ids param) ───────────────
-// Using these alongside a minimal keyword prevents cross-category contamination.
+// ─── Category → eBay categoryId ──────────────────────────────────────────────
 const CATEGORY_IDS = {
-  Pokemon:     "183454", // Pokémon Individual Cards
-  Basketball:  "214",   // Basketball Cards (Singles)
-  Baseball:    "213",   // Baseball Cards (Singles)
-  Football:    "217",   // Football Cards (Singles)
-  Hockey:      "216",   // Hockey Cards (Singles)
-  Soccer:      "260",   // Soccer Cards (Singles)
-  "Formula 1": null,    // No dedicated eBay category — keyword only
-  WWE:         null,    // No reliable eBay category — keyword only
+  Pokemon:     "183454",
+  Basketball:  "214",
+  Baseball:    "213",
+  Football:    "217",
+  Hockey:      "216",
+  Soccer:      "260",
+  "Formula 1": null,
+  WWE:         null,
 };
 
-// Minimal positive keyword per category (used when no player name is supplied).
-// These are sport nouns only — NO grade, condition, or "PSA" keywords.
-// Grades/conditions ONLY go through aspect_filter / conditionIds filter params.
 const CAT_BASE_KEYWORD = {
   Pokemon:     "pokemon card",
   Basketball:  "basketball card",
@@ -61,21 +135,17 @@ const CAT_BASE_KEYWORD = {
 function detectCategory(title, selectedCats) {
   if (selectedCats.length === 1) return selectedCats[0];
   const t = title.toLowerCase();
-  if (t.includes("pokemon")) return "Pokemon";
-  if (t.includes("basketball") || t.includes(" nba ")) return "Basketball";
-  if (t.includes("baseball") || t.includes(" mlb ")) return "Baseball";
-  if (t.includes("football") || t.includes(" nfl ")) return "Football";
-  if (t.includes("hockey") || t.includes(" nhl ")) return "Hockey";
-  if (t.includes("soccer") || t.includes("fifa") || t.includes(" mls ")) return "Soccer";
-  if (t.includes("formula 1") || t.includes("formula1") || /\bf1\b/.test(t)) return "Formula 1";
-  if (t.includes("wwe") || t.includes("wwf") || t.includes("wrestling")) return "WWE";
+  if (t.includes("pokemon"))                             return "Pokemon";
+  if (t.includes("basketball") || t.includes(" nba "))  return "Basketball";
+  if (t.includes("baseball")   || t.includes(" mlb "))  return "Baseball";
+  if (t.includes("football")   || t.includes(" nfl "))  return "Football";
+  if (t.includes("hockey")     || t.includes(" nhl "))  return "Hockey";
+  if (t.includes("soccer")     || t.includes("fifa"))   return "Soccer";
+  if (t.includes("formula 1")  || /\bf1\b/.test(t))     return "Formula 1";
+  if (t.includes("wwe")        || t.includes("wrestling")) return "WWE";
   return selectedCats[0] || "Unknown";
 }
 
-/**
- * Extract a human-readable grade from the listing title.
- * Covers PSA, BGS, SGC, CGC, HGA, AGS, GMA — returns e.g. "PSA 10", "BGS 9.5", "Raw".
- */
 function detectGrade(title) {
   const m = title.match(/\b(psa|bgs|sgc|cgc|hga|ags|gma|csg)\s*(\d+(?:\.\d+)?)\b/i);
   if (m) return `${m[1].toUpperCase()} ${m[2]}`;
@@ -83,88 +153,55 @@ function detectGrade(title) {
   return "Raw";
 }
 
-/**
- * Build a direct eBay affiliate URL — no Rover redirect pixel.
- * Prefers itemAffiliateWebUrl (returned when affiliate header is set),
- * otherwise builds a clean URL with EPN params.
- */
 function buildAffiliateUrl(item) {
-  // Prefer eBay's pre-signed affiliate URL (requires the X-EBAY-C-ENDUSERCTX header).
   if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
-
-  const AFF_PARAMS = {
-    campid:   EPN_CAMP_ID,
-    toolid:   "10001",
-    mkevt:    "1",
-    mkcid:    "1",
-    mkrid:    "711-53200-19255-0",
-    customid: "thecardmatch",
-  };
-
-  // Try to stamp the itemWebUrl.
+  const AFF = { campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
+                mkrid: "711-53200-19255-0", customid: "thecardmatch" };
   const rawUrl = item.itemWebUrl || "";
   if (rawUrl) {
     try {
       const u = new URL(rawUrl);
-      const cleanUrl = new URL(`${u.origin}${u.pathname}`);
-      Object.entries(AFF_PARAMS).forEach(([k, v]) => cleanUrl.searchParams.set(k, v));
-      return cleanUrl.toString();
+      const clean = new URL(`${u.origin}${u.pathname}`);
+      Object.entries(AFF).forEach(([k, v]) => clean.searchParams.set(k, v));
+      return clean.toString();
     } catch { /* fall through */ }
   }
-
-  // Last resort: build a direct /itm/{id} URL from the itemId.
   if (item.itemId) {
-    const direct = new URL(`https://www.ebay.com/itm/${item.itemId}`);
-    Object.entries(AFF_PARAMS).forEach(([k, v]) => direct.searchParams.set(k, v));
-    return direct.toString();
+    const d = new URL(`https://www.ebay.com/itm/${item.itemId}`);
+    Object.entries(AFF).forEach(([k, v]) => d.searchParams.set(k, v));
+    return d.toString();
   }
-
   return "";
 }
 
 function mapItem(item, selectedCats) {
-  const primaryImg = item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "";
+  const primaryImg     = item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "";
   const additionalImgs = (item.additionalImages || []).map((i) => i.imageUrl).filter(Boolean);
-  const allImages = primaryImg
-    ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)]
-    : additionalImgs;
-  const buyingOptions = item.buyingOptions || [];
-  const listingType = buyingOptions.includes("AUCTION") ? "Auction" : "BuyItNow";
-
-  // For active auctions, eBay returns the live bid in currentBidPrice.
-  // price can be $0.00 (starting price before any bids) — always prefer currentBidPrice.
-  const bidValue =
-    parseFloat(item.currentBidPrice?.value ?? "") ||
-    parseFloat(item.price?.value ?? "") ||
-    0;
-
-  // Always build an affiliate URL — prefer the EPN-signed one eBay returns,
-  // fall back to our own stamped URL so campid is never missing.
-  const affiliateUrl = buildAffiliateUrl(item);
-
+  const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
+  const buyingOptions  = item.buyingOptions || [];
+  const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "BuyItNow";
+  const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
   return {
-    id: item.itemId,
-    name: item.title || "Unknown Card",
-    category: detectCategory(item.title || "", selectedCats),
-    image: primaryImg,
-    images: allImages,
-    currentBid: bidValue,
-    currency: item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-    grade: detectGrade(item.title || ""),
-    ebayUrl: affiliateUrl,
-    endTime: item.itemEndDate || null,
-    watchCount: item.watchCount || 0,
-    condition: item.condition || "",
+    id:          item.itemId,
+    name:        item.title || "Unknown Card",
+    category:    detectCategory(item.title || "", selectedCats),
+    image:       primaryImg,
+    images:      allImages,
+    currentBid:  bidValue,
+    currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+    grade:       detectGrade(item.title || ""),
+    ebayUrl:     buildAffiliateUrl(item),
+    endTime:     item.itemEndDate || null,
+    watchCount:  item.watchCount || 0,
+    condition:   item.condition || "",
     listingType,
   };
 }
 
-// ─── Post-filter: drop Card Supplies (categoryId 183444) ─────────────────────
 function isSuppliesCategory(item) {
   return (item.categories || []).some((c) => String(c.categoryId) === "183444");
 }
 
-// ─── Sort value mapping ───────────────────────────────────────────────────────
 const SORT_MAP = {
   endingSoonest:      "endingSoonest",
   priceAsc:           "price",
@@ -174,89 +211,52 @@ const SORT_MAP = {
   bidCountDescending: "bidCountDescending",
 };
 
-// ─── Negative keywords (appended to q when showBulk is false) ────────────────
-// Kept intentionally minimal — only the most obvious bulk-only terms.
-// Over-excluding with more keywords causes real individual listings to disappear,
-// making our results diverge from what eBay actually shows for the same search.
 const BULK_EXCLUSION = ["-lot", "-bundle"].join(" ");
 
-// ─── Dynamic condition + grade aspect filters ─────────────────────────────────
-// Conditions: "Raw" → conditionIds:{3000}, any Grade → conditionIds:{2750}
-// Grade aspect filter: Grade:10|9 (Browse API format — never stuffed into q)
 function buildConditionParams(conditions) {
-  if (!conditions || conditions.length === 0) {
-    return { conditionFilter: null, aspectFilter: null };
-  }
+  if (!conditions || conditions.length === 0) return { conditionFilter: null, aspectFilter: null };
   const hasRaw    = conditions.includes("Raw");
-  const grades    = conditions
-    .filter((c) => c.startsWith("Grade "))
-    .map((c) => c.replace("Grade ", ""));
+  const grades    = conditions.filter((c) => c.startsWith("Grade ")).map((c) => c.replace("Grade ", ""));
   const hasGrades = grades.length > 0;
-
   let conditionFilter = null;
   if (hasRaw && hasGrades) conditionFilter = "conditionIds:{3000|2750}";
   else if (hasRaw)         conditionFilter = "conditionIds:{3000}";
   else if (hasGrades)      conditionFilter = "conditionIds:{2750}";
-
-  // aspect_filter: Browse API format — Grade:10|9 (pipe-separated numeric values)
   const aspectFilter = hasGrades ? `Grade:${grades.join("|")}` : null;
-
   return { conditionFilter, aspectFilter };
 }
 
-// ─── Grade post-filter helpers ────────────────────────────────────────────────
-/**
- * Parse the conditions param into a grade filter descriptor.
- * Returns null if no grade/raw filter is active (all items pass).
- */
 function buildGradeFilter(conditions) {
-  const wantRaw      = conditions.includes("Raw");
-  const wantNums     = conditions
-    .filter((c) => c.startsWith("Grade "))
-    .map((c) => c.replace("Grade ", "").trim()); // ["7","8","9","10"]
+  const wantRaw  = conditions.includes("Raw");
+  const wantNums = conditions.filter((c) => c.startsWith("Grade ")).map((c) => c.replace("Grade ", "").trim());
   if (!wantRaw && wantNums.length === 0) return null;
   return { wantRaw, wantNums };
 }
 
-/**
- * Returns true only if the mapped item's grade exactly matches one of the
- * requested grades.  "Graded" (title has "graded" but no grading label) is
- * treated as ambiguous and rejected when a specific grade number is required.
- */
 function passesGradeFilter(gradeStr, filter) {
   if (!filter) return true;
   const { wantRaw, wantNums } = filter;
-
   if (!gradeStr || gradeStr === "Raw") return wantRaw;
-  if (gradeStr === "Graded") return wantNums.length === 0; // ambiguous — reject when specific grade asked
-
-  // "PSA 10", "BGS 9.5", "CGC 7" → extract trailing number
+  if (gradeStr === "Graded") return wantNums.length === 0;
   const m = gradeStr.match(/(\d+(?:\.\d+)?)$/);
   if (!m) return false;
-  return wantNums.includes(m[1]); // exact match: "10" === "10", NOT "9.5" === "9"
+  return wantNums.includes(m[1]);
 }
 
-// ─── Single eBay Browse API search ───────────────────────────────────────────
+// ─── Core eBay Browse API call ────────────────────────────────────────────────
 async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 25, offset = 0) {
-  const params = new URLSearchParams({
-    sort: sortVal,
-    limit: String(limit),
-    fieldgroups: "MATCHING_ITEMS,EXTENDED",
-  });
+  const params = new URLSearchParams({ sort: sortVal, limit: String(limit), fieldgroups: "MATCHING_ITEMS,EXTENDED" });
   if (offset > 0) params.set("offset", String(offset));
-  // q is optional when category_ids is set, but eBay requires at least one positive
-  // keyword when negatives are present — use a trimmed q if non-empty.
   if (q && q.trim()) params.set("q", q.trim());
   if (filterStr) params.set("filter", filterStr);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
   if (categoryId) params.set("category_ids", categoryId);
-
   const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
   const res = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization:              `Bearer ${token}`,
       "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      "X-EBAY-C-ENDUSERCTX":    `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
     },
   });
   if (!res.ok) {
@@ -267,7 +267,83 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   return res.json();
 }
 
-// ─── /api/ebay/search ─────────────────────────────────────────────────────────
+// ─── GET /api/entities — autocomplete ────────────────────────────────────────
+app.get("/api/entities", async (req, res) => {
+  if (!supabase) return res.json({ entities: [] });
+  const { q = "", limit = "8" } = req.query;
+  const trimmed = q.trim();
+  if (trimmed.length < 2) return res.json({ entities: [] });
+  try {
+    const { data, error } = await supabase
+      .from("searchable_entities")
+      .select("id, name, category, ebay_keyword")
+      .ilike("name", `%${trimmed}%`)
+      .order("name")
+      .limit(parseInt(limit, 10));
+    if (error) throw error;
+    return res.json({ entities: data ?? [] });
+  } catch (err) {
+    console.error("[entities] autocomplete error:", err.message);
+    return res.json({ entities: [] });
+  }
+});
+
+// ─── GET /api/search — entity-specific card deck (with Supabase cache) ────────
+app.get("/api/search", async (req, res) => {
+  try {
+    const { entityId } = req.query;
+    if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
+
+    // 1. Check entity cache
+    const cached = await getEntityCache(entityId);
+    if (cached && cached.length > 0) {
+      const now    = new Date();
+      const active = cached.filter((c) =>
+        c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
+      );
+      return res.json({ items: active, fromCache: true });
+    }
+
+    // 2. Load entity definition from Supabase
+    if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
+    const { data: entity, error: eErr } = await supabase
+      .from("searchable_entities")
+      .select("*")
+      .eq("id", entityId)
+      .maybeSingle();
+    if (eErr || !entity) return res.status(404).json({ error: "Entity not found", items: [] });
+
+    // 3. Dual eBay fetch: auctions (endingSoonest) + BuyItNow (bestMatch)
+    const token  = await getEbayToken();
+    const catId  = CATEGORY_IDS[entity.category] ?? null;
+    const kw     = `${entity.ebay_keyword} -lot -bundle`;
+    const baseFilter = "price:[1..],priceCurrency:USD";
+
+    const [auctionData, binData] = await Promise.all([
+      ebaySearch(token, kw, "endingSoonest", `${baseFilter},buyingOptions:{AUCTION}`,    null, catId, 100, 0),
+      ebaySearch(token, kw, "bestMatch",     `${baseFilter},buyingOptions:{FIXED_PRICE}`, null, catId, 100, 0),
+    ]);
+
+    const cats    = [entity.category];
+    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
+    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
+
+    // 4. Merge: auctions first (already endingSoonest), then unique BIN items
+    const auctionIds = new Set(auctions.map((i) => i.id));
+    const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
+    const merged     = [...auctions, ...uniqueBin];
+
+    // 5. Cache asynchronously (don't block the response)
+    setEntityCache(entityId, merged).catch(() => {});
+
+    return res.json({ items: merged, fromCache: false });
+  } catch (err) {
+    console.error("[entity search] error:", err.message);
+    return res.status(500).json({ error: err.message, items: [] });
+  }
+});
+
+// ─── GET /api/ebay/search — broad category browse (with Supabase cache) ───────
 app.get("/api/ebay/search", async (req, res) => {
   try {
     const token = await getEbayToken();
@@ -276,120 +352,108 @@ app.get("/api/ebay/search", async (req, res) => {
       sort        = "bestMatch",
       minPrice    = "0",
       maxPrice    = "",
-      query       = "",         // player name / free text only
+      query       = "",
       conditions  = "",
       showBulk    = "false",
       listingType = "All",
-      offset      = "0",        // pagination — client increments by 50 each load-more
+      offset      = "0",
     } = req.query;
 
-    const cats   = categories.split(",").filter(Boolean);
-    const conds  = conditions.split(",").filter(Boolean);
+    const cats    = categories.split(",").filter(Boolean);
+    const conds   = conditions.split(",").filter(Boolean);
     const sortVal = SORT_MAP[sort] || "bestMatch";
-
-    // ── Filters ───────────────────────────────────────────────────────────────
-    const filterParts = [];
-
-    // Price — always enforce $1 floor
-    const min = Math.max(1, parseFloat(minPrice) || 0);
-    const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
-    filterParts.push(`price:[${min}..${max}],priceCurrency:USD`);
-
-    // Condition / grade (conditionIds + aspect_filter)
-    const { conditionFilter, aspectFilter } = buildConditionParams(conds);
-    if (conditionFilter) filterParts.push(conditionFilter);
-
-    // Listing type
-    if (listingType === "Auction")      filterParts.push("buyingOptions:{AUCTION}");
-    else if (listingType === "BuyItNow") filterParts.push("buyingOptions:{FIXED_PRICE}");
-
-    const filterStr = filterParts.join(",");
-
-    // ── Negative keywords suffix ──────────────────────────────────────────────
-    const bulkSuffix = showBulk === "true" ? "" : ` ${BULK_EXCLUSION}`;
-
-    // ── Build q: ONLY player/card name + negative keywords ───────────────────
-    // Never append category name, grade number, or "PSA" to q.
-    // Category precision comes from category_ids; grade from aspect_filter.
-    const playerQ = query.trim();
-
-    // ── Grade post-filter descriptor ─────────────────────────────────────────
-    // Built from the selected conditions. Used AFTER fetching to remove the few
-    // eBay items that slip through aspect_filter despite not matching the grade.
-    // We do NOT oversample — results mirror eBay's sort order page-for-page.
-    const gradeFilter = buildGradeFilter(conds); // null = no grade selected
-
-    // Direct 1-to-1 eBay offset — client offset 0 → eBay 0–199,
-    // offset 200 → eBay 200–399, etc. Sort order is never disturbed.
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    // Per-request fetch limit: 200 (eBay Browse API maximum).
-    // Larger pages mean our sorted results match eBay's actual sorted order
-    // for that window — fewer gaps caused by fetching too few items.
-    const PAGE_SIZE = 200;
+    // ── Filters ───────────────────────────────────────────────────────────────
+    const min = Math.max(1, parseFloat(minPrice) || 0);
+    const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
+    const filterParts = [`price:[${min}..${max}],priceCurrency:USD`];
+    const { conditionFilter, aspectFilter } = buildConditionParams(conds);
+    if (conditionFilter) filterParts.push(conditionFilter);
+    if (listingType === "Auction")      filterParts.push("buyingOptions:{AUCTION}");
+    else if (listingType === "BuyItNow") filterParts.push("buyingOptions:{FIXED_PRICE}");
+    const filterStr  = filterParts.join(",");
+    const bulkSuffix = showBulk === "true" ? "" : ` ${BULK_EXCLUSION}`;
+    const playerQ    = query.trim();
+    const gradeFilter = buildGradeFilter(conds);
 
+    // ── Broad cache check (page 0 only) ───────────────────────────────────────
+    if (ebayOffset === 0) {
+      const cacheKey = buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk);
+      const cached   = await getBroadCache(cacheKey);
+      if (cached && cached.length > 0) {
+        console.log(`[cache] broad hit: ${cacheKey.slice(0, 60)}`);
+        return res.json({ items: cached, total: cached.length, fromCache: true });
+      }
+
+      // ── eBay fetch ────────────────────────────────────────────────────────
+      let allItems = [];
+      const PAGE_SIZE = 200;
+
+      if (cats.length === 0) {
+        const baseQ = playerQ ? `${playerQ} card` : "card";
+        const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, 0);
+        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
+      } else {
+        const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
+        const results = await Promise.all(cats.map(async (cat) => {
+          const catId      = CATEGORY_IDS[cat] || null;
+          const baseKw     = CAT_BASE_KEYWORD[cat] || `${cat} card`;
+          const q          = playerQ ? `${playerQ} card${bulkSuffix}` : `${baseKw}${bulkSuffix}`;
+          const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
+          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
+        }));
+        const maxLen = Math.max(...results.map((r) => r.length));
+        for (let i = 0; i < maxLen; i++) {
+          for (const r of results) { if (i < r.length) allItems.push(r[i]); }
+        }
+      }
+
+      if (gradeFilter) allItems = allItems.filter((i) => passesGradeFilter(i.grade, gradeFilter));
+
+      const seen  = new Set();
+      const items = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
+
+      // Write to broad cache async
+      if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
+
+      return res.json({ items, total: items.length });
+    }
+
+    // ── Paginated fetch (offset > 0) — no cache ───────────────────────────────
+    const PAGE_SIZE = 200;
     let allItems = [];
 
     if (cats.length === 0) {
-      // No category selected — use player + "card" or bare "card" so eBay accepts negatives
       const baseQ = playerQ ? `${playerQ} card` : "card";
-      const q = `${baseQ}${bulkSuffix}`;
-      const data = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
-      allItems = (data.itemSummaries || [])
-        .filter((item) => !isSuppliesCategory(item))
-        .map((item) => mapItem(item, []));
+      const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
+      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
     } else {
-      const perCat = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
-
-      const searches = cats.map(async (cat) => {
-        const catId       = CATEGORY_IDS[cat] || null;
-        const baseKeyword = CAT_BASE_KEYWORD[cat] || `${cat} card`;
-
-        // q = "<player name> card" (if player provided) OR sport base keyword.
-        // Appending "card" when a player is specified prevents jerseys/figures/magazines
-        // from leaking through even when category_ids is set (eBay category 214 is broad).
-        // Grades and conditions are NEVER in q — only in aspect_filter / conditionIds.
-        const q = playerQ
-          ? `${playerQ} card${bulkSuffix}`     // player + "card" → strictly trading cards
-          : `${baseKeyword}${bulkSuffix}`;      // baseline: sport card noun
-
-        const data = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
-        return (data.itemSummaries || [])
-          .filter((item) => !isSuppliesCategory(item))
-          .map((item) => mapItem(item, [cat]));
-      });
-
-      const results = await Promise.all(searches);
-      // Interleave results across categories for a diverse feed
+      const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
+      const results = await Promise.all(cats.map(async (cat) => {
+        const catId  = CATEGORY_IDS[cat] || null;
+        const baseKw = CAT_BASE_KEYWORD[cat] || `${cat} card`;
+        const q      = playerQ ? `${playerQ} card${bulkSuffix}` : `${baseKw}${bulkSuffix}`;
+        const data   = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
+        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
+      }));
       const maxLen = Math.max(...results.map((r) => r.length));
       for (let i = 0; i < maxLen; i++) {
         for (const r of results) { if (i < r.length) allItems.push(r[i]); }
       }
     }
 
-    // ── Strict grade post-filter ──────────────────────────────────────────────
-    // eBay's aspect_filter is advisory — a small number of items slip through.
-    // This removes them without reordering or skipping eBay's result pages.
-    // Raw must be Raw. Grade 10 must be PSA/BGS/CGC/SGC/… 10 — no "9.5", no "Graded".
-    if (gradeFilter) {
-      allItems = allItems.filter((item) => passesGradeFilter(item.grade, gradeFilter));
-    }
+    if (gradeFilter) allItems = allItems.filter((i) => passesGradeFilter(i.grade, gradeFilter));
+    const seen  = new Set();
+    const items = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
+    return res.json({ items, total: items.length });
 
-    // ── Deduplicate (no cap — return all that pass) ───────────────────────────
-    const seen = new Set();
-    const items = allItems.filter((item) => {
-      if (seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
-
-    res.json({ items, total: items.length });
   } catch (err) {
     console.error("[ebay] /api/ebay/search error:", err.message);
-    res.status(500).json({ error: err.message, items: [] });
+    return res.status(500).json({ error: err.message, items: [] });
   }
 });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!supabase }));
 
 app.listen(PORT, () => console.log(`[api] eBay proxy listening on port ${PORT}`));

@@ -1,0 +1,2 @@
+- [Entity search cache architecture](entity-cache-arch.md) — dual-mode app: entity search (Supabase-cached, client-filtered) coexists with category browse (broad cache).
+- [Supabase service role key](supabase-srk.md) — server uses SUPABASE_SERVICE_ROLE_KEY for cache writes; app degrades gracefully (direct eBay) if not set.

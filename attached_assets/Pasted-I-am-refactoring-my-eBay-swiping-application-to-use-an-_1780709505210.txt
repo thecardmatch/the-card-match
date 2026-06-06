@@ -1,0 +1,20 @@
+I am refactoring my eBay swiping application to use an On-Demand Lazy-Loading Cache with Supabase. This must support a massive database of players and Pokémon, stay within a 5,000 daily API limit, and completely eliminate time gaps in the card decks. Please help me write the code for these specific systems:
+
+1. Setup Searchable Entities & Seeders:
+- Create a `searchable_entities` table in Supabase (`id`, `name`, `category`, `ebay_keyword`).
+- Write a Node.js seeder script that populates this table with every Pokémon name via the PokeAPI ('https://pokeapi.co/api/v2/pokemon?limit=1500').
+- Provide a clear method/script to ingest a comprehensive list of all-time MLB, NBA, and NFL athletes into this table. Add a database index to the `name` column for rapid autocomplete lookup.
+
+2. Build the Gap-Free Search Endpoint (`/api/search`):
+- When a user searches a validated entity, check if active listings exist in the Supabase `cached_cards` table.
+- If a cache miss occurs or the deck has a gap where active auction times jump drastically, call the eBay Browse API using a smart blend:
+  - Query 1: Fetch Auctions sorted by `sort=endingSoonest`.
+  - Query 2: Fetch Buy It Now items (`buyingOptions:{FIXED_PRICE}`) for the same keyword.
+- Merge these two datasets on the backend, filter out duplicate items, sort them seamlessly by end-time/availability, and bulk-save them to the `cached_cards` table with a `fetched_at` timestamp before returning them to the frontend.
+
+3. Frontend Swipe Deck Integration:
+- Replace the current free-text input with an autocomplete selector tied to the `searchable_entities` table.
+- When an entity is selected, pull the unified, gap-free card stack (limit 100) from the backend.
+- The frontend will load these cards into memory for seamless swiping. To preserve our API limits, only make a direct call to the eBay single-item endpoint to get the live "Current Bid" the exact second a user clicks a card to leave the app and go to eBay.
+
+Let's generate the updated backend code, database schemas, and seeder scripts to make this architecture real.
