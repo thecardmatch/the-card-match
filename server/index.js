@@ -1,9 +1,15 @@
 import express from "express";
 import cors from "cors";
+import path from "path";
+import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 
-const app = express();
-const PORT = 3001;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+const app  = express();
+const PORT = parseInt(process.env.PORT || "3001");
 
 app.use(cors({ origin: true }));
 app.use(express.json());
@@ -791,4 +797,14 @@ app.get("/api/ebay/search", async (req, res) => {
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!supabase }));
 
-app.listen(PORT, () => console.log(`[api] eBay proxy server operational on port ${PORT}`));
+// ── Production: serve built React app + SPA catch-all ─────────────────────
+const distPath = path.join(__dirname, "..", "dist");
+if (existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get(/(.*)/, (_req, res) => {
+    const idx = path.join(distPath, "index.html");
+    existsSync(idx) ? res.sendFile(idx) : res.status(404).send("Not found");
+  });
+}
+
+app.listen(PORT, "0.0.0.0", () => console.log(`[api] eBay proxy server operational on port ${PORT}`));

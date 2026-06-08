@@ -8,12 +8,15 @@ export type TradingCard = {
   name: string;
   category: Category;
   image: string;
+  images?: string[];
   currentBid: number;
+  currency?: string;
   grade: string;
   ebayUrl: string;
   endTime?: string | null;
   condition?: string;
   listingType?: "Auction" | "Buy It Now";
+  watchCount?: number;
 };
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];
