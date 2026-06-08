@@ -2,21 +2,12 @@ import { useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-function LiveBadge() {
-  return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/15 border border-green-500/30 text-[9px] font-black text-green-600 uppercase tracking-wide shrink-0">
-      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-      Live
-    </span>
-  );
-}
-
 const PLAYLISTS = [
   {
     id: "nba-finals-stars",
     emoji: "🏆",
     label: "NBA Finals Stars",
-    sub: "Top marquee stars — live auctions",
+    sub: "Top marquee stars — auctions ending soon",
   },
   {
     id: "trending-pokemon",
@@ -68,7 +59,6 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
           </button>
         ))}
 
-        {/* Custom Search row */}
         <div className="border-t border-border/50 mt-1 pt-1">
           <AnimatePresence>
             {customOpen ? (
@@ -122,7 +112,6 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
   return (
     <div className="flex flex-col h-full bg-background overflow-y-auto">
 
-      {/* Branding header */}
       <div className="flex items-center gap-3 px-5 pt-6 pb-2 shrink-0">
         <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl" />
         <div>
@@ -135,7 +124,6 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
         </div>
       </div>
 
-      {/* Hero */}
       <div className="px-5 pt-4 pb-6 shrink-0">
         <h2 className="text-2xl font-black tracking-tight text-foreground leading-tight">
           Featured Playlists
@@ -145,7 +133,6 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
         </p>
       </div>
 
-      {/* Playlist rows */}
       <div className="px-4 flex flex-col gap-3 shrink-0">
         {PLAYLISTS.map((pl, i) => (
           <motion.button
@@ -158,17 +145,13 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
           >
             <span className="text-3xl shrink-0">{pl.emoji}</span>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-bold text-base text-foreground leading-tight">{pl.label}</p>
-                <LiveBadge />
-              </div>
+              <p className="font-bold text-base text-foreground leading-tight">{pl.label}</p>
               <p className="text-xs text-muted-foreground mt-0.5">{pl.sub}</p>
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
           </motion.button>
         ))}
 
-        {/* Custom Search expandable card */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}

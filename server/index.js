@@ -393,10 +393,9 @@ app.get("/api/playlist", async (req, res) => {
     }
 
     const def      = id ? PLAYLIST_DEFS[id] : null;
-    // pl4: prefix busts old bestMatch caches (now using endingSoonest for auctions)
     const cacheKey = id
-      ? `pl4:${id}`
-      : `qs4:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
+      ? `pl5:${id}`
+      : `qs5:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
 
     // ── 1. Supabase cache (15-min TTL) ──────────────────────────────────────
     const cached = await getBroadCache(cacheKey);
@@ -417,8 +416,7 @@ app.get("/api/playlist", async (req, res) => {
       const buckets = await Promise.all(
         terms.map(async (term) => {
           try {
-            // endingSoonest → auction listings only; every result has a real endTime
-            const data = await ebaySearch(token, term, "endingSoonest", filterStr, null, categoryId, perTerm, 0);
+            const data = await ebaySearch(token, term, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
               .map((i) => mapItem(i, []));
