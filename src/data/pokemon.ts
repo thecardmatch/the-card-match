@@ -1,6 +1,6 @@
 export type Category = "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer" | "Formula 1" | "WWE";
 export type ConditionFilter = "Raw" | "Grade 7" | "Grade 8" | "Grade 9" | "Grade 10";
-export type ListingType = "All" | "Auction" | "BuyItNow";
+export type ListingType = "All" | "Auction" | "Buy It Now";
 export type SortOption = "bestMatch" | "endingSoonest";
 
 export type TradingCard = {
@@ -13,7 +13,7 @@ export type TradingCard = {
   ebayUrl: string;
   endTime?: string | null;
   condition?: string;
-  listingType?: "Auction" | "BuyItNow";
+  listingType?: "Auction" | "Buy It Now";
 };
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];

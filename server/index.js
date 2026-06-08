@@ -133,17 +133,230 @@ const CAT_BASE_KEYWORD = {
   WWE:          "wwe wrestling card",
 };
 
-function detectCategory(title, selectedCats) {
+function detectCategory(title, selectedCats, itemCategoryIds = []) {
+  // 1. Caller already knows the category (e.g. playlist with a single sport)
   if (selectedCats.length === 1) return selectedCats[0];
+
+  // 2. Use eBay's own category IDs — most reliable signal
+  const catSet = new Set(itemCategoryIds.map(String));
+  if (catSet.has("183050") || catSet.has("183454")) return "Pokemon"; // CCG singles
+  // 261328 = Sports Trading Cards (all sports) — need title to distinguish
+
   const t = title.toLowerCase();
-  if (t.includes("pokemon"))                      return "Pokemon";
-  if (t.includes("basketball") || t.includes(" nba "))  return "Basketball";
-  if (t.includes("baseball")   || t.includes(" mlb "))  return "Baseball";
-  if (t.includes("football")   || t.includes(" nfl "))  return "Football";
-  if (t.includes("hockey")     || t.includes(" nhl "))  return "Hockey";
-  if (t.includes("soccer")     || t.includes("fifa"))   return "Soccer";
-  if (t.includes("formula 1")  || /\bf1\b/.test(t))     return "Formula 1";
-  if (t.includes("wwe")        || t.includes("wrestling")) return "WWE";
+
+  // 3. Explicit league / sport words in the title
+  if (t.includes("pokemon") || t.includes(" tcg ") || t.includes("tcg card"))
+                                                              return "Pokemon";
+  if (t.includes("basketball") || t.includes(" nba "))        return "Basketball";
+  if (t.includes("baseball")   || t.includes(" mlb "))        return "Baseball";
+  if (t.includes("football")   || t.includes(" nfl "))        return "Football";
+  if (t.includes("hockey")     || t.includes(" nhl "))        return "Hockey";
+  if (t.includes("soccer")     || t.includes("fifa") || t.includes(" mls "))
+                                                              return "Soccer";
+  if (t.includes("formula 1")  || /\bf1\b/.test(t))           return "Formula 1";
+  if (t.includes("wwe")        || t.includes("wrestling"))     return "WWE";
+
+  // 4. Well-known Pokémon names
+  const pokemonNames = ["charizard","pikachu","mewtwo","umbreon","eevee","gengar",
+    "snorlax","greninja","dragapult","rayquaza","lugia","mew ","bulbasaur",
+    "squirtle","blastoise","venusaur","sylveon","espeon","flareon","vaporeon",
+    "jolteon","glaceon","leafeon","dragonite","gyarados","articuno","zapdos",
+    "moltres","raichu","clefairy","lapras","ditto","togepi","entei","suicune",
+    "raikou","celebi","latios","latias","jirachi","deoxys","garchomp","lucario",
+    "riolu","togekiss","gallade","rotom","arceus","zekrom","reshiram","kyurem",
+    "xerneas","yveltal","solgaleo","lunala","necrozma","zacian","zamazenta",
+    "calyrex","koraidon","miraidon","terapagos","ogerpon"];
+  if (pokemonNames.some((n) => t.includes(n))) return "Pokemon";
+
+  // Card set suffixes that indicate Pokémon sets
+  if (/\b(vmax|vstar|ex card|gx card|lv\.x|legend card|prime card|break card|mega \w+ ex)\b/.test(t))
+    return "Pokemon";
+
+  // 5. NBA player names → Basketball
+  const nbaPlayers = [
+    "michael jordan","michael jordan card","michael jordan rc","jordan logoman",
+    "wembanyama","lebron","stephen curry","steph curry","kevin durant","kd card",
+    "giannis","luka doncic","brunson","de'aaron fox","devin vassell","mikal bridges",
+    "josh hart","og anunoby","stephon castle","dylan harper","ja morant","embiid",
+    "tatum","devin booker","anthony davis","jaylen brown","zion","bam adebayo",
+    "karl-anthony towns","damian lillard","donovan mitchell","tyrese haliburton",
+    "shai gilgeous","cade cunningham","scottie barnes","franz wagner","paolo banchero",
+    "evan mobley","jalen green","alperen sengun","nikola jokic","nikola vucevic",
+    "lamelo ball","julius randle","kobe bryant","shaquille","shaq ","magic johnson",
+    "larry bird","kareem","dirk nowitzki","dwyane wade","chris paul","allen iverson",
+    "charles barkley","patrick ewing","hakeem olajuwon","reggie miller","tim duncan",
+    "clyde drexler","dominique wilkins","isiah thomas","raymond felton","brandon clarke",
+    "julius erving","dr. j","bill russell","wilt chamberlain","oscar robertson",
+    "gary payton","jason kidd","steve nash","paul pierce","ray allen","vince carter",
+    "tracy mcgrady","kevin garnett","ben simmons","russell westbrook","james harden",
+    "kawhi leonard","paul george","kyrie irving","stephen curry","bradley beal",
+    "julius randle","demar derozan","zach lavine","jayson tatum","kemba walker",
+    "lonzo ball","klay thompson","draymond green","andrew wiggins","jordan poole",
+    "tyrese maxey","de'anthony melton","joel embiid","tobias harris","ben simmons",
+  ];
+  if (nbaPlayers.some((n) => t.includes(n))) return "Basketball";
+
+  // 6. NFL player names → Football
+  const nflPlayers = [
+    "mahomes","joe burrow","lamar jackson","josh allen","c.j. stroud","stroud card",
+    "caleb williams","jayden daniels","bryce young","trevor lawrence","dak prescott",
+    "jalen hurts","justin jefferson","ceedee lamb","cooper kupp","tyreek hill",
+    "davante adams","travis kelce","christian mccaffrey","saquon barkley",
+    "derrick henry","nick bosa","micah parsons","myles garrett","tj watt",
+    "tom brady","peyton manning","dan marino","brett favre","joe montana",
+    "john elway","jerry rice","emmitt smith","barry sanders","walter payton",
+    "lawrence taylor","l.t. card","roethlisberger","ben roethlisberger",
+    "drew brees","drew bledsoe","kyler murray","cam newton","aaron rodgers",
+    "patrick mahomes","eli manning","archie manning","randy moss","terrell owens",
+    "antonio brown","ladainian tomlinson","bo jackson","reggie bush","adrián peterson",
+    "jim brown","dick butkus","mean joe greene","roger staubach","troy aikman",
+    "michael vick","steve young","jim kelly","warren moon","randall cunningham",
+    "bo scarbrough","odell beckham","deandre hopkins","stefon diggs","davante",
+    "george kittle","mark andrews","darren waller","zeke elliott","christian mccaffrey",
+    "nick chubb","alvin kamara","dalvin cook","jonathan taylor","najee harris",
+    "james robinson","breece hall","isaiah pacheco","de'von achane","jahmyr gibbs",
+  ];
+  if (nflPlayers.some((n) => t.includes(n))) return "Football";
+
+  // 7. MLB player names → Baseball
+  const mlbPlayers = [
+    "ohtani","mike trout","aaron judge","juan soto","ronald acuna","bryce harper",
+    "corey seager","mookie betts","freddie freeman","fernando tatis","julio rodriguez",
+    "gunnar henderson","elly de la cruz","jackson holliday","paul skenes","griffey",
+    "derek jeter","babe ruth","mickey mantle","ted williams","willie mays","ken griffey",
+    "randy johnson","pete rose","bo jackson","nolan ryan","cal ripken",
+    "tom seaver","reggie jackson","hank aaron","sandy koufax","clayton kershaw",
+    "frank thomas","chipper jones","greg maddux","roger clemens","bob gibson",
+    "ichiro suzuki","paul goldschmidt","vladimir guerrero","jose canseco","mark mcgwire",
+    "sammy sosa","barry bonds","wade boggs","tony gwynn","george brett","mike schmidt",
+    "johnny bench","yogi berra","lou gehrig","cy young","honus wagner","ty cobb",
+    "roberto clemente","ernie banks","harmon killebrew","al kaline","carl yastrzemski",
+    "jackson merrill","kyle schwarber","corbin carroll","spencer strider","gerrit cole",
+    "max scherzer","justin verlander","zack wheeler","shane bieber","tyler glasnow",
+    "jose altuve","freddie freeman","pete alonso","yordan alvarez","kyle tucker",
+  ];
+  if (mlbPlayers.some((n) => t.includes(n))) return "Baseball";
+
+  // 8. NHL player names → Hockey
+  const nhlPlayers = [
+    "mcdavid","crosby","ovechkin","auston matthews","draisaitl",
+    "nathan mackinnon","cale makar","roman josi","igor shesterkin","andrei vasilevskiy",
+    "david pastrnak","kirill kaprizov","trevor zegras","matty beniers","shane wright",
+    "wayne gretzky","mario lemieux","bobby orr","mark messier","brett hull",
+    "jaromir jagr","patrick roy","martin brodeur","dominik hasek","nicklas lidstrom",
+    "steve yzerman","joe sakic","peter forsberg","mats sundin","brendan shanahan",
+    "eric lindros","paul kariya","teemu selanne","mike modano","ray bourque",
+    "scott niedermayer","chris chelios","mike richter","ken dryden","gordie howe",
+  ];
+  if (nhlPlayers.some((n) => t.includes(n))) return "Hockey";
+
+  // 9. More player names missed above
+  const moreNba = ["danny granger","reggie jackson nba","glen rice","alonzo mourning",
+    "derrick rose","john stockton","karl malone","scottie pippen","dennis rodman",
+    "charles oakley","muggsy bogues","spud webb","dee brown","anfernee hardaway",
+    "penny hardaway","grant hill","glen robinson","larry johnson","vin baker",
+    "rod strickland","nick van exel","sam cassell","stephon marbury","gilbert arenas",
+    "andre iguodala","luol deng","andrei kirilenko","mehmet okur","carlos boozer",
+    "elton brand","corey maggette","baron davis","mike bibby","jason williams",
+    "peja stojakovic","mike miller","shawn marion","amare stoudemire","boris diaw",
+    "leandro barbosa","steve nash","joe johnson","josh smith","al horford",
+    "mike conley","marc gasol","pau gasol","lamar odom","ron artest","metta world peace"];
+  if (moreNba.some((n) => t.includes(n))) return "Basketball";
+
+  const moreNfl = ["marshawn lynch","beast mode","richard sherman","terry bradshaw","earl campbell",
+    "john madden","joe namath","len dawson","bart starr","johnny unitas","y.a. tittle",
+    "fran tarkenton","otto graham","sammy baugh","sid luckman","george halas",
+    "vince lombardi","buddy ryan","don shula","mike ditka","bill walsh",
+    "matthew golden","matthew stafford","tyreek","juju smith","brandon cooks",
+    "will fuller","keenan allen","davante parker","jarvis landry","cole beasley",
+    "golden tate","larry fitzgerald","fitzgerald","antwaan randle el","plaxico burress",
+    "chad johnson","chad ochocinco","keyshawn johnson","amari cooper","deshaun watson",
+    "tua tagovailoa","justin fields","sam darnold","teddy bridgewater","baker mayfield",
+    "mitchell trubisky","sam bradford","colt mccoy","ryan tannehill","matt ryan",
+    "marcus mariota","ryan fitzpatrick","fitzmagic","nick foles","case keenum",
+    "james winston","jameis winston","derek carr","matthew stafford","mac jones",
+    "zach wilson","kenny pickett","aidan o'connell","gardner minshew","will levis","bo nix",
+    "adrian peterson","frank gore",
+    "jerome bettis","eddie george","shaun alexander","ricky williams","tiki barber",
+    "clinton portis","brian westbrook","steven jackson","matt forte","arian foster",
+    "le'veon bell","todd gurley","kareem hunt","leonard fournette","sony michel",
+    "a.j. green","dez bryant","brandon marshall","anquan boldin","hines ward",
+    "issac bruce","torry holt","marvin harrison","tim brown","steve largent",
+    "michael irvin","cris carter","art monk","charlie joiner","don hutson",
+    "ronnie lott","ed reed","troy polamalu","charles woodson","darelle revis",
+    "nnamdi asomugha","champ bailey","deion sanders","primetime","night train lane",
+    "dick lane","mel blount","mike haynes","aeneas williams","rod woodson",
+    "jack lambert","lawrence taylor","chuck bednarik","ray lewis","brian urlacher",
+    "junior seau","derrick thomas","reggie white","bruce smith","dwight freeney",
+    "julius peppers","demarcus ware","clay matthews","khalil mack","aaron donald"];
+  if (moreNfl.some((n) => t.includes(n))) return "Football";
+
+  const moreMlb = ["manny machado","orelvis martinez","bryce eldridge","bret boone","bret saberhagen","bert blyleven","bruce sutter",
+    "carlton fisk","catfish hunter","dave winfield","dennis eckersley","don drysdale",
+    "duke snider","fergie jenkins","gaylord perry","hal newhouser","herb score",
+    "jim bunning","jim palmer","juan marichal","kirby puckett","lou brock",
+    "pee wee reese","phil niekro","ralph kiner","rich gossage","rick ferrell",
+    "robin roberts","robin yount","rollie fingers","rube waddell","satchel paige",
+    "stan musial","three finger brown","warren spahn","whitey ford","billy martin",
+    "casey stengel","bobby doerr","bob lemon","early wynn","enos slaughter",
+    "jackson merrill","kyle schwarber","pete alonso","francisco lindor",
+    "tim anderson","jose ramirez","rafael devers","xander bogaerts","trevor story",
+    "kris bryant","anthony rizzo","javier baez","willson contreras","jon lester",
+    "jake arrieta","jon gray","yu darvish","cole hamels","john lackey",
+    "albert pujols","miguel cabrera","david ortiz","manny ramirez","alex rodriguez",
+    "carlos beltran","jim thome","todd helton","larry walker","mark teixeira",
+    "kevin youkilis","dustin pedroia","andrew jones","chipper jones","john smoltz",
+    "tom glavine","david justice","ryan braun","prince fielder","aramis ramirez",
+    "ryne sandberg","andre dawson","billy williams","ron santo","ernie banks"];
+  if (moreMlb.some((n) => t.includes(n))) return "Baseball";
+
+  // 10. Team names → sport
+  const mlbTeams = ["yankees","red sox","dodgers","cubs","cardinals","mets","braves",
+    "san francisco giants","sf giants","new york mets","athletics","phillies","astros",
+    "texas rangers","seattle mariners","san diego padres",
+    "rockies","diamondbacks","nationals","marlins","brewers","reds","pirates",
+    "orioles","tigers","white sox","indians","guardians","twins","royals","blue jays",
+    "rays","angels","athletics"];
+  if (mlbTeams.some((n) => t.includes(n))) return "Baseball";
+
+  const nflTeams = ["patriots","cowboys","packers","steelers","bears","giants nfl",
+    "eagles nfl","49ers","chiefs","ravens","seahawks","saints","broncos","raiders",
+    "colts","bengals","bills","jets","dolphins","buccaneers","falcons","panthers",
+    "cardinals nfl","rams","chargers","browns","texans","jaguars","titans","vikings",
+    "commanders","redskins","lions nfl"];
+  if (nflTeams.some((n) => t.includes(n))) return "Football";
+
+  const nhlTeams = ["maple leafs","canadiens","bruins","rangers nhl","blackhawks",
+    "penguins","oilers nhl","flyers","red wings","kings nhl","sharks nhl",
+    "avalanche","blues","lightning","capitals nhl","golden knights","jets nhl",
+    "wild","flames nhl","canucks","senators","sabres","hurricanes","blue jackets",
+    "predators","ducks","coyotes","stars nhl","devils nhl","islanders"];
+  if (nhlTeams.some((n) => t.includes(n))) return "Hockey";
+
+  // 11. Set/brand names with league labels
+  // "Hoops" is an NBA-specific brand
+  if (/\bhoops\b/.test(t) && !t.includes("baseball") && !t.includes("football")) return "Basketball";
+
+  // Helmet patches/relics are almost exclusively NFL
+  if (/helmet.*patch|helmet.*relic|mini helmet/.test(t)) return "Football";
+
+  if (t.includes("prizm nba") || t.includes("optic nba") || t.includes("select nba") ||
+      t.includes("hoops nba") || t.includes("chronicles nba") || t.includes("panini nba") ||
+      t.includes("fleer nba") || t.includes("skybox") || t.includes("upper deck nba"))
+    return "Basketball";
+  if (t.includes("prizm nfl") || t.includes("optic nfl") || t.includes("select nfl") ||
+      t.includes("panini nfl") || t.includes("score nfl") || t.includes("upper deck nfl"))
+    return "Football";
+  if (t.includes("topps museum") || t.includes("prizm mlb") || t.includes("optic mlb") ||
+      t.includes("bowman ") || t.includes("topps now") || t.includes("topps heritage") ||
+      t.includes("donruss mlb") || t.includes("fleer mlb") || t.includes("topps finest"))
+    return "Baseball";
+  if (t.includes("upper deck nhl") || t.includes("o-pee-chee") || t.includes("sp authentic"))
+    return "Hockey";
+
+  // 12. Year-season format (YYYY-YY) in sports card category → likely Basketball
+  if (/\b\d{4}-\d{2}\b/.test(t) && catSet.has("261328")) return "Basketball";
+
   return selectedCats[0] || "Unknown";
 }
 
@@ -181,12 +394,13 @@ function mapItem(item, selectedCats) {
   const additionalImgs = (item.additionalImages || []).map((i) => i.imageUrl).filter(Boolean);
   const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
   const buyingOptions  = item.buyingOptions || [];
-  const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "BuyItNow";
+  const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
+  const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
   const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
   return {
     id:          item.itemId,
     name:        item.title || "Unknown Card",
-    category:    detectCategory(item.title || "", selectedCats),
+    category:    detectCategory(item.title || "", selectedCats, itemCategoryIds),
     image:       primaryImg,
     images:      allImages,
     currentBid:  bidValue,
@@ -358,26 +572,29 @@ app.get("/api/search", async (req, res) => {
 // Fix: one API call per term, results merged & interleaved.
 const PLAYLIST_DEFS = {
   "nba-finals-stars": {
-    terms:      ["Victor Wembanyama", "Jalen Brunson", "Karl-Anthony Towns",
-                 "De'Aaron Fox", "Devin Vassell", "Mikal Bridges",
-                 "Josh Hart", "OG Anunoby", "Stephon Castle", "Dylan Harper"],
-    categoryId: "261328",   // Sports Trading Cards
-    perTerm:    12,
-    minPrice:   1,
+    terms:        ["Victor Wembanyama", "Jalen Brunson", "Karl-Anthony Towns",
+                   "De'Aaron Fox", "Devin Vassell", "Mikal Bridges",
+                   "Josh Hart", "OG Anunoby", "Stephon Castle", "Dylan Harper"],
+    categoryId:   "261328",
+    categoryHint: "Basketball",
+    perTerm:      12,
+    minPrice:     1,
   },
   "trending-pokemon": {
-    terms:      ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
-                 "Umbreon VMAX Alt", "Charizard ex SIR", "Pikachu ex SIR",
-                 "Team Rocket Mewtwo", "Dragapult ex"],
-    categoryId: "183050",   // CCG/Pokémon Singles
-    perTerm:    12,
-    minPrice:   1,
+    terms:        ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
+                   "Umbreon VMAX Alt", "Charizard ex SIR", "Pikachu ex SIR",
+                   "Team Rocket Mewtwo", "Dragapult ex"],
+    categoryId:   "183050",
+    categoryHint: "Pokemon",
+    perTerm:      12,
+    minPrice:     1,
   },
   "high-end-showcase": {
-    terms:      ["PSA 10 card", "BGS 9.5 card", "Auto Patch card", "1/1 Logoman"],
-    categoryId: "212",      // Trading Cards (broad — graded cross-sport)
-    perTerm:    25,
-    minPrice:   200,
+    terms:        ["PSA 10 card", "BGS 9.5 card", "Auto Patch card", "1/1 Logoman"],
+    categoryId:   "212",
+    categoryHint: null,    // mixed sports — detect from title
+    perTerm:      25,
+    minPrice:     200,
   },
 };
 
@@ -410,16 +627,17 @@ app.get("/api/playlist", async (req, res) => {
 
     if (def) {
       // PRESET: parallel per-term calls, round-robin interleave
-      const { terms, categoryId, perTerm, minPrice } = def;
+      const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
       const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
 
+      const hintCats = categoryHint ? [categoryHint] : [];
       const buckets = await Promise.all(
         terms.map(async (term) => {
           try {
             const data = await ebaySearch(token, term, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
-              .map((i) => mapItem(i, []));
+              .map((i) => mapItem(i, hintCats));
           } catch (e) {
             console.warn(`[playlist] term "${term}" failed:`, e.message);
             return [];
