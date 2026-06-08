@@ -366,22 +366,32 @@ const PLAYLIST_CONFIGS = {
 // Query params: ?id=<playlistId>  OR  ?query=<keyword>
 app.get("/api/playlist", async (req, res) => {
   try {
-    const { id, query: customQuery } = req.query;
+    // All searches now come in as plain query strings.
+    // Optional: categoryId and minPrice for High-End Showcase (and any future use).
+    const {
+      id,
+      query:      customQuery,
+      categoryId: qCategoryId,
+      minPrice:   qMinPrice,
+    } = req.query;
 
     if (!id && !customQuery) {
       return res.status(400).json({ error: "id or query is required", items: [] });
     }
 
-    const config    = id ? PLAYLIST_CONFIGS[id] : null;
-    const cacheKey  = id
-      ? `playlist:${id}`
-      : `custom:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
+    // Legacy ID path kept for backward compat (though frontend no longer uses it)
+    const config = id ? PLAYLIST_CONFIGS[id] : null;
 
-    // 1. Cache check (15-min TTL, shared across all users)
+    // Build cache key — incorporate category/price params so High-End doesn't collide
+    const baseKey = id
+      ? `playlist:${id}`
+      : `q:${String(customQuery).trim().toLowerCase().slice(0, 100)}`;
+    const cacheKey = `${baseKey}${qCategoryId ? `:c${qCategoryId}` : ""}${qMinPrice ? `:p${qMinPrice}` : ""}`;
+
+    // 1. Cache check (15-min TTL)
     const cached = await getBroadCache(cacheKey);
     if (cached && cached.length > 0) {
       console.log(`[cache] playlist hit: ${cacheKey}`);
-      // Filter out ended auctions before returning
       const now    = new Date();
       const active = cached.filter((c) =>
         c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
@@ -389,19 +399,19 @@ app.get("/api/playlist", async (req, res) => {
       return res.json({ items: active, fromCache: true });
     }
 
-    // 2. eBay fetch — exactly ONE call, 100 results, sorted endingSoonest
+    // 2. ONE eBay call — plain OR query, endingSoonest, 100 results
     const token      = await getEbayToken();
     const q          = config ? config.query : String(customQuery).trim();
-    const minPrice   = config?.minPrice ?? 1;
-    const categoryId = config?.categoryId ?? null;
+    const minPrice   = config?.minPrice ?? (qMinPrice ? Number(qMinPrice) : 1);
+    const categoryId = config?.categoryId ?? qCategoryId ?? null;
     const filterStr  = `price:[${minPrice}..],priceCurrency:USD`;
 
     const data  = await ebaySearch(token, q, "endingSoonest", filterStr, null, categoryId, 100, 0);
     const items = (data.itemSummaries || [])
       .filter((i) => !isSuppliesCategory(i))
-      .map((i) => mapItem(i, []));       // mapItem calls buildAffiliateUrl → campid always set
+      .map((i) => mapItem(i, []));   // buildAffiliateUrl → campid 5339150952 always set
 
-    // 3. Cache async (don't block response)
+    // 3. Cache async — never block the response
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
 
     console.log(`[playlist] ${cacheKey} → ${items.length} cards`);

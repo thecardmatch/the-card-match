@@ -1,0 +1,20 @@
+The Custom Search works perfectly, which means our API connections are completely correct. The Playlists are returning 0 cards because the frontend is trying to pass nested array logic or hidden legacy search parameters when a button is clicked, which corrupts the eBay request. Let's fix this completely by simplifying how playlists fire.
+
+1. Unify Playlist Triggers with the Search Handler:
+Modify the onClick handler for the 4 dashboard menu buttons. When an option is clicked, it must clear out any hidden filter states and simply feed its exact keyword string into our working Custom Search function. 
+
+Ensure the exact query strings match this plain-text format (using standard single quotes inside the outer double quotes):
+- Option 1 (🏆 NBA Finals Stars): "Victor Wembanyama OR Jalen Brunson OR Karl-Anthony Towns OR De'Aaron Fox OR Devin Vassell OR Mikal Bridges OR Josh Hart OR OG Anunoby OR Stephon Castle OR Dylan Harper"
+- Option 2 (⚡ Trending Pokémon): "Mega Greninja ex OR Umbreon ex SIR OR Snorlax Legendary OR Umbreon VMAX Alt OR Charizard ex SIR OR Pikachu ex SIR OR Team Rocket Mewtwo OR Dragapult ex"
+- Option 3 (💎 High-End Showcase): "PSA 10 OR BGS 9.5 OR Auto Patch OR 1/1 Logoman" (For this option only, explicitly hardcode the backend to pass categoryId 212 and an filter parameter of price:[200..] alongside the string, exactly how a user would search premium items).
+- Option 4 (🔍 Custom Search): Clicking this row just opens the local inline text input field where a user types a word and hits Enter.
+
+2. Enforce the Three-State Loading View:
+- Ensure that as soon as a playlist string is passed or custom search text is entered, the UI state sets loading = true. 
+- Hide the menu grid and display the smooth, pulsing text screen: "Fetching cards..."
+- Only render the swiper deck component on success, and only render the empty state error if the resulting array length is strictly 0 after the request resolves.
+
+3. Fix the URL Deep Linking:
+- If a user lands on the app with '?playlist=finals_2026' in the URL, immediately invoke the Option 1 search string string automatically, bypassing the home screen.
+
+Please refactor the playlist click events so they pipe plain text keywords directly into the working custom search execution controller!

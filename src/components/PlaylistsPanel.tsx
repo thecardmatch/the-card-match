@@ -3,17 +3,37 @@ import { ChevronRight, Search, LogOut, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
-export type PlaylistId = "nba-finals-stars" | "trending-pokemon" | "high-end-showcase";
+// All queries use plain OR (no inner quotes) — matches eBay Browse API behavior
+const PLAYLISTS = [
+  {
+    emoji: "🏆",
+    label: "NBA Finals Stars",
+    sub: "Top marquee stars — auctions ending soon",
+    query: "Victor Wembanyama OR Jalen Brunson OR Karl-Anthony Towns OR De'Aaron Fox OR Devin Vassell OR Mikal Bridges OR Josh Hart OR OG Anunoby OR Stephon Castle OR Dylan Harper",
+  },
+  {
+    emoji: "⚡",
+    label: "Trending Pokémon",
+    sub: "Current market chase cards",
+    query: "Mega Greninja ex OR Umbreon ex SIR OR Snorlax Legendary OR Umbreon VMAX Alt OR Charizard ex SIR OR Pikachu ex SIR OR Team Rocket Mewtwo OR Dragapult ex",
+  },
+  {
+    emoji: "💎",
+    label: "High-End Showcase",
+    sub: "Premium graded — $200+ only",
+    query: "PSA 10 OR BGS 9.5 OR Auto Patch OR 1/1 Logoman",
+    categoryId: "212",
+    minPrice: "200",
+  },
+] as const;
 
-export const PLAYLISTS: { id: PlaylistId; emoji: string; label: string; sub: string }[] = [
-  { id: "nba-finals-stars",  emoji: "🏆", label: "NBA Finals Stars",  sub: "Top marquee stars — auctions ending soon"  },
-  { id: "trending-pokemon",  emoji: "⚡", label: "Trending Pokémon",  sub: "Current market chase cards"                },
-  { id: "high-end-showcase", emoji: "💎", label: "High-End Showcase", sub: "Premium graded — $200+ only"               },
-];
+// Export the NBA query for use in deep-link routing
+export const NBA_QUERY = PLAYLISTS[0].query;
 
 type Props = {
   mode: "home" | "panel";
-  onLoadPlaylist: (id: string, label: string, query?: string) => void;
+  // All playlists now use plain query strings — no ID routing
+  onLoadPlaylist: (label: string, query: string, categoryId?: string, minPrice?: string) => void;
   onOpenAuth: () => void;
   user: SupabaseUser | null;
 };
@@ -25,7 +45,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
   function submitCustom() {
     const q = customQuery.trim();
     if (!q) return;
-    onLoadPlaylist("custom", `🔍 "${q}"`, q);
+    onLoadPlaylist(`🔍 "${q}"`, q);
     setCustomQuery("");
     setCustomOpen(false);
   }
@@ -36,8 +56,13 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
       <div className="py-1">
         {PLAYLISTS.map((pl) => (
           <button
-            key={pl.id}
-            onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
+            key={pl.label}
+            onClick={() => onLoadPlaylist(
+              `${pl.emoji} ${pl.label}`,
+              pl.query,
+              "categoryId" in pl ? pl.categoryId : undefined,
+              "minPrice"   in pl ? pl.minPrice   : undefined,
+            )}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/60 transition-colors text-left"
           >
             <span className="text-xl shrink-0">{pl.emoji}</span>
@@ -138,11 +163,16 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
       <div className="px-4 flex flex-col gap-3 shrink-0">
         {PLAYLISTS.map((pl, i) => (
           <motion.button
-            key={pl.id}
+            key={pl.label}
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06 }}
-            onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
+            onClick={() => onLoadPlaylist(
+              `${pl.emoji} ${pl.label}`,
+              pl.query,
+              "categoryId" in pl ? pl.categoryId : undefined,
+              "minPrice"   in pl ? pl.minPrice   : undefined,
+            )}
             className="group w-full flex items-center gap-4 bg-card border border-border rounded-2xl px-5 py-4 text-left hover:border-primary/40 hover:shadow-md active:scale-[0.98] transition-all"
           >
             <span className="text-3xl shrink-0">{pl.emoji}</span>

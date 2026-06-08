@@ -5,7 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
 import { AuthDialog } from "@/components/AuthDialog";
 import { EntitySearch } from "@/components/EntitySearch";
-import { PlaylistsPanel } from "@/components/PlaylistsPanel";
+import { PlaylistsPanel, NBA_QUERY } from "@/components/PlaylistsPanel";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard } from "@/data/pokemon";
 import { fetchEntityCards, type SearchableEntity } from "@/services/entities";
@@ -44,9 +44,8 @@ export default function App() {
   // ── Deep-link routing: ?playlist=finals_2026 auto-loads NBA Finals Stars ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const pl = params.get("playlist");
-    if (pl === "finals_2026") {
-      loadPlaylist("nba-finals-stars", "🏆 NBA Finals Stars");
+    if (params.get("playlist") === "finals_2026") {
+      loadPlaylist("🏆 NBA Finals Stars", NBA_QUERY);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -62,8 +61,8 @@ export default function App() {
     });
   }, [user]);
 
-  // ── Load a preset or custom-keyword playlist ──────────────────────────────
-  async function loadPlaylist(playlistId: string, label: string, customQuery?: string) {
+  // ── Load any playlist or custom search — all use plain OR query strings ────
+  async function loadPlaylist(label: string, query: string, categoryId?: string, minPrice?: string) {
     setAppMode("loading");
     setDeckLabel(label);
     setPlaylistsOpen(false);
@@ -72,9 +71,9 @@ export default function App() {
     seenIds.current = new Set();
 
     try {
-      const params = playlistId !== "custom"
-        ? new URLSearchParams({ id: playlistId })
-        : new URLSearchParams({ query: customQuery || "" });
+      const params = new URLSearchParams({ query });
+      if (categoryId) params.set("categoryId", categoryId);
+      if (minPrice)   params.set("minPrice",   minPrice);
 
       const res  = await fetch(`/api/playlist?${params}`);
       const data = await res.json();
