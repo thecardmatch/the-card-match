@@ -2,6 +2,15 @@ import { useState } from "react";
 import { ChevronRight, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+function LiveBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-green-500/15 border border-green-500/30 text-[9px] font-black text-green-600 uppercase tracking-wide shrink-0">
+      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+      Live
+    </span>
+  );
+}
+
 const PLAYLISTS = [
   {
     id: "nba-finals-stars",
@@ -149,7 +158,10 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
           >
             <span className="text-3xl shrink-0">{pl.emoji}</span>
             <div className="flex-1 min-w-0">
-              <p className="font-bold text-base text-foreground leading-tight">{pl.label}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-bold text-base text-foreground leading-tight">{pl.label}</p>
+                <LiveBadge />
+              </div>
               <p className="text-xs text-muted-foreground mt-0.5">{pl.sub}</p>
             </div>
             <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />

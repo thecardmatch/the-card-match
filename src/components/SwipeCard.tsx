@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
+import { Clock } from "lucide-react";
 import type { TradingCard } from "@/data/pokemon";
 import { useCountdown } from "@/hooks/useCountdown";
 
@@ -17,17 +18,15 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
   const rotate = useTransform(x, [-200, 0, 200], [-15, 0, 15]);
   const saveOpacity = useTransform(x, [0, 80], [0, 1]);
   const passOpacity = useTransform(x, [-80, 0], [1, 0]);
-  const buyOpacity = useTransform(y, [-80, 0], [1, 0]);
+  const buyOpacity  = useTransform(y, [-80, 0], [1, 0]);
 
   const [imgIndex, setImgIndex] = useState(0);
-  const countdown = useCountdown(card.endTime);
-  const allImages = card.images?.length ? card.images : [card.image];
+  const countdown  = useCountdown(card.endTime);
+  const allImages  = card.images?.length ? card.images : [card.image];
 
-  // FIXED: Added velocity to handle quick "flicks" and threshold for intentional swipes
   const handleDragEnd = (_: any, info: PanInfo) => {
-    const threshold = 100;
+    const threshold         = 100;
     const velocityThreshold = 500;
-
     if (info.offset.y < -threshold || info.velocity.y < -velocityThreshold) {
       onSwipe("up");
     } else if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
@@ -35,14 +34,17 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
     } else if (info.offset.x < -threshold || info.velocity.x < -velocityThreshold) {
       onSwipe("left");
     }
-    // No "else" needed: dragSnapToOrigin (below) handles the snap-back to 0,0
   };
 
   const handleImageClick = (e: React.MouseEvent) => {
     if (!isTop || allImages.length <= 1) return;
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect  = e.currentTarget.getBoundingClientRect();
     const isLeft = e.clientX - rect.left < rect.width / 2;
-    setImgIndex(prev => isLeft ? (prev - 1 + allImages.length) % allImages.length : (prev + 1) % allImages.length);
+    setImgIndex((prev) =>
+      isLeft
+        ? (prev - 1 + allImages.length) % allImages.length
+        : (prev + 1) % allImages.length
+    );
   };
 
   return (
@@ -51,7 +53,6 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
       animate={{ scale: 1 - offset * 0.04, y: offset * 10 }}
       drag={isTop}
-      // FIXED: dragConstraints and dragSnapToOrigin prevent the "free floating" mode
       dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
       dragSnapToOrigin={true}
       dragElastic={0.15}
@@ -59,7 +60,9 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
       transition={{ type: "spring", stiffness: 300, damping: 25 }}
     >
       <div className="h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
-        <div 
+
+        {/* ── Image area ─────────────────────────────────────────────────── */}
+        <div
           className="relative flex-1 bg-muted/30 flex items-center justify-center p-4 min-h-0 cursor-pointer"
           onClick={handleImageClick}
         >
@@ -70,14 +73,50 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
             draggable={false}
           />
 
+          {/* Image dots */}
           {allImages.length > 1 && (
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
               {allImages.map((_, i) => (
-                <div key={i} className={`h-1.5 rounded-full transition-all ${i === imgIndex ? "w-4 bg-primary" : "w-1.5 bg-primary/20"}`} />
+                <div
+                  key={i}
+                  className={`h-1.5 rounded-full transition-all ${
+                    i === imgIndex ? "w-4 bg-primary" : "w-1.5 bg-primary/20"
+                  }`}
+                />
               ))}
             </div>
           )}
 
+          {/* Countdown badge — top-right corner over the image */}
+          {countdown && !countdown.ended && (
+            <div
+              className={`absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black backdrop-blur-sm shadow-lg border ${
+                countdown.urgent
+                  ? "bg-red-500/90 text-white border-red-400"
+                  : "bg-black/70 text-white border-white/10"
+              }`}
+            >
+              {countdown.urgent && (
+                <motion.div
+                  animate={{ scale: [1, 1.3, 1] }}
+                  transition={{ duration: 0.8, repeat: Infinity }}
+                  className="w-1.5 h-1.5 rounded-full bg-white shrink-0"
+                />
+              )}
+              <Clock className="w-3 h-3 shrink-0" />
+              <span>{countdown.text}</span>
+            </div>
+          )}
+
+          {/* Ended badge */}
+          {countdown?.ended && (
+            <div className="absolute top-3 right-3 flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-black bg-gray-800/90 text-gray-400 border border-gray-600 backdrop-blur-sm">
+              <Clock className="w-3 h-3" />
+              <span>Ended</span>
+            </div>
+          )}
+
+          {/* Swipe overlays */}
           {isTop && (
             <div className="pointer-events-none">
               <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60 backdrop-blur-sm">SAVE</motion.div>
@@ -87,26 +126,45 @@ export function SwipeCard({ card, isTop, zIndex, offset, onSwipe }: Props) {
           )}
         </div>
 
+        {/* ── Info bar ───────────────────────────────────────────────────── */}
         <div className="p-4 bg-card border-t border-border shrink-0">
           <div className="flex flex-wrap gap-1.5 mb-2">
             <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
               {card.category === "Pokemon" ? "Pokémon TCG" : card.category}
             </span>
-            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-primary/10 text-primary uppercase">{card.grade}</span>
-            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">{card.listingType}</span>
+            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-primary/10 text-primary uppercase">
+              {card.grade}
+            </span>
+            <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
+              {card.listingType}
+            </span>
           </div>
 
-          <h2 className="text-base font-black text-card-foreground leading-tight line-clamp-1 mb-2">{card.name}</h2>
+          <h2 className="text-base font-black text-card-foreground leading-tight line-clamp-1 mb-2">
+            {card.name}
+          </h2>
 
           <div className="flex justify-between items-end">
             <div>
-              <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">Current Bid</p>
+              <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">
+                {card.listingType === "Auction" ? "Current Bid" : "Price"}
+              </p>
               <span className="text-xl font-black text-primary">${card.currentBid.toFixed(2)}</span>
             </div>
-            {countdown && (
+
+            {/* Bottom-right: auction time (secondary to the badge, shown as text) */}
+            {countdown && !countdown.ended && (
               <div className="text-right">
-                <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">Time Left</p>
-                <span className={`text-xs font-black ${countdown.urgent ? 'text-red-500' : ''}`}>{countdown.text}</span>
+                <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">
+                  Ends in
+                </p>
+                <span
+                  className={`text-sm font-black leading-tight ${
+                    countdown.urgent ? "text-red-500" : "text-foreground"
+                  }`}
+                >
+                  {countdown.text}
+                </span>
               </div>
             )}
           </div>

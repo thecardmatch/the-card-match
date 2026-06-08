@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState, useEffect } from "react";
-import { Search, Heart, LayoutList, X } from "lucide-react";
+import { useCallback, useRef, useState, useEffect, useMemo } from "react";
+import { Search, Heart, LayoutList, X, Clock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
 import { PlaylistsPanel } from "@/components/PlaylistsPanel";
+import { useCountdown } from "@/hooks/useCountdown";
 import type { TradingCard } from "@/data/pokemon";
 
 const WATCHLIST_KEY = "cardmatch:watchlist";
@@ -32,6 +33,15 @@ export default function App() {
   const [deckResetKey,  setDeckResetKey]  = useState(0);
 
   const seenIds = useRef(new Set<string>());
+
+  // Nearest auction end time across all loaded cards
+  const nearestEndTime = useMemo(() => {
+    return cards
+      .filter((c) => c.endTime && c.listingType === "Auction")
+      .sort((a, b) => new Date(a.endTime!).getTime() - new Date(b.endTime!).getTime())[0]
+      ?.endTime ?? null;
+  }, [cards]);
+  const nearestCountdown = useCountdown(nearestEndTime);
 
   // ── Deep-link: ?playlist=finals_2026 → auto-load NBA Finals Stars ─────────
   useEffect(() => {
@@ -180,6 +190,27 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* Nearest auction countdown — shows while browsing a deck */}
+          {appMode === "deck" && nearestCountdown && !nearestCountdown.ended && (
+            <div
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border shrink-0 ${
+                nearestCountdown.urgent
+                  ? "bg-red-500/10 border-red-500/40 text-red-500"
+                  : "bg-muted border-border text-muted-foreground"
+              }`}
+            >
+              {nearestCountdown.urgent && (
+                <motion.div
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 0.8, repeat: Infinity }}
+                  className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"
+                />
+              )}
+              <Clock className="w-3 h-3 shrink-0" />
+              <span>Next ends {nearestCountdown.text}</span>
+            </div>
+          )}
 
           {/* Inline search bar */}
           <div className="flex-1 min-w-0">
