@@ -1,0 +1,25 @@
+Let's perform a strict code purge and clean refactor. The application is pulling up a legacy settings page state on playlist click—we must completely delete, remove, and strip out all old settings views, filter parameter toggles, or advanced options components from the codebase to maximize execution speed and efficiency.
+
+1. Uniform "Featured Playlists" Dashboard Layout:
+The main app interface must be entirely single-page, rendering a clean list under a "Featured Playlists" header containing exactly 4 items. No other navigational headers or tabs are allowed:
+- Option 1: "🏆 NBA Finals Stars" -> Triggers a backend query: '"Victor Wembanyama" OR "Jalen Brunson" OR "Karl-Anthony Towns" OR "De\'Aaron Fox" OR "Devin Vassell" OR "Mikal Bridges" OR "Josh Hart" OR "OG Anunoby" OR "Stephon Castle" OR "Dylan Harper"'
+- Option 2: "⚡ Trending Pokémon" -> Triggers a backend query: '"Mega Greninja ex" OR "Umbreon ex SIR" OR "Snorlax Legendary" OR "Umbreon VMAX Alt" OR "Charizard ex SIR" OR "Pikachu ex SIR" OR "Team Rocket Mewtwo" OR "Dragapult ex"'
+- Option 3: "💎 High-End Showcase" -> Triggers a backend query: '"PSA 10" OR "BGS 9.5" OR "Auto Patch" OR "1/1 Logoman"' (Ensure backend appends Category ID 212 and a $200 price floor filter ONLY for this deck).
+- Option 4: "🔍 Custom Search" -> Clicking this reveals an inline text input box directly inside the menu layout where a user can input any custom keyword and press Enter.
+
+2. Three-State Loading Logic & View Replacement:
+When an option is tapped or submitted, mutate a simple, isolated state string variable (e.g., appState = 'loading' | 'swiper' | 'menu'). 
+- State 1 (Loading): Hide the choice menu entirely. Render a full-screen, clean animated text screen that pulses: "Fetching cards..." 
+- State 2 (Success): Once the array loads, change appState to 'swiper'. Render ONLY the unified Tinder-style card swipe deck container in place of the loader. The 100-card array must load instantly into frontend local memory.
+- State 3 (Strictly Empty): If the array returns exactly 0 items, show a clean error text string: "No upcoming auctions found for this criteria right now. Try another search!" with a back button to reset state back to 'menu'.
+
+3. Supabase Caching Layer & Affiliate Hook:
+- The backend controller must check your Supabase `cached_cards` table for a query match under 15 minutes old.
+- On cache miss, execute exactly ONE backend request to the eBay Browse API for 100 results sorted by 'endingSoonest'. Use the tracking header 'X-EBAY-C-ENDUSERCTX: affiliateCampaignId=YOUR_EPN_CAMPAIGN_ID_HERE' and map 'itemAffiliateWebUrl' directly to the frontend model. Save the full JSON array to `cached_cards` and pass it to the view layer.
+
+4. Swipe Interface Mechanics:
+- Directly under the card container frame, render a clear text row: "👈 Swipe Left to Pass | Swipe Right to Watch 👉 | 👆 Swipe Up to View on eBay"
+- Gestures: Left advances index, Right saves data to browser LocalStorage ('my_watchlist') requiring zero user database login overhead, Up/Click opens 'itemAffiliateWebUrl' in a separate tab.
+- Deep Link Routing: If a landing URL contains `?playlist=finals_2026`, bypass the dashboard menu instantly and execute Option 1's fetching engine.
+
+Please delete all legacy views, sweep away any filter setting state traps, and compile this highly streamlined 4-option framework!

@@ -1,28 +1,26 @@
 import { useState } from "react";
-import { Search, ChevronRight, Settings, User, LogOut, X } from "lucide-react";
+import { ChevronRight, Search, LogOut, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 
 export type PlaylistId = "nba-finals-stars" | "trending-pokemon" | "high-end-showcase";
 
 export const PLAYLISTS: { id: PlaylistId; emoji: string; label: string; sub: string }[] = [
-  { id: "nba-finals-stars",  emoji: "🏆", label: "NBA Finals Stars",   sub: "Top marquee stars — auctions ending soon"     },
-  { id: "trending-pokemon",  emoji: "⚡", label: "Trending Pokémon",   sub: "Current market chase cards"                   },
-  { id: "high-end-showcase", emoji: "💎", label: "High-End Showcase",  sub: "Premium graded — $200+ only"                  },
+  { id: "nba-finals-stars",  emoji: "🏆", label: "NBA Finals Stars",  sub: "Top marquee stars — auctions ending soon"  },
+  { id: "trending-pokemon",  emoji: "⚡", label: "Trending Pokémon",  sub: "Current market chase cards"                },
+  { id: "high-end-showcase", emoji: "💎", label: "High-End Showcase", sub: "Premium graded — $200+ only"               },
 ];
 
 type Props = {
   mode: "home" | "panel";
   onLoadPlaylist: (id: string, label: string, query?: string) => void;
-  onOpenSettings: () => void;
   onOpenAuth: () => void;
-  onClose?: () => void;
   user: SupabaseUser | null;
 };
 
-export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenSettings, onOpenAuth, onClose, user }: Props) {
-  const [customQuery, setCustomQuery]   = useState("");
-  const [customOpen,  setCustomOpen]    = useState(false);
+export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props) {
+  const [customQuery, setCustomQuery] = useState("");
+  const [customOpen,  setCustomOpen]  = useState(false);
 
   function submitCustom() {
     const q = customQuery.trim();
@@ -32,6 +30,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenSettings, onOpenAut
     setCustomOpen(false);
   }
 
+  // ── Panel mode (dropdown from deck header) ────────────────────────────────
   if (mode === "panel") {
     return (
       <div className="py-1">
@@ -101,20 +100,27 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenSettings, onOpenAut
   // ── Home mode (full screen) ───────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-background overflow-y-auto">
+
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 pt-6 pb-2 shrink-0">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl" />
           <div>
-            <h1 className="text-base font-black uppercase tracking-tight text-foreground leading-none">The Card Match</h1>
-            <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">Swipe. Watch. Win.</p>
+            <h1 className="text-base font-black uppercase tracking-tight text-foreground leading-none">
+              The Card Match
+            </h1>
+            <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">
+              Swipe. Watch. Win.
+            </p>
           </div>
         </div>
         <button
-          onClick={user ? onOpenAuth : onOpenAuth}
+          onClick={onOpenAuth}
           className="w-9 h-9 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
         >
-          {user ? <LogOut className="w-4 h-4 text-primary" /> : <User className="w-4 h-4 text-muted-foreground" />}
+          {user
+            ? <LogOut className="w-4 h-4 text-primary" />
+            : <User    className="w-4 h-4 text-muted-foreground" />}
         </button>
       </div>
 
@@ -128,7 +134,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenSettings, onOpenAut
         </p>
       </div>
 
-      {/* Playlist cards */}
+      {/* 3 preset playlist cards */}
       <div className="px-4 flex flex-col gap-3 shrink-0">
         {PLAYLISTS.map((pl, i) => (
           <motion.button
@@ -202,17 +208,6 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenSettings, onOpenAut
             )}
           </AnimatePresence>
         </motion.div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-center gap-4 mt-auto py-6 px-5">
-        <button
-          onClick={onOpenSettings}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          Preferences
-        </button>
       </div>
     </div>
   );

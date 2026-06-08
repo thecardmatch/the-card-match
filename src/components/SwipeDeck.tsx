@@ -26,19 +26,20 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
     const card = cards[currentIndex];
     if (!card) return;
     if (direction === "right") onLike(card);
-    if (direction === "up") onBuy(card);
+    if (direction === "up")    onBuy(card);
     setCurrentIndex((prev) => prev + 1);
   };
 
-  const isDone = currentIndex >= cards.length;
+  const isDone  = currentIndex >= cards.length;
   const visible = cards.slice(currentIndex, currentIndex + 3);
 
   return (
     <div className="flex flex-col w-full h-full min-h-0 items-center justify-between">
-      <div className="relative w-full flex-1 min-h-0 mb-4">
+      {/* Card stack */}
+      <div className="relative w-full flex-1 min-h-0 mb-3">
         {isDone ? (
           <div className="absolute inset-0 flex items-center justify-center text-center p-8 bg-muted/20 rounded-3xl border-2 border-dashed border-muted">
-            <p className="text-muted-foreground font-medium">No more cards found.</p>
+            <p className="text-muted-foreground font-medium">You've seen all the cards!</p>
           </div>
         ) : (
           <AnimatePresence mode="popLayout">
@@ -59,20 +60,34 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
         )}
       </div>
 
+      {/* Action buttons + swipe hint */}
       {!isDone && (
-        <div className="flex flex-col items-center gap-3 pb-8 shrink-0">
+        <div className="flex flex-col items-center gap-2.5 pb-6 shrink-0">
           <div className="flex items-center justify-center gap-8">
-            <button onClick={() => handleSwipe("left")} className="w-14 h-14 rounded-full bg-card border shadow-xl flex items-center justify-center active:scale-90 transition-transform">
+            <button
+              onClick={() => handleSwipe("left")}
+              className="w-14 h-14 rounded-full bg-card border shadow-xl flex items-center justify-center active:scale-90 transition-transform"
+            >
               <X className="w-8 h-8 text-red-500" />
             </button>
-            <button onClick={() => handleSwipe("up")} className="w-16 h-16 rounded-full border-2 border-yellow-400 bg-yellow-400/5 flex items-center justify-center shadow-xl active:scale-90 transition-transform">
+            <button
+              onClick={() => handleSwipe("up")}
+              className="w-16 h-16 rounded-full border-2 border-yellow-400 bg-yellow-400/5 flex items-center justify-center shadow-xl active:scale-90 transition-transform"
+            >
               <ShoppingBag className="w-8 h-8 text-yellow-500" />
             </button>
-            <button onClick={() => handleSwipe("right")} className="w-14 h-14 rounded-full bg-card border shadow-xl flex items-center justify-center active:scale-90 transition-transform">
+            <button
+              onClick={() => handleSwipe("right")}
+              className="w-14 h-14 rounded-full bg-card border shadow-xl flex items-center justify-center active:scale-90 transition-transform"
+            >
               <Heart className="w-8 h-8 text-green-500 fill-green-500" />
             </button>
           </div>
-          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground opacity-50">Swipe Up to Buy</p>
+
+          {/* Swipe instruction row */}
+          <p className="text-[10px] font-semibold text-muted-foreground/70 tracking-wide text-center leading-relaxed">
+            👈 Swipe Left to Pass &nbsp;|&nbsp; Swipe Right to Watch 👉 &nbsp;|&nbsp; 👆 Swipe Up to View on eBay
+          </p>
         </div>
       )}
     </div>
