@@ -1,68 +1,53 @@
 import { useState } from "react";
-import { ChevronRight, Search, LogOut, User } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { User as SupabaseUser } from "@supabase/supabase-js";
 
-// All queries use plain OR (no inner quotes) — matches eBay Browse API behavior
 const PLAYLISTS = [
   {
+    id: "nba-finals-stars",
     emoji: "🏆",
     label: "NBA Finals Stars",
-    sub: "Top marquee stars — auctions ending soon",
-    query: "Victor Wembanyama OR Jalen Brunson OR Karl-Anthony Towns OR De'Aaron Fox OR Devin Vassell OR Mikal Bridges OR Josh Hart OR OG Anunoby OR Stephon Castle OR Dylan Harper",
+    sub: "Top marquee stars — live auctions",
   },
   {
+    id: "trending-pokemon",
     emoji: "⚡",
     label: "Trending Pokémon",
     sub: "Current market chase cards",
-    query: "Mega Greninja ex OR Umbreon ex SIR OR Snorlax Legendary OR Umbreon VMAX Alt OR Charizard ex SIR OR Pikachu ex SIR OR Team Rocket Mewtwo OR Dragapult ex",
   },
   {
+    id: "high-end-showcase",
     emoji: "💎",
     label: "High-End Showcase",
     sub: "Premium graded — $200+ only",
-    query: "PSA 10 OR BGS 9.5 OR Auto Patch OR 1/1 Logoman",
-    categoryId: "212",
-    minPrice: "200",
   },
 ] as const;
 
-// Export the NBA query for use in deep-link routing
-export const NBA_QUERY = PLAYLISTS[0].query;
-
 type Props = {
   mode: "home" | "panel";
-  // All playlists now use plain query strings — no ID routing
-  onLoadPlaylist: (label: string, query: string, categoryId?: string, minPrice?: string) => void;
-  onOpenAuth: () => void;
-  user: SupabaseUser | null;
+  onLoadPlaylist: (playlistId: string, label: string, query?: string) => void;
 };
 
-export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props) {
+export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
   const [customQuery, setCustomQuery] = useState("");
   const [customOpen,  setCustomOpen]  = useState(false);
 
   function submitCustom() {
     const q = customQuery.trim();
     if (!q) return;
-    onLoadPlaylist(`🔍 "${q}"`, q);
+    onLoadPlaylist("custom", `🔍 "${q}"`, q);
     setCustomQuery("");
     setCustomOpen(false);
   }
 
-  // ── Panel mode (dropdown from deck header) ────────────────────────────────
+  // ── Panel mode (compact dropdown from deck header) ───────────────────────
   if (mode === "panel") {
     return (
       <div className="py-1">
         {PLAYLISTS.map((pl) => (
           <button
-            key={pl.label}
-            onClick={() => onLoadPlaylist(
-              `${pl.emoji} ${pl.label}`,
-              pl.query,
-              "categoryId" in pl ? pl.categoryId : undefined,
-              "minPrice"   in pl ? pl.minPrice   : undefined,
-            )}
+            key={pl.id}
+            onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
             className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/60 transition-colors text-left"
           >
             <span className="text-xl shrink-0">{pl.emoji}</span>
@@ -74,6 +59,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
           </button>
         ))}
 
+        {/* Custom Search row */}
         <div className="border-t border-border/50 mt-1 pt-1">
           <AnimatePresence>
             {customOpen ? (
@@ -87,10 +73,11 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
                 <form onSubmit={(e) => { e.preventDefault(); submitCustom(); }} className="flex gap-2">
                   <input
                     autoFocus
-                    type="text"
+                    type="search"
+                    enterKeyHint="search"
                     value={customQuery}
                     onChange={(e) => setCustomQuery(e.target.value)}
-                    placeholder="Player name or keyword…"
+                    placeholder="Player, card, or keyword…"
                     className="flex-1 text-sm px-3 py-2 bg-muted rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <button
@@ -122,57 +109,42 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
     );
   }
 
-  // ── Home mode (full screen) ───────────────────────────────────────────────
+  // ── Home mode (full-screen) ───────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-background overflow-y-auto">
 
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-5 pt-6 pb-2 shrink-0">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl" />
-          <div>
-            <h1 className="text-base font-black uppercase tracking-tight text-foreground leading-none">
-              The Card Match
-            </h1>
-            <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">
-              Swipe. Watch. Win.
-            </p>
-          </div>
+      {/* Branding header */}
+      <div className="flex items-center gap-3 px-5 pt-6 pb-2 shrink-0">
+        <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl" />
+        <div>
+          <h1 className="text-base font-black uppercase tracking-tight text-foreground leading-none">
+            The Card Match
+          </h1>
+          <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">
+            Swipe. Watch. Win.
+          </p>
         </div>
-        <button
-          onClick={onOpenAuth}
-          className="w-9 h-9 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
-        >
-          {user
-            ? <LogOut className="w-4 h-4 text-primary" />
-            : <User    className="w-4 h-4 text-muted-foreground" />}
-        </button>
       </div>
 
-      {/* Hero blurb */}
+      {/* Hero */}
       <div className="px-5 pt-4 pb-6 shrink-0">
         <h2 className="text-2xl font-black tracking-tight text-foreground leading-tight">
           Featured Playlists
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Swipe through live eBay auctions — right to watch, up to buy.
+          Swipe live eBay auctions — right to watch, up to buy.
         </p>
       </div>
 
-      {/* 3 preset playlist cards */}
+      {/* Playlist rows */}
       <div className="px-4 flex flex-col gap-3 shrink-0">
         {PLAYLISTS.map((pl, i) => (
           <motion.button
-            key={pl.label}
+            key={pl.id}
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06 }}
-            onClick={() => onLoadPlaylist(
-              `${pl.emoji} ${pl.label}`,
-              pl.query,
-              "categoryId" in pl ? pl.categoryId : undefined,
-              "minPrice"   in pl ? pl.minPrice   : undefined,
-            )}
+            onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
             className="group w-full flex items-center gap-4 bg-card border border-border rounded-2xl px-5 py-4 text-left hover:border-primary/40 hover:shadow-md active:scale-[0.98] transition-all"
           >
             <span className="text-3xl shrink-0">{pl.emoji}</span>
@@ -184,7 +156,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
           </motion.button>
         ))}
 
-        {/* Custom Search card */}
+        {/* Custom Search expandable card */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -220,7 +192,8 @@ export function PlaylistsPanel({ mode, onLoadPlaylist, onOpenAuth, user }: Props
                 >
                   <input
                     autoFocus
-                    type="text"
+                    type="search"
+                    enterKeyHint="search"
                     value={customQuery}
                     onChange={(e) => setCustomQuery(e.target.value)}
                     placeholder="e.g. Charizard, LeBron James, PSA 10…"

@@ -1,15 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import { Search, Heart, LayoutList, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
-import { AuthDialog } from "@/components/AuthDialog";
-import { EntitySearch } from "@/components/EntitySearch";
-import { PlaylistsPanel, NBA_QUERY } from "@/components/PlaylistsPanel";
-import { useAuth } from "@/hooks/useAuth";
+import { PlaylistsPanel } from "@/components/PlaylistsPanel";
 import type { TradingCard } from "@/data/pokemon";
-import { fetchEntityCards, type SearchableEntity } from "@/services/entities";
-import { addToWatchlist, removeFromWatchlist, fetchWatchlist } from "@/services/watchlist";
 
 const WATCHLIST_KEY = "cardmatch:watchlist";
 
@@ -26,54 +21,40 @@ function loadLocalWatchlist(): TradingCard[] {
 type AppMode = "home" | "loading" | "deck";
 
 export default function App() {
-  const { user, signOut } = useAuth();
-
-  const [appMode,        setAppMode]        = useState<AppMode>("home");
-  const [deckLabel,      setDeckLabel]      = useState("");
-  const [liked,          setLiked]          = useState<TradingCard[]>(() => loadLocalWatchlist());
-  const [cards,          setCards]          = useState<TradingCard[]>([]);
-  const [watchlistOpen,  setWatchlistOpen]  = useState(false);
-  const [playlistsOpen,  setPlaylistsOpen]  = useState(false);
-  const [searchOpen,     setSearchOpen]     = useState(false);
-  const [authOpen,       setAuthOpen]       = useState(false);
-  const [selectedEntity, setSelectedEntity] = useState<SearchableEntity | null>(null);
-  const [deckResetKey,   setDeckResetKey]   = useState(0);
+  const [appMode,       setAppMode]       = useState<AppMode>("home");
+  const [deckLabel,     setDeckLabel]     = useState("");
+  const [liked,         setLiked]         = useState<TradingCard[]>(() => loadLocalWatchlist());
+  const [cards,         setCards]         = useState<TradingCard[]>([]);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [playlistsOpen, setPlaylistsOpen] = useState(false);
+  const [searchOpen,    setSearchOpen]    = useState(false);
+  const [searchQuery,   setSearchQuery]   = useState("");
+  const [deckResetKey,  setDeckResetKey]  = useState(0);
 
   const seenIds = useRef(new Set<string>());
 
-  // ── Deep-link routing: ?playlist=finals_2026 auto-loads NBA Finals Stars ──
+  // ── Deep-link: ?playlist=finals_2026 → auto-load NBA Finals Stars ─────────
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("playlist") === "finals_2026") {
-      loadPlaylist("🏆 NBA Finals Stars", NBA_QUERY);
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("playlist") === "finals_2026") {
+      loadPlaylist("nba-finals-stars", "🏆 NBA Finals Stars");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Sync watchlist from Supabase on login ─────────────────────────────────
-  useEffect(() => {
-    if (!user) return;
-    fetchWatchlist().then((dbCards) => {
-      if (dbCards && dbCards.length > 0) {
-        setLiked(dbCards);
-        window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(dbCards));
-      }
-    });
-  }, [user]);
-
-  // ── Load any playlist or custom search — all use plain OR query strings ────
-  async function loadPlaylist(label: string, query: string, categoryId?: string, minPrice?: string) {
+  // ── Core loader: calls /api/playlist for presets OR custom keyword search ──
+  async function loadPlaylist(playlistId: string, label: string, query?: string) {
     setAppMode("loading");
     setDeckLabel(label);
     setPlaylistsOpen(false);
     setSearchOpen(false);
-    setSelectedEntity(null);
+    setSearchQuery("");
     seenIds.current = new Set();
 
     try {
-      const params = new URLSearchParams({ query });
-      if (categoryId) params.set("categoryId", categoryId);
-      if (minPrice)   params.set("minPrice",   minPrice);
+      const params = playlistId !== "custom"
+        ? new URLSearchParams({ id: playlistId })
+        : new URLSearchParams({ query: query || "" });
 
       const res  = await fetch(`/api/playlist?${params}`);
       const data = await res.json();
@@ -90,60 +71,40 @@ export default function App() {
     }
   }
 
-  // ── Entity search — fires when user picks a player from autocomplete ───────
-  useEffect(() => {
-    if (!selectedEntity) return;
-    let cancelled = false;
-    setAppMode("loading");
-    setDeckLabel(`${selectedEntity.name} · ${selectedEntity.category}`);
-    setSearchOpen(false);
-    seenIds.current = new Set();
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q) loadPlaylist("custom", `🔍 "${q}"`, q);
+  }
 
-    fetchEntityCards(selectedEntity.id).then((items) => {
-      if (cancelled) return;
-      items.forEach((c) => seenIds.current.add(c.id));
-      setCards(items);
-      setDeckResetKey((k) => k + 1);
-      setAppMode("deck");
-    }).catch((err) => {
-      console.warn("[entity] fetch failed:", err.message);
-      if (!cancelled) { setCards([]); setAppMode("deck"); }
-    });
-
-    return () => { cancelled = true; };
-  }, [selectedEntity]);
-
-  // ── No-op: playlists are fully loaded upfront (100 cards) ─────────────────
-  const handleNeedMore = useCallback(() => {}, []);
-
-  // ── Watchlist helpers ─────────────────────────────────────────────────────
-  async function handleLike(card: TradingCard) {
+  // ── Watchlist (localStorage only — no account required) ───────────────────
+  function handleLike(card: TradingCard) {
     setLiked((prev) => {
       const next = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
       window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
       return next;
     });
-    if (user) await addToWatchlist(user.id, card);
   }
 
-  async function handleRemove(cardId: string) {
+  function handleRemove(cardId: string) {
     setLiked((prev) => {
       const next = prev.filter((c) => c.id !== cardId);
       window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
       return next;
     });
-    if (user) await removeFromWatchlist(user.id, cardId);
   }
 
   function handleBuy(card: TradingCard) {
     if (card.ebayUrl) window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
   }
 
+  const handleNeedMore = useCallback(() => {}, []);
+
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
 
-      {/* ── HOME SCREEN ──────────────────────────────────────────────────── */}
+      {/* ── HOME / FEATURED PLAYLISTS ──────────────────────────────────── */}
       <AnimatePresence>
         {appMode === "home" && (
           <motion.div
@@ -157,14 +118,12 @@ export default function App() {
             <PlaylistsPanel
               mode="home"
               onLoadPlaylist={loadPlaylist}
-              onOpenAuth={() => setAuthOpen(true)}
-              user={user}
             />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── LOADING SCREEN ───────────────────────────────────────────────── */}
+      {/* ── LOADING ───────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {appMode === "loading" && (
           <motion.div
@@ -201,14 +160,13 @@ export default function App() {
       {/* ── DECK VIEW ────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* Header */}
+        {/* ── Header ──────────────────────────────────────────────────── */}
         <header className="h-16 px-4 md:px-5 border-b border-border flex items-center gap-3 bg-background z-50 shrink-0">
 
-          {/* Logo — click to go back home */}
+          {/* Logo — taps back to home */}
           <div
             className="flex items-center gap-2.5 shrink-0 cursor-pointer group"
             onClick={() => setAppMode("home")}
-            title="Back to playlists"
           >
             <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg" />
             <div className="hidden sm:block">
@@ -223,36 +181,56 @@ export default function App() {
             </div>
           </div>
 
-          {/* Inline entity search bar */}
+          {/* Inline search bar */}
           <div className="flex-1 min-w-0">
             <AnimatePresence>
               {searchOpen && (
-                <motion.div
+                <motion.form
+                  key="searchbar"
                   initial={{ opacity: 0, scale: 0.96 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.96 }}
+                  onSubmit={handleSearchSubmit}
                   className="flex items-center gap-2"
                 >
-                  <EntitySearch selectedEntity={selectedEntity} onSelect={setSelectedEntity} />
+                  <input
+                    autoFocus
+                    type="search"
+                    enterKeyHint="search"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search any player, card, or set…"
+                    className="flex-1 text-sm px-4 py-2 bg-muted rounded-full border border-border focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
                   <button
-                    onClick={() => setSearchOpen(false)}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    type="submit"
+                    disabled={!searchQuery.trim()}
+                    className="px-3 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-full disabled:opacity-40 shrink-0"
+                  >
+                    Go
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
+                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>
-                </motion.div>
+                </motion.form>
               )}
             </AnimatePresence>
           </div>
 
-          {/* ── 3 Icons ─────────────────────────────────────────────────── */}
+          {/* ── 3 Icons ──────────────────────────────────────────────── */}
           <div className="flex items-center gap-2 shrink-0">
 
             {/* Search */}
             <button
               onClick={() => { setSearchOpen((o) => !o); setPlaylistsOpen(false); }}
               className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${
-                searchOpen ? "bg-primary border-primary text-primary-foreground" : "bg-card hover:bg-accent"
+                searchOpen
+                  ? "bg-primary border-primary text-primary-foreground"
+                  : "bg-card hover:bg-accent"
               }`}
             >
               <Search className="w-4 h-4" />
@@ -261,9 +239,11 @@ export default function App() {
             {/* Playlists */}
             <div className="relative">
               <button
-                onClick={() => { setPlaylistsOpen((o) => !o); setSearchOpen(false); }}
+                onClick={() => { setPlaylistsOpen((o) => !o); setSearchOpen(false); setSearchQuery(""); }}
                 className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${
-                  playlistsOpen ? "bg-primary border-primary text-primary-foreground" : "bg-card hover:bg-accent"
+                  playlistsOpen
+                    ? "bg-primary border-primary text-primary-foreground"
+                    : "bg-card hover:bg-accent"
                 }`}
               >
                 <LayoutList className="w-4 h-4" />
@@ -292,8 +272,6 @@ export default function App() {
                       <PlaylistsPanel
                         mode="panel"
                         onLoadPlaylist={loadPlaylist}
-                        onOpenAuth={() => { setAuthOpen(true); setPlaylistsOpen(false); }}
-                        user={user}
                       />
                     </motion.div>
                   </>
@@ -301,7 +279,7 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {/* Heart — mobile */}
+            {/* Heart — mobile watchlist */}
             <button
               onClick={() => setWatchlistOpen(true)}
               className="relative w-9 h-9 rounded-full bg-card border flex items-center justify-center hover:bg-accent transition-colors md:hidden"
@@ -314,10 +292,10 @@ export default function App() {
               )}
             </button>
 
-            {/* Heart — desktop (decorative, sidebar is always visible) */}
+            {/* Heart — desktop (sidebar always visible) */}
             <button
               className="relative w-9 h-9 rounded-full bg-card border hidden md:flex items-center justify-center hover:bg-accent transition-colors"
-              title="Watchlist →"
+              title="Watchlist (right panel)"
             >
               <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
               {liked.length > 0 && (
@@ -329,7 +307,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Deck area */}
+        {/* ── Deck area ────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
             {appMode === "deck" && cards.length === 0 ? (
@@ -369,7 +347,7 @@ export default function App() {
         />
       </aside>
 
-      {/* ── Mobile watchlist drawer ────────────────────────────────────── */}
+      {/* ── Mobile watchlist drawer ───────────────────────────────────── */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
@@ -392,8 +370,6 @@ export default function App() {
           </>
         )}
       </AnimatePresence>
-
-      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
 }

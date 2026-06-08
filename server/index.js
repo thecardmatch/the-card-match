@@ -12,6 +12,8 @@ app.use(express.json());
 const EPN_CAMP_ID = "5339150952";
 
 // ─── Supabase admin client (server-side caching) ──────────────────────────────
+// Requires SUPABASE_SERVICE_ROLE_KEY in Replit Secrets.
+// If not set the app degrades gracefully — no caching, direct eBay calls.
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_SRK)
@@ -152,6 +154,7 @@ function detectGrade(title) {
   return "Raw";
 }
 
+// ─── eBay Affiliate Link Builder Engine ──────────────────────────────────────
 function buildAffiliateUrl(item) {
   if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
   const AFF = { campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
@@ -350,73 +353,115 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-// ─── RE-ENGINEERED FLUID PLAYLIST ROUTER MAPPINGS ────────────────────────────
-const PLAYLIST_CONFIGS = {
+// ─── Playlist definitions — individual terms, fetched in parallel ─────────────
+// eBay Browse API does NOT support OR keyword syntax in `q`.
+// Fix: one API call per term, results merged & interleaved.
+const PLAYLIST_DEFS = {
   "nba-finals-stars": {
-    query: '"Victor Wembanyama" OR "Jalen Brunson" OR "Karl-Anthony Towns" OR "De\'Aaron Fox" OR "Devin Vassell" OR "Mikal Bridges" OR "Josh Hart" OR "OG Anunoby" OR "Stephon Castle" OR "Dylan Harper"',
-    categoryId: "261328", // Restricted to Sports Trading Cards exclusively
-    minPrice: 1,
+    terms:      ["Victor Wembanyama", "Jalen Brunson", "Karl-Anthony Towns",
+                 "De'Aaron Fox", "Devin Vassell", "Mikal Bridges",
+                 "Josh Hart", "OG Anunoby", "Stephon Castle", "Dylan Harper"],
+    categoryId: "261328",   // Sports Trading Cards
+    perTerm:    12,
+    minPrice:   1,
   },
   "trending-pokemon": {
-    query: '"Mega Greninja ex" OR "Umbreon ex SIR" OR "Snorlax Legendary" OR "Umbreon VMAX Alt" OR "Charizard ex SIR" OR "Pikachu ex SIR" OR "Team Rocket Mewtwo" OR "Dragapult ex"',
-    categoryId: "183050", // Restricted to CCG Card Singles exclusively
-    minPrice: 1,
+    terms:      ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
+                 "Umbreon VMAX Alt", "Charizard ex SIR", "Pikachu ex SIR",
+                 "Team Rocket Mewtwo", "Dragapult ex"],
+    categoryId: "183050",   // CCG/Pokémon Singles
+    perTerm:    12,
+    minPrice:   1,
   },
   "high-end-showcase": {
-    query: '"PSA 10" OR "BGS 9.5" OR "Auto Patch" OR "1/1 Logoman"',
-    categoryId: "261328", // Graded Sports Cards
-    minPrice: 200,
+    terms:      ["PSA 10 card", "BGS 9.5 card", "Auto Patch card", "1/1 Logoman"],
+    categoryId: "212",      // Trading Cards (broad — graded cross-sport)
+    perTerm:    25,
+    minPrice:   200,
   },
 };
 
-// ─── GET /api/playlist — Main unified entry point execution controller ────────
+// ─── GET /api/playlist ────────────────────────────────────────────────────────
+// ?id=<presetId>   → parallel per-term eBay calls, merged result (cached 15 min)
+// ?query=<keyword> → single eBay call for any keyword (cached 15 min)
 app.get("/api/playlist", async (req, res) => {
   try {
-    const { id, query: customQuery, categoryId: qCategoryId, minPrice: qMinPrice } = req.query;
+    const { id, query: customQuery } = req.query;
 
     if (!id && !customQuery) {
-      return res.status(400).json({ error: "id or query parameter is required", items: [] });
+      return res.status(400).json({ error: "id or query required", items: [] });
     }
 
-    // Bind configuration properties automatically
-    const config = id ? PLAYLIST_CONFIGS[id] : null;
+    const def      = id ? PLAYLIST_DEFS[id] : null;
+    // Use a versioned prefix so old zero-result caches are ignored
+    const cacheKey = id
+      ? `pl3:${id}`
+      : `qs3:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
 
-    // Construct precise cache isolated keys to prevent index collisions
-    const baseKey = id
-      ? `playlist:${id}`
-      : `q:${String(customQuery).trim().toLowerCase().slice(0, 100)}`;
-    const cacheKey = `${baseKey}${qCategoryId ? `:c${qCategoryId}` : ""}${qMinPrice ? `:p${qMinPrice}` : ""}`;
-
-    // 1. Fetch from 15-minute backend cache
+    // ── 1. Supabase cache (15-min TTL) ──────────────────────────────────────
     const cached = await getBroadCache(cacheKey);
     if (cached && cached.length > 0) {
-      const now    = new Date();
-      const active = cached.filter((c) =>
-        c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
-      );
-      return res.json({ items: active, fromCache: true });
+      console.log(`[playlist] cache hit: ${cacheKey} (${cached.length} cards)`);
+      return res.json({ items: cached, fromCache: true });
     }
 
-    // 2. Resolve parameters and call clean unified search engine
-    const token      = await getEbayToken();
-    const q          = config ? config.query : String(customQuery).trim();
-    const minPrice   = config?.minPrice ?? (qMinPrice ? Number(qMinPrice) : 1);
-    const categoryId = config?.categoryId ?? qCategoryId ?? null;
-    const filterStr  = `price:[${minPrice}..],priceCurrency:USD`;
+    // ── 2. eBay fetch ────────────────────────────────────────────────────────
+    const token = await getEbayToken();
+    let items   = [];
 
-    // Fire unified query request array back from eBay (returns 100 items directly)
-    const data  = await ebaySearch(token, q, "endingSoonest", filterStr, null, categoryId, 100, 0);
-    const items = (data.itemSummaries || [])
-      .filter((i) => !isSuppliesCategory(i))
-      .map((i) => mapItem(i, []));
+    if (def) {
+      // PRESET: parallel per-term calls, round-robin interleave
+      const { terms, categoryId, perTerm, minPrice } = def;
+      const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
 
-    // 3. Commit back to cache layer asynchronously
+      const buckets = await Promise.all(
+        terms.map(async (term) => {
+          try {
+            const data = await ebaySearch(token, term, "bestMatch", filterStr, null, categoryId, perTerm, 0);
+            return (data.itemSummaries || [])
+              .filter((i) => !isSuppliesCategory(i))
+              .map((i) => mapItem(i, []));
+          } catch (e) {
+            console.warn(`[playlist] term "${term}" failed:`, e.message);
+            return [];
+          }
+        })
+      );
+
+      // Interleave: one card from each term, round-robin
+      const maxLen = Math.max(...buckets.map((b) => b.length), 0);
+      for (let i = 0; i < maxLen; i++) {
+        for (const bucket of buckets) {
+          if (i < bucket.length) items.push(bucket[i]);
+        }
+      }
+
+      // Deduplicate by eBay item ID
+      const seen = new Set();
+      items = items.filter((c) => {
+        if (seen.has(c.id)) return false;
+        seen.add(c.id);
+        return true;
+      }).slice(0, 100);
+
+    } else {
+      // CUSTOM KEYWORD: single call — bestMatch for max coverage
+      const q         = String(customQuery).trim();
+      const filterStr = "price:[1..],priceCurrency:USD";
+      const data      = await ebaySearch(token, q, "bestMatch", filterStr, null, null, 100, 0);
+      items = (data.itemSummaries || [])
+        .filter((i) => !isSuppliesCategory(i))
+        .map((i) => mapItem(i, []));
+    }
+
+    // ── 3. Write to Supabase cache (async, non-blocking) ────────────────────
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
 
-    console.log(`[playlist successful match] ${cacheKey} resolved → passed ${items.length} trading cards.`);
+    console.log(`[playlist] ${cacheKey} → ${items.length} cards`);
     return res.json({ items, fromCache: false });
+
   } catch (err) {
-    console.error("[playlist server pipeline crash]:", err.message);
+    console.error("[playlist] error:", err.message);
     return res.status(500).json({ error: err.message, items: [] });
   }
 });
