@@ -2,17 +2,16 @@ import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 
-const app  = express();
+const app = express();
 const PORT = 3001;
 
 app.use(cors({ origin: true }));
 app.use(express.json());
 
+// ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
 const EPN_CAMP_ID = "5339150952";
 
 // ─── Supabase admin client (server-side caching) ──────────────────────────────
-// Requires SUPABASE_SERVICE_ROLE_KEY in Replit Secrets.
-// If not set the app degrades gracefully — no caching, direct eBay calls.
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_SRK)
@@ -21,8 +20,8 @@ const supabase = (SUPABASE_URL && SUPABASE_SRK)
 if (!supabase) console.warn("[cache] SUPABASE_SERVICE_ROLE_KEY not set — caching disabled");
 
 // ─── Cache TTLs ───────────────────────────────────────────────────────────────
-const ENTITY_TTL_MS = 30 * 60 * 1000;  // 30 min — entity-specific deck
-const BROAD_TTL_MS  = 15 * 60 * 1000;  // 15 min — broad category deck
+const ENTITY_TTL_MS = 30 * 60 * 1000;  // 30 min
+const BROAD_TTL_MS  = 15 * 60 * 1000;  // 15 min
 
 // ─── Cache helpers ────────────────────────────────────────────────────────────
 async function getEntityCache(entityId) {
@@ -109,33 +108,33 @@ async function getEbayToken() {
   return _token;
 }
 
-// ─── Category → eBay categoryId ──────────────────────────────────────────────
+// ─── UNIVERSAL TRADING CARD CATEGORY FIXED MAPPINGS ──────────────────────────
 const CATEGORY_IDS = {
-  Pokemon:     "183454",
-  Basketball:  "214",
-  Baseball:    "213",
-  Football:    "217",
-  Hockey:      "216",
-  Soccer:      "260",
-  "Formula 1": null,
-  WWE:         null,
+  Pokemon:      "183050", // Correct CCG Category (Was non-sport 183454)
+  Basketball:   "261328", // Correct Sports Cards Category (Was Automotive 214!)
+  Baseball:     "261328", // Correct Sports Cards Category (Was 213)
+  Football:     "261328", // Correct Sports Cards Category (Was 217)
+  Hockey:       "261328", // Correct Sports Cards Category (Was 216)
+  Soccer:       "261328", // Correct Sports Cards Category (Was 260)
+  "Formula 1":  "261328",
+  WWE:          "261328"
 };
 
 const CAT_BASE_KEYWORD = {
-  Pokemon:     "pokemon card",
-  Basketball:  "basketball card",
-  Baseball:    "baseball card",
-  Football:    "football card",
-  Hockey:      "hockey card",
-  Soccer:      "soccer card",
-  "Formula 1": "formula 1 f1 card",
-  WWE:         "wwe wrestling card",
+  Pokemon:      "pokemon card",
+  Basketball:   "basketball card",
+  Baseball:     "baseball card",
+  Football:     "football card",
+  Hockey:       "hockey card",
+  Soccer:       "soccer card",
+  "Formula 1":  "formula 1 f1 card",
+  WWE:          "wwe wrestling card",
 };
 
 function detectCategory(title, selectedCats) {
   if (selectedCats.length === 1) return selectedCats[0];
   const t = title.toLowerCase();
-  if (t.includes("pokemon"))                             return "Pokemon";
+  if (t.includes("pokemon"))                      return "Pokemon";
   if (t.includes("basketball") || t.includes(" nba "))  return "Basketball";
   if (t.includes("baseball")   || t.includes(" mlb "))  return "Baseball";
   if (t.includes("football")   || t.includes(" nfl "))  return "Football";
@@ -199,7 +198,7 @@ function mapItem(item, selectedCats) {
 }
 
 function isSuppliesCategory(item) {
-  return (item.categories || []).some((c) => String(c.categoryId) === "183444");
+  return (item.categories || []).some((c) => String(c.categoryId) === "183444" || String(c.categoryId) === "550");
 }
 
 const SORT_MAP = {
@@ -211,7 +210,7 @@ const SORT_MAP = {
   bidCountDescending: "bidCountDescending",
 };
 
-const BULK_EXCLUSION = ["-lot", "-bundle"].join(" ");
+const BULK_EXCLUSION = ["-lot", "-bundle", "-box", "-case", "-pack"].join(" ");
 
 function buildConditionParams(conditions) {
   if (!conditions || conditions.length === 0) return { conditionFilter: null, aspectFilter: null };
@@ -220,8 +219,8 @@ function buildConditionParams(conditions) {
   const hasGrades = grades.length > 0;
   let conditionFilter = null;
   if (hasRaw && hasGrades) conditionFilter = "conditionIds:{3000|2750}";
-  else if (hasRaw)         conditionFilter = "conditionIds:{3000}";
-  else if (hasGrades)      conditionFilter = "conditionIds:{2750}";
+  else if (hasRaw)          conditionFilter = "conditionIds:{3000}";
+  else if (hasGrades)       conditionFilter = "conditionIds:{2750}";
   const aspectFilter = hasGrades ? `Grade:${grades.join("|")}` : null;
   return { conditionFilter, aspectFilter };
 }
@@ -243,20 +242,36 @@ function passesGradeFilter(gradeStr, filter) {
   return wantNums.includes(m[1]);
 }
 
-// ─── Core eBay Browse API call ────────────────────────────────────────────────
-async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 25, offset = 0) {
+// ─── Core eBay Browse API Call Engine ─────────────────────────────────────────
+async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0) {
   const params = new URLSearchParams({ sort: sortVal, limit: String(limit), fieldgroups: "MATCHING_ITEMS,EXTENDED" });
   if (offset > 0) params.set("offset", String(offset));
-  if (q && q.trim()) params.set("q", q.trim());
+
+  // Clean up user searches and apply mandatory trading card bulk clean-out parameters
+  if (q && q.trim()) {
+    let targetQuery = q.trim();
+    if (!targetQuery.toLowerCase().includes("-lot")) {
+      targetQuery += ` ${BULK_EXCLUSION}`;
+    }
+    params.set("q", targetQuery);
+  }
+
   if (filterStr) params.set("filter", filterStr);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
-  if (categoryId) params.set("category_ids", categoryId);
+
+  // Force global trading cards fallback containment if no categoryId is supplied
+  if (categoryId) {
+    params.set("category_ids", categoryId);
+  } else {
+    params.set("category_ids", "261328,183050"); 
+  }
+
   const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
   const res = await fetch(url, {
     headers: {
       Authorization:              `Bearer ${token}`,
       "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      "X-EBAY-C-ENDUSERCTX":    `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
     },
   });
   if (!res.ok) {
@@ -283,7 +298,6 @@ app.get("/api/entities", async (req, res) => {
     if (error) throw error;
     return res.json({ entities: data ?? [] });
   } catch (err) {
-    console.error("[entities] autocomplete error:", err.message);
     return res.json({ entities: [] });
   }
 });
@@ -294,7 +308,6 @@ app.get("/api/search", async (req, res) => {
     const { entityId } = req.query;
     if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
 
-    // 1. Check entity cache
     const cached = await getEntityCache(entityId);
     if (cached && cached.length > 0) {
       const now    = new Date();
@@ -304,7 +317,6 @@ app.get("/api/search", async (req, res) => {
       return res.json({ items: active, fromCache: true });
     }
 
-    // 2. Load entity definition from Supabase
     if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
     const { data: entity, error: eErr } = await supabase
       .from("searchable_entities")
@@ -313,10 +325,9 @@ app.get("/api/search", async (req, res) => {
       .maybeSingle();
     if (eErr || !entity) return res.status(404).json({ error: "Entity not found", items: [] });
 
-    // 3. Dual eBay fetch: auctions (endingSoonest) + BuyItNow (bestMatch)
     const token  = await getEbayToken();
     const catId  = CATEGORY_IDS[entity.category] ?? null;
-    const kw     = `${entity.ebay_keyword} -lot -bundle`;
+    const kw     = `${entity.ebay_keyword}`;
     const baseFilter = "price:[1..],priceCurrency:USD";
 
     const [auctionData, binData] = await Promise.all([
@@ -328,70 +339,57 @@ app.get("/api/search", async (req, res) => {
     const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
     const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
 
-    // 4. Merge: auctions first (already endingSoonest), then unique BIN items
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
     const merged     = [...auctions, ...uniqueBin];
 
-    // 5. Cache asynchronously (don't block the response)
     setEntityCache(entityId, merged).catch(() => {});
-
     return res.json({ items: merged, fromCache: false });
   } catch (err) {
-    console.error("[entity search] error:", err.message);
     return res.status(500).json({ error: err.message, items: [] });
   }
 });
 
-// ─── Playlist configs ────────────────────────────────────────────────────────
+// ─── RE-ENGINEERED FLUID PLAYLIST ROUTER MAPPINGS ────────────────────────────
 const PLAYLIST_CONFIGS = {
   "nba-finals-stars": {
     query: '"Victor Wembanyama" OR "Jalen Brunson" OR "Karl-Anthony Towns" OR "De\'Aaron Fox" OR "Devin Vassell" OR "Mikal Bridges" OR "Josh Hart" OR "OG Anunoby" OR "Stephon Castle" OR "Dylan Harper"',
-    categoryId: null,
+    categoryId: "261328", // Restricted to Sports Trading Cards exclusively
     minPrice: 1,
   },
   "trending-pokemon": {
     query: '"Mega Greninja ex" OR "Umbreon ex SIR" OR "Snorlax Legendary" OR "Umbreon VMAX Alt" OR "Charizard ex SIR" OR "Pikachu ex SIR" OR "Team Rocket Mewtwo" OR "Dragapult ex"',
-    categoryId: "183454",
+    categoryId: "183050", // Restricted to CCG Card Singles exclusively
     minPrice: 1,
   },
   "high-end-showcase": {
     query: '"PSA 10" OR "BGS 9.5" OR "Auto Patch" OR "1/1 Logoman"',
-    categoryId: "212",
+    categoryId: "261328", // Graded Sports Cards
     minPrice: 200,
   },
 };
 
-// ─── GET /api/playlist — preset or custom-keyword deck (cached 15 min) ────────
-// Query params: ?id=<playlistId>  OR  ?query=<keyword>
+// ─── GET /api/playlist — Main unified entry point execution controller ────────
 app.get("/api/playlist", async (req, res) => {
   try {
-    // All searches now come in as plain query strings.
-    // Optional: categoryId and minPrice for High-End Showcase (and any future use).
-    const {
-      id,
-      query:      customQuery,
-      categoryId: qCategoryId,
-      minPrice:   qMinPrice,
-    } = req.query;
+    const { id, query: customQuery, categoryId: qCategoryId, minPrice: qMinPrice } = req.query;
 
     if (!id && !customQuery) {
-      return res.status(400).json({ error: "id or query is required", items: [] });
+      return res.status(400).json({ error: "id or query parameter is required", items: [] });
     }
 
-    // Legacy ID path kept for backward compat (though frontend no longer uses it)
+    // Bind configuration properties automatically
     const config = id ? PLAYLIST_CONFIGS[id] : null;
 
-    // Build cache key — incorporate category/price params so High-End doesn't collide
+    // Construct precise cache isolated keys to prevent index collisions
     const baseKey = id
       ? `playlist:${id}`
       : `q:${String(customQuery).trim().toLowerCase().slice(0, 100)}`;
     const cacheKey = `${baseKey}${qCategoryId ? `:c${qCategoryId}` : ""}${qMinPrice ? `:p${qMinPrice}` : ""}`;
 
-    // 1. Cache check (15-min TTL)
+    // 1. Fetch from 15-minute backend cache
     const cached = await getBroadCache(cacheKey);
     if (cached && cached.length > 0) {
-      console.log(`[cache] playlist hit: ${cacheKey}`);
       const now    = new Date();
       const active = cached.filter((c) =>
         c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
@@ -399,30 +397,31 @@ app.get("/api/playlist", async (req, res) => {
       return res.json({ items: active, fromCache: true });
     }
 
-    // 2. ONE eBay call — plain OR query, endingSoonest, 100 results
+    // 2. Resolve parameters and call clean unified search engine
     const token      = await getEbayToken();
     const q          = config ? config.query : String(customQuery).trim();
     const minPrice   = config?.minPrice ?? (qMinPrice ? Number(qMinPrice) : 1);
     const categoryId = config?.categoryId ?? qCategoryId ?? null;
     const filterStr  = `price:[${minPrice}..],priceCurrency:USD`;
 
+    // Fire unified query request array back from eBay (returns 100 items directly)
     const data  = await ebaySearch(token, q, "endingSoonest", filterStr, null, categoryId, 100, 0);
     const items = (data.itemSummaries || [])
       .filter((i) => !isSuppliesCategory(i))
-      .map((i) => mapItem(i, []));   // buildAffiliateUrl → campid 5339150952 always set
+      .map((i) => mapItem(i, []));
 
-    // 3. Cache async — never block the response
+    // 3. Commit back to cache layer asynchronously
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
 
-    console.log(`[playlist] ${cacheKey} → ${items.length} cards`);
+    console.log(`[playlist successful match] ${cacheKey} resolved → passed ${items.length} trading cards.`);
     return res.json({ items, fromCache: false });
   } catch (err) {
-    console.error("[playlist] error:", err.message);
+    console.error("[playlist server pipeline crash]:", err.message);
     return res.status(500).json({ error: err.message, items: [] });
   }
 });
 
-// ─── GET /api/ebay/search — broad category browse (with Supabase cache) ───────
+// ─── GET /api/ebay/search — General global search configurations ──────────────────
 app.get("/api/ebay/search", async (req, res) => {
   try {
     const token = await getEbayToken();
@@ -443,7 +442,6 @@ app.get("/api/ebay/search", async (req, res) => {
     const sortVal = SORT_MAP[sort] || "bestMatch";
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    // ── Filters ───────────────────────────────────────────────────────────────
     const min = Math.max(1, parseFloat(minPrice) || 0);
     const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
     const filterParts = [`price:[${min}..${max}],priceCurrency:USD`];
@@ -456,16 +454,13 @@ app.get("/api/ebay/search", async (req, res) => {
     const playerQ    = query.trim();
     const gradeFilter = buildGradeFilter(conds);
 
-    // ── Broad cache check (page 0 only) ───────────────────────────────────────
     if (ebayOffset === 0) {
       const cacheKey = buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk);
       const cached   = await getBroadCache(cacheKey);
       if (cached && cached.length > 0) {
-        console.log(`[cache] broad hit: ${cacheKey.slice(0, 60)}`);
         return res.json({ items: cached, total: cached.length, fromCache: true });
       }
 
-      // ── eBay fetch ────────────────────────────────────────────────────────
       let allItems = [];
       const PAGE_SIZE = 200;
 
@@ -490,16 +485,13 @@ app.get("/api/ebay/search", async (req, res) => {
 
       if (gradeFilter) allItems = allItems.filter((i) => passesGradeFilter(i.grade, gradeFilter));
 
-      const seen  = new Set();
+      const seen   = new Set();
       const items = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
 
-      // Write to broad cache async
       if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
-
       return res.json({ items, total: items.length });
     }
 
-    // ── Paginated fetch (offset > 0) — no cache ───────────────────────────────
     const PAGE_SIZE = 200;
     let allItems = [];
 
@@ -523,16 +515,15 @@ app.get("/api/ebay/search", async (req, res) => {
     }
 
     if (gradeFilter) allItems = allItems.filter((i) => passesGradeFilter(i.grade, gradeFilter));
-    const seen  = new Set();
+    const seen   = new Set();
     const items = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
     return res.json({ items, total: items.length });
 
   } catch (err) {
-    console.error("[ebay] /api/ebay/search error:", err.message);
     return res.status(500).json({ error: err.message, items: [] });
   }
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!supabase }));
 
-app.listen(PORT, () => console.log(`[api] eBay proxy listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`[api] eBay proxy server operational on port ${PORT}`));
