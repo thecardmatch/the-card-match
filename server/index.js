@@ -476,11 +476,10 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   if (filterStr) params.set("filter", filterStr);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
 
-  // Force global trading cards fallback containment if no categoryId is supplied
+  // Only restrict by category when one is explicitly provided.
+  // Passing multiple IDs triggers a 400 from Browse API (max 1 allowed).
   if (categoryId) {
     params.set("category_ids", categoryId);
-  } else {
-    params.set("category_ids", "261328,183050"); 
   }
 
   const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
@@ -710,7 +709,7 @@ app.get("/api/ebay/search", async (req, res) => {
     const { conditionFilter, aspectFilter } = buildConditionParams(conds);
     if (conditionFilter) filterParts.push(conditionFilter);
     if (listingType === "Auction")      filterParts.push("buyingOptions:{AUCTION}");
-    else if (listingType === "BuyItNow") filterParts.push("buyingOptions:{FIXED_PRICE}");
+    else if (listingType === "Buy It Now") filterParts.push("buyingOptions:{FIXED_PRICE}");
     const filterStr  = filterParts.join(",");
     const bulkSuffix = showBulk === "true" ? "" : ` ${BULK_EXCLUSION}`;
     const playerQ    = query.trim();
