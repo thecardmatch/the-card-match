@@ -1,0 +1,27 @@
+Let's build and lock down the main interface dashboard and loading engine for our high-speed Beta application launch. We are implementing a clean grid/list menu under a "Featured Playlists" header, backed by a robust Supabase on-demand caching strategy to protect our 5,000 daily eBay API limit. Bypassing user accounts entirely for maximum speed.
+
+1. Implement Main "Featured Playlists" Menu Layout (4 Clickable Rows):
+At launch, the main home interface must display a clean, uniform list or grid titled "Featured Playlists". It should contain exactly 4 interactive options:
+- Option 1: "🏆 NBA Finals Stars" -> Points to a backend query targeting maximum top marquee stars (ensure De'Aaron Fox's name is properly escaped for the code string): '"Victor Wembanyama" OR "Jalen Brunson" OR "Karl-Anthony Towns" OR "De\'Aaron Fox" OR "Devin Vassell" OR "Mikal Bridges" OR "Josh Hart" OR "OG Anunoby" OR "Stephon Castle" OR "Dylan Harper"'
+- Option 2: "⚡ Trending Pokémon" -> Points to a backend query targeting current market chase cards: '"Mega Greninja ex" OR "Umbreon ex SIR" OR "Snorlax Legendary" OR "Umbreon VMAX Alt" OR "Charizard ex SIR" OR "Pikachu ex SIR" OR "Team Rocket Mewtwo" OR "Dragapult ex"'
+- Option 3: "💎 High-End Showcase" -> Points to a backend query for premium graded items: '"PSA 10" OR "BGS 9.5" OR "Auto Patch" OR "1/1 Logoman"' (Apply eBay Category ID 212 and a strict $200 price floor filter in the backend logic when fetching this specific playlist).
+- Option 4: "🔍 Custom Search" -> Clicking this item reveals or transitions into a text search input box allowing the user to type in any custom player or keyword on demand.
+
+2. Unified Backend Caching Layer:
+- Whether a user executes a query via the "Custom Search" input option or taps one of the 3 hardcoded Featured Playlists, the backend must check our Supabase `cached_cards` table first to see if a valid 100-card response array exists for that exact string or playlist ID from the last 15 minutes.
+- On a cache miss, execute exactly ONE call to the eBay Browse API for 100 results sorted strictly by 'endingSoonest'. Save that returned array to Supabase as a JSON blob with a timestamp, and pass it to the frontend.
+
+3. Frontend Three-State Loading Logic:
+- Establish explicit state tracking (`loading`, `error`, `success`) whenever a deck is requested from the menu.
+- State 1 (Loading): The instant an input is submitted or a playlist is tapped, hide the selection menu and enter a loading state. Display a pulsing, smooth "Fetching cards..." text animation overlay on the screen.
+- State 2 (Success): Once data resolves, instantly hide the loading indicator and populate the cards. Load the 100-card array directly into frontend memory for completely lag-free swiping.
+- State 3 (Strictly Empty): Do NOT flash a "No cards found" or empty screen while data is transferring. Only display a clean "No upcoming auctions found for this criteria right now. Try another search!" message if and only if the final returned array has an explicit length of 0 after the network request completely finishes.
+
+4. Frontend Swipe Deck UI & Local Watchlist:
+- Directly beneath the active swiping card component, render a clean, readable text instruction row that says: "👈 Swipe Left to Pass | Swipe Right to Watch 👉 | 👆 Swipe Up to View on eBay"
+- Wire up the swiping gestures:
+  - Swipe Left: Advance to the next card.
+  - Swipe Right: Save that card's data (title, image, price, ebay URL) locally using the browser's LocalStorage into an array named 'my_watchlist' so users can build a collection without creating an account.
+  - Swipe Up / Click Card: Open the item's eBay link (`itemWebUrl`) in a new browser tab.
+
+Please build this clean, fast, data-driven menu interface, paying special attention to the escaped string for Fox's name, and ensure the loading states prevent premature empty-state error messages!

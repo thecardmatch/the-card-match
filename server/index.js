@@ -343,6 +343,75 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
+// ─── Playlist configs ────────────────────────────────────────────────────────
+const PLAYLIST_CONFIGS = {
+  "nba-finals-stars": {
+    query: '"Victor Wembanyama" OR "Jalen Brunson" OR "Karl-Anthony Towns" OR "De\'Aaron Fox" OR "Devin Vassell" OR "Mikal Bridges" OR "Josh Hart" OR "OG Anunoby" OR "Stephon Castle" OR "Dylan Harper"',
+    categoryId: null,
+    minPrice: 1,
+  },
+  "trending-pokemon": {
+    query: '"Mega Greninja ex" OR "Umbreon ex SIR" OR "Snorlax Legendary" OR "Umbreon VMAX Alt" OR "Charizard ex SIR" OR "Pikachu ex SIR" OR "Team Rocket Mewtwo" OR "Dragapult ex"',
+    categoryId: "183454",
+    minPrice: 1,
+  },
+  "high-end-showcase": {
+    query: '"PSA 10" OR "BGS 9.5" OR "Auto Patch" OR "1/1 Logoman"',
+    categoryId: "212",
+    minPrice: 200,
+  },
+};
+
+// ─── GET /api/playlist — preset or custom-keyword deck (cached 15 min) ────────
+// Query params: ?id=<playlistId>  OR  ?query=<keyword>
+app.get("/api/playlist", async (req, res) => {
+  try {
+    const { id, query: customQuery } = req.query;
+
+    if (!id && !customQuery) {
+      return res.status(400).json({ error: "id or query is required", items: [] });
+    }
+
+    const config    = id ? PLAYLIST_CONFIGS[id] : null;
+    const cacheKey  = id
+      ? `playlist:${id}`
+      : `custom:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
+
+    // 1. Cache check (15-min TTL, shared across all users)
+    const cached = await getBroadCache(cacheKey);
+    if (cached && cached.length > 0) {
+      console.log(`[cache] playlist hit: ${cacheKey}`);
+      // Filter out ended auctions before returning
+      const now    = new Date();
+      const active = cached.filter((c) =>
+        c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
+      );
+      return res.json({ items: active, fromCache: true });
+    }
+
+    // 2. eBay fetch — exactly ONE call, 100 results, sorted endingSoonest
+    const token      = await getEbayToken();
+    const q          = config ? config.query : String(customQuery).trim();
+    const minPrice   = config?.minPrice ?? 1;
+    const categoryId = config?.categoryId ?? null;
+    const filterStr  = `price:[${minPrice}..],priceCurrency:USD`;
+
+    const data  = await ebaySearch(token, q, "endingSoonest", filterStr, null, categoryId, 100, 0);
+    const items = (data.itemSummaries || [])
+      .filter((i) => !isSuppliesCategory(i))
+      .map((i) => mapItem(i, []));       // mapItem calls buildAffiliateUrl → campid always set
+
+    // 3. Cache async (don't block response)
+    if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
+
+    console.log(`[playlist] ${cacheKey} → ${items.length} cards`);
+    return res.json({ items, fromCache: false });
+  } catch (err) {
+    console.error("[playlist] error:", err.message);
+    return res.status(500).json({ error: err.message, items: [] });
+  }
+});
+
 // ─── GET /api/ebay/search — broad category browse (with Supabase cache) ───────
 app.get("/api/ebay/search", async (req, res) => {
   try {

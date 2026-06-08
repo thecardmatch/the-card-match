@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings as SettingsIcon, Heart, ArrowUpDown, Check, X, User as UserIcon, LogOut } from "lucide-react";
+import { Search, Heart, LayoutList, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "@/components/Sidebar";
 import { SwipeDeck } from "@/components/SwipeDeck";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { AuthDialog } from "@/components/AuthDialog";
 import { EntitySearch } from "@/components/EntitySearch";
+import { PlaylistsPanel } from "@/components/PlaylistsPanel";
 import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/hooks/useAuth";
 import type { TradingCard } from "@/data/pokemon";
-import { SORT_OPTIONS } from "@/data/pokemon";
-import { searchCards } from "@/services/ebay";
 import { fetchEntityCards, filterEntityCards, type SearchableEntity } from "@/services/entities";
 import { addToWatchlist, removeFromWatchlist, fetchWatchlist } from "@/services/watchlist";
 
@@ -26,69 +25,29 @@ function loadLocalWatchlist(): TradingCard[] {
   } catch { return []; }
 }
 
+type AppMode = "home" | "loading" | "deck";
+
 export default function App() {
-  const { user, signOut }             = useAuth();
-  const { prefs, setPrefs, hasOnboarded } = usePreferences();
+  const { user, signOut }     = useAuth();
+  const { prefs, setPrefs }   = usePreferences();
 
-  const [liked,          setLiked]          = useState<TradingCard[]>(() => loadLocalWatchlist());
-  const [cards,          setCards]          = useState<TradingCard[]>([]);
-  const [loading,        setLoading]        = useState(false);
-  const [loadingMore,    setLoadingMore]    = useState(false);
-  const [settingsOpen,   setSettingsOpen]   = useState(false);
-  const [watchlistOpen,  setWatchlistOpen]  = useState(false);
-  const [sortOpen,       setSortOpen]       = useState(false);
-  const [authOpen,       setAuthOpen]       = useState(false);
-  const [selectedEntity, setSelectedEntity] = useState<SearchableEntity | null>(null);
-  const [deckResetKey,   setDeckResetKey]   = useState(0);
+  const [appMode,         setAppMode]         = useState<AppMode>("home");
+  const [deckLabel,       setDeckLabel]       = useState("");
+  const [liked,           setLiked]           = useState<TradingCard[]>(() => loadLocalWatchlist());
+  const [cards,           setCards]           = useState<TradingCard[]>([]);
+  const [watchlistOpen,   setWatchlistOpen]   = useState(false);
+  const [playlistsOpen,   setPlaylistsOpen]   = useState(false);
+  const [searchOpen,      setSearchOpen]      = useState(false);
+  const [settingsOpen,    setSettingsOpen]    = useState(false);
+  const [authOpen,        setAuthOpen]        = useState(false);
+  const [selectedEntity,  setSelectedEntity]  = useState<SearchableEntity | null>(null);
+  const [deckResetKey,    setDeckResetKey]    = useState(0);
+  const [loadingMore,     setLoadingMore]     = useState(false);
 
-  const ebayOffset  = useRef(0);
-  const seenIds     = useRef(new Set<string>());
-  const sortBtnRef  = useRef<HTMLDivElement>(null);
+  const seenIds    = useRef(new Set<string>());
+  const isInDeck   = appMode === "deck";
 
-  // ── Category (broad) mode — triggered by prefs change ──────────────────────
-  useEffect(() => {
-    if (selectedEntity) return; // entity mode owns the deck
-    let cancelled = false;
-    setLoading(true);
-    ebayOffset.current  = 0;
-    seenIds.current     = new Set();
-
-    searchCards(prefs, 0).then((results) => {
-      if (cancelled) return;
-      const fresh = results.filter((c) => !seenIds.current.has(c.id));
-      fresh.forEach((c) => seenIds.current.add(c.id));
-      ebayOffset.current = 200;
-      setCards(fresh);
-      setDeckResetKey((k) => k + 1);
-      setLoading(false);
-    }).catch(() => { if (!cancelled) setLoading(false); });
-
-    return () => { cancelled = true; };
-  }, [prefs, selectedEntity]);
-
-  // ── Entity mode — triggered when user selects an entity ────────────────────
-  useEffect(() => {
-    if (!selectedEntity) return;
-    let cancelled = false;
-    setLoading(true);
-    seenIds.current = new Set();
-
-    fetchEntityCards(selectedEntity.id).then((raw) => {
-      if (cancelled) return;
-      const filtered = filterEntityCards(raw, prefs.minPrice, prefs.maxPrice, prefs.conditions as string[]);
-      filtered.forEach((c) => seenIds.current.add(c.id));
-      setCards(filtered);
-      setDeckResetKey((k) => k + 1);
-      setLoading(false);
-    }).catch((err) => {
-      console.warn("[entity] fetch failed:", err.message);
-      if (!cancelled) setLoading(false);
-    });
-
-    return () => { cancelled = true; };
-  }, [selectedEntity]); // intentionally NOT watching prefs — cache is filter-agnostic
-
-  // ── Sync watchlist from Supabase on login ───────────────────────────────────
+  // ── Sync watchlist from Supabase on login ─────────────────────────────────
   useEffect(() => {
     if (!user) return;
     fetchWatchlist().then((dbCards) => {
@@ -99,23 +58,67 @@ export default function App() {
     });
   }, [user]);
 
-  // ── Load more (category mode only) ─────────────────────────────────────────
-  const handleNeedMore = useCallback(async () => {
-    if (selectedEntity) return; // entity decks are fixed (200 cards, no pagination)
-    if (loadingMore || loading) return;
-    setLoadingMore(true);
-    try {
-      const more  = await searchCards(prefs, ebayOffset.current);
-      const fresh = more.filter((c) => !seenIds.current.has(c.id));
-      if (fresh.length > 0) {
-        fresh.forEach((c) => seenIds.current.add(c.id));
-        ebayOffset.current += 200;
-        setCards((prev) => [...prev, ...fresh]);
-      }
-    } catch (err) { console.warn(err); }
-    finally { setLoadingMore(false); }
-  }, [loadingMore, loading, prefs, selectedEntity]);
+  // ── Load a preset or custom-keyword playlist ──────────────────────────────
+  async function loadPlaylist(playlistId: string, label: string, customQuery?: string) {
+    setAppMode("loading");
+    setDeckLabel(label);
+    setPlaylistsOpen(false);
+    setSearchOpen(false);
+    setSelectedEntity(null);
+    seenIds.current = new Set();
 
+    try {
+      const params = playlistId !== "custom"
+        ? new URLSearchParams({ id: playlistId })
+        : new URLSearchParams({ query: customQuery || "" });
+
+      const res  = await fetch(`/api/playlist?${params}`);
+      const data = await res.json();
+      const incoming: TradingCard[] = data.items ?? [];
+
+      incoming.forEach((c) => seenIds.current.add(c.id));
+      setCards(incoming);
+      setDeckResetKey((k) => k + 1);
+      setAppMode("deck");
+    } catch (err) {
+      console.warn("[playlist] load failed:", err);
+      setCards([]);
+      setAppMode("deck");
+    }
+  }
+
+  // ── Entity search — triggers on entity selection ──────────────────────────
+  useEffect(() => {
+    if (!selectedEntity) return;
+    let cancelled = false;
+    setAppMode("loading");
+    setDeckLabel(`${selectedEntity.name} · ${selectedEntity.category}`);
+    setSearchOpen(false);
+    seenIds.current = new Set();
+
+    fetchEntityCards(selectedEntity.id).then((raw) => {
+      if (cancelled) return;
+      const filtered = filterEntityCards(raw, prefs.minPrice, prefs.maxPrice, prefs.conditions as string[]);
+      filtered.forEach((c) => seenIds.current.add(c.id));
+      setCards(filtered);
+      setDeckResetKey((k) => k + 1);
+      setAppMode("deck");
+    }).catch((err) => {
+      console.warn("[entity] fetch failed:", err.message);
+      if (!cancelled) { setCards([]); setAppMode("deck"); }
+    });
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEntity]);
+
+  // ── onNeedMore: playlists are a fixed 100-card deck, no pagination ────────
+  const handleNeedMore = useCallback(() => {
+    // No-op: playlists are single-shot 100-card pulls, entity decks are 200-card.
+    // Both are loaded fully upfront — no backend pagination needed.
+  }, []);
+
+  // ── Watchlist helpers ─────────────────────────────────────────────────────
   async function handleLike(card: TradingCard) {
     setLiked((prev) => {
       const newList = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
@@ -134,110 +137,230 @@ export default function App() {
     if (user) await removeFromWatchlist(user.id, cardId);
   }
 
-  // ── Subtitle text ─────────────────────────────────────────────────────────
-  const subtitle = loading
-    ? "Searching…"
-    : selectedEntity
-      ? `${selectedEntity.name} · ${selectedEntity.category}`
-      : (() => {
-          const cats = prefs.categories.length > 0 ? prefs.categories.join(", ") : "All Categories";
-          return `Browsing ${cats}`;
-        })();
+  function handleBuy(card: TradingCard) {
+    if (card.ebayUrl) window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
+  }
 
+  // ── Close playlists panel when clicking outside ───────────────────────────
+  function handleBackdropClick() {
+    setPlaylistsOpen(false);
+    setSearchOpen(false);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
+
+      {/* ── HOME SCREEN ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {appMode === "home" && (
+          <motion.div
+            key="home"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[200] bg-background"
+          >
+            <PlaylistsPanel
+              mode="home"
+              onLoadPlaylist={loadPlaylist}
+              onOpenSettings={() => setSettingsOpen(true)}
+              onOpenAuth={() => setAuthOpen(true)}
+              user={user}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── LOADING SCREEN ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {appMode === "loading" && (
+          <motion.div
+            key="loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[190] bg-background flex flex-col items-center justify-center gap-5"
+          >
+            {/* Pulsing dots */}
+            <div className="flex gap-2">
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  className="w-3 h-3 rounded-full bg-primary"
+                  animate={{ scale: [1, 1.5, 1], opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
+                />
+              ))}
+            </div>
+            <motion.p
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 1.6, repeat: Infinity }}
+              className="text-sm font-semibold text-muted-foreground tracking-wide"
+            >
+              Fetching cards…
+            </motion.p>
+            {deckLabel && (
+              <p className="text-xs text-muted-foreground/70">{deckLabel}</p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── DECK VIEW ──────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* ── Header ────────────────────────────────────────────────────── */}
-        <header className="h-16 px-3 md:px-5 border-b border-border flex items-center gap-2 bg-background z-50 shrink-0">
+        {/* Header — only shown in deck mode */}
+        <header className="h-16 px-4 md:px-5 border-b border-border flex items-center gap-3 bg-background z-50 shrink-0">
 
-          {/* Logo + subtitle */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg shrink-0" />
-            <div className="hidden sm:block min-w-0">
-              <h1 className="text-sm font-black text-foreground leading-tight tracking-tight uppercase">THE CARD MATCH</h1>
-              <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest truncate max-w-[160px]">
-                {subtitle}
-              </p>
+          {/* Logo + deck label */}
+          <div
+            className="flex items-center gap-2.5 shrink-0 cursor-pointer group"
+            onClick={() => setAppMode("home")}
+            title="Back to playlists"
+          >
+            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg" />
+            <div className="hidden sm:block">
+              <h1 className="text-sm font-black uppercase tracking-tight text-foreground leading-none group-hover:text-primary transition-colors">
+                THE CARD MATCH
+              </h1>
+              {deckLabel && (
+                <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-widest truncate max-w-[180px]">
+                  {deckLabel}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Entity autocomplete — fills remaining space */}
-          <div className="flex-1 flex items-center justify-center px-1 min-w-0">
-            <EntitySearch selectedEntity={selectedEntity} onSelect={setSelectedEntity} />
+          {/* Spacer — entity search bar drops in here when open */}
+          <div className="flex-1 min-w-0">
+            <AnimatePresence>
+              {searchOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  className="flex items-center gap-2"
+                >
+                  <EntitySearch
+                    selectedEntity={selectedEntity}
+                    onSelect={(e) => { setSelectedEntity(e); }}
+                  />
+                  <button onClick={() => setSearchOpen(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* Right-side action buttons */}
-          <div className="flex items-center gap-1.5 shrink-0">
+          {/* ── Right 3 icons ──────────────────────────────────────────── */}
+          <div className="flex items-center gap-2 shrink-0">
+
+            {/* Search */}
             <button
-              onClick={() => user ? signOut() : setAuthOpen(true)}
-              className="w-9 h-9 rounded-full bg-card border flex items-center justify-center shadow-sm hover:bg-accent transition-colors"
+              onClick={() => { setSearchOpen((o) => !o); setPlaylistsOpen(false); }}
+              className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${searchOpen ? "bg-primary border-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
             >
-              {user ? <LogOut className="w-4 h-4 text-primary" /> : <UserIcon className="w-4 h-4" />}
+              <Search className="w-4 h-4" />
             </button>
 
-            <button
-              onClick={() => setWatchlistOpen(true)}
-              className="md:hidden relative w-9 h-9 rounded-full bg-card border flex items-center justify-center"
-            >
-              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
-              {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
-                  {liked.length}
-                </span>
-              )}
-            </button>
-
-            <div ref={sortBtnRef} className="relative">
+            {/* Playlists */}
+            <div className="relative">
               <button
-                onClick={() => setSortOpen(!sortOpen)}
-                className="w-9 h-9 rounded-full border flex items-center justify-center hover:bg-accent transition-colors"
+                onClick={() => { setPlaylistsOpen((o) => !o); setSearchOpen(false); }}
+                className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${playlistsOpen ? "bg-primary border-primary text-primary-foreground" : "bg-card hover:bg-accent"}`}
               >
-                <ArrowUpDown className="w-4 h-4" />
+                <LayoutList className="w-4 h-4" />
               </button>
+
+              {/* Playlists dropdown */}
               <AnimatePresence>
-                {sortOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    className="absolute right-0 top-full mt-2 w-48 bg-card border rounded-xl shadow-xl z-[60] overflow-hidden"
-                  >
-                    {SORT_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => { setPrefs({ ...prefs, sort: opt.value }); setSortOpen(false); }}
-                        className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-accent transition-colors"
-                      >
-                        {opt.label}
-                        {prefs.sort === opt.value && <Check className="w-4 h-4 text-primary" />}
-                      </button>
-                    ))}
-                  </motion.div>
+                {playlistsOpen && (
+                  <>
+                    <motion.div
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      onClick={handleBackdropClick}
+                      className="fixed inset-0 z-[55]"
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.97 }}
+                      animate={{ opacity: 1, y: 0,  scale: 1 }}
+                      exit={{ opacity: 0,    y: -8, scale: 0.97 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute right-0 top-full mt-2 w-72 bg-card border border-border rounded-2xl shadow-2xl z-[60] overflow-hidden"
+                    >
+                      <div className="px-4 pt-3 pb-1">
+                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Featured Playlists</p>
+                      </div>
+                      <PlaylistsPanel
+                        mode="panel"
+                        onLoadPlaylist={loadPlaylist}
+                        onOpenSettings={() => { setSettingsOpen(true); setPlaylistsOpen(false); }}
+                        onOpenAuth={() => { setAuthOpen(true); setPlaylistsOpen(false); }}
+                        user={user}
+                      />
+                    </motion.div>
+                  </>
                 )}
               </AnimatePresence>
             </div>
 
+            {/* Heart / Watchlist */}
             <button
-              onClick={() => setSettingsOpen(true)}
-              className="w-9 h-9 rounded-full bg-card border flex items-center justify-center hover:bg-accent transition-colors"
+              onClick={() => setWatchlistOpen(true)}
+              className="relative w-9 h-9 rounded-full bg-card border flex items-center justify-center hover:bg-accent transition-colors md:hidden"
             >
-              <SettingsIcon className="w-4 h-4" />
+              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                  {liked.length > 99 ? "99" : liked.length}
+                </span>
+              )}
+            </button>
+
+            {/* Desktop: heart opens watchlist focus, always visible */}
+            <button
+              onClick={() => {}}
+              className="relative w-9 h-9 rounded-full bg-card border hidden md:flex items-center justify-center hover:bg-accent transition-colors"
+              title="Watchlist (right panel)"
+            >
+              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                  {liked.length > 99 ? "99" : liked.length}
+                </span>
+              )}
             </button>
           </div>
         </header>
 
-        {/* ── Card deck ─────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden relative">
+        {/* Deck area */}
+        <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
-            <SwipeDeck
-              cards={cards}
-              onLike={handleLike}
-              onBuy={(card) => { if (card.ebayUrl) window.location.href = card.ebayUrl; }}
-              onNeedMore={handleNeedMore}
-              isLoadingMore={loadingMore}
-              resetKey={deckResetKey}
-            />
+            {isInDeck && cards.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
+                <p className="text-4xl">🃏</p>
+                <p className="text-base font-semibold text-foreground">No cards found</p>
+                <p className="text-sm text-muted-foreground">No upcoming auctions found for this criteria right now. Try another search!</p>
+                <button
+                  onClick={() => setAppMode("home")}
+                  className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
+                >
+                  Back to Playlists
+                </button>
+              </div>
+            ) : (
+              <SwipeDeck
+                cards={cards}
+                onLike={handleLike}
+                onBuy={handleBuy}
+                onNeedMore={handleNeedMore}
+                isLoadingMore={loadingMore}
+                resetKey={deckResetKey}
+              />
+            )}
           </div>
         </div>
       </main>
@@ -275,7 +398,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <SettingsDialog open={settingsOpen || !hasOnboarded} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
+      <SettingsDialog open={settingsOpen} prefs={prefs} onClose={() => setSettingsOpen(false)} onSave={setPrefs} />
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
