@@ -25,17 +25,19 @@ const PLAYLISTS = [
 
 type Props = {
   mode: "home" | "panel";
-  onLoadPlaylist: (playlistId: string, label: string, query?: string) => void;
+  onLoadPlaylist: (playlistId: string, label: string, query?: string, auctionsOnly?: boolean) => void;
 };
 
 export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
-  const [customQuery, setCustomQuery] = useState("");
-  const [customOpen,  setCustomOpen]  = useState(false);
+  const [customQuery,   setCustomQuery]   = useState("");
+  const [customOpen,    setCustomOpen]    = useState(false);
+  const [auctionsOnly,  setAuctionsOnly]  = useState(false);
 
   function submitCustom() {
     const q = customQuery.trim();
     if (!q) return;
-    onLoadPlaylist("custom", `🔍 "${q}"`, q);
+    const label = auctionsOnly ? `🔨 "${q}"` : `🔍 "${q}"`;
+    onLoadPlaylist("custom", label, q, auctionsOnly);
     setCustomQuery("");
     setCustomOpen(false);
   }
@@ -67,7 +69,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden px-4 py-3"
+                className="overflow-hidden px-4 py-3 space-y-2"
               >
                 <form onSubmit={(e) => { e.preventDefault(); submitCustom(); }} className="flex gap-2">
                   <input
@@ -87,6 +89,15 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
                     Go
                   </button>
                 </form>
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={auctionsOnly}
+                    onChange={(e) => setAuctionsOnly(e.target.checked)}
+                    className="w-4 h-4 rounded accent-primary cursor-pointer"
+                  />
+                  <span className="text-xs text-muted-foreground">Auctions only — ending soonest</span>
+                </label>
               </motion.div>
             ) : (
               <motion.button
@@ -183,7 +194,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
               >
                 <form
                   onSubmit={(e) => { e.preventDefault(); submitCustom(); }}
-                  className="flex gap-2 p-4"
+                  className="flex gap-2 px-4 pt-4 pb-3"
                 >
                   <input
                     autoFocus
@@ -202,6 +213,15 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
                     Go
                   </button>
                 </form>
+                <label className="flex items-center gap-2.5 px-4 pb-4 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={auctionsOnly}
+                    onChange={(e) => setAuctionsOnly(e.target.checked)}
+                    className="w-4 h-4 rounded accent-primary cursor-pointer"
+                  />
+                  <span className="text-sm text-muted-foreground">Auctions only — ending soonest first</span>
+                </label>
               </motion.div>
             )}
           </AnimatePresence>

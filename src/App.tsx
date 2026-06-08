@@ -43,7 +43,7 @@ export default function App() {
   }, []);
 
   // ── Core loader: calls /api/playlist for presets OR custom keyword search ──
-  async function loadPlaylist(playlistId: string, label: string, query?: string) {
+  async function loadPlaylist(playlistId: string, label: string, query?: string, auctionsOnly?: boolean) {
     setAppMode("loading");
     setDeckLabel(label);
     setPlaylistsOpen(false);
@@ -52,9 +52,13 @@ export default function App() {
     seenIds.current = new Set();
 
     try {
-      const params = playlistId !== "custom"
-        ? new URLSearchParams({ id: playlistId })
-        : new URLSearchParams({ query: query || "" });
+      let params: URLSearchParams;
+      if (playlistId !== "custom") {
+        params = new URLSearchParams({ id: playlistId });
+      } else {
+        params = new URLSearchParams({ query: query || "" });
+        if (auctionsOnly) params.set("auctionsOnly", "true");
+      }
 
       const res  = await fetch(`/api/playlist?${params}`);
       const data = await res.json();

@@ -602,7 +602,8 @@ const PLAYLIST_DEFS = {
 // ?query=<keyword> → single eBay call for any keyword (cached 15 min)
 app.get("/api/playlist", async (req, res) => {
   try {
-    const { id, query: customQuery } = req.query;
+    const { id, query: customQuery, auctionsOnly } = req.query;
+    const isAuctionsOnly = auctionsOnly === "true";
 
     if (!id && !customQuery) {
       return res.status(400).json({ error: "id or query required", items: [] });
@@ -611,7 +612,7 @@ app.get("/api/playlist", async (req, res) => {
     const def      = id ? PLAYLIST_DEFS[id] : null;
     const cacheKey = id
       ? `pl5:${id}`
-      : `qs5:${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
+      : `qs5:${isAuctionsOnly ? "a:" : ""}${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
 
     // ── 1. Supabase cache (15-min TTL) ──────────────────────────────────────
     const cached = await getBroadCache(cacheKey);
@@ -661,10 +662,13 @@ app.get("/api/playlist", async (req, res) => {
       }).slice(0, 100);
 
     } else {
-      // CUSTOM KEYWORD: single call — bestMatch for max coverage
-      const q         = String(customQuery).trim();
-      const filterStr = "price:[1..],priceCurrency:USD";
-      const data      = await ebaySearch(token, q, "bestMatch", filterStr, null, null, 100, 0);
+      // CUSTOM KEYWORD: single call
+      const q           = String(customQuery).trim();
+      const sortVal     = isAuctionsOnly ? "endingSoonest" : "bestMatch";
+      const filterParts = ["price:[1..],priceCurrency:USD"];
+      if (isAuctionsOnly) filterParts.push("buyingOptions:{AUCTION}");
+      const filterStr   = filterParts.join(",");
+      const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
       items = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
         .map((i) => mapItem(i, []));
