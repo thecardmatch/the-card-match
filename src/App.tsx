@@ -100,8 +100,22 @@ export default function App() {
     });
   }
 
+  // ── Mobile-Optimized Direct Outbound Handling ─────────────────────────────
   function handleBuy(card: TradingCard) {
-    if (card.ebayUrl) window.open(card.ebayUrl, "_blank", "noopener,noreferrer");
+    const targetUrl = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
+    if (!targetUrl) return;
+
+    // Detect true mobile devices vs desktop setups
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    if (isMobile) {
+      // Direct assignment forces the active browser tab over to eBay immediately
+      window.location.href = targetUrl;
+    } else {
+      // Desktop systems still run cleanly inside secondary utility tabs
+      const newTab = window.open(targetUrl, "_blank", "noopener,noreferrer");
+      if (!newTab) window.location.href = targetUrl;
+    }
   }
 
   const handleNeedMore = useCallback(() => {}, []);
