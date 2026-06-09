@@ -587,21 +587,63 @@ app.get("/api/search", async (req, res) => {
     const token  = await getEbayToken();
     const catId  = CATEGORY_IDS[entity.category] ?? null;
 
-    // Auto-inject high-end target modifiers (including 1-of-1 Superfractor tags) into the entity query
     const luxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
     const kw     = `${entity.ebay_keyword}${luxuryModifiers}`;
 
-    // Set a high-end price floor ($75) to filter out common base cards instantly
     const baseFilter = "price:[75..],priceCurrency:USD";
+
+    // Adjusting mapItem internally right before mapping to apply safe high-res paths
+    const mapItemWithCDNFix = (item, selectedCats) => {
+      const forceMaximumHD = (url) => {
+        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        try {
+          let cleanUrl = url.split('?')[0];
+          // Replace any thumbnail size identifier (e.g., s-l225, s-l300, s-l500) with pristine s-l1600
+          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+          }
+          if (/\$_\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+            return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.$1");
+          }
+          return cleanUrl;
+        } catch (e) {
+          return url;
+        }
+      };
+
+      const primaryImg     = forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl);
+      const additionalImgs = (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean);
+      const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
+      const buyingOptions   = item.buyingOptions || [];
+      const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
+      const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
+      const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
+
+      return {
+        id:          item.itemId,
+        name:        item.title || "Unknown Card",
+        category:    detectCategory(item.title || "", selectedCats, itemCategoryIds),
+        image:       primaryImg,
+        images:      allImages,
+        currentBid:  bidValue,
+        currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+        grade:       detectGrade(item.title || ""),
+        ebayUrl:     buildAffiliateUrl(item),
+        endTime:     item.itemEndDate || null,
+        watchCount:  item.watchCount || 0,
+        condition:   item.condition || "",
+        listingType,
+      };
+    };
 
     const [auctionData, binData] = await Promise.all([
       ebaySearch(token, kw, "endingSoonest", `${baseFilter},buyingOptions:{AUCTION}`,    null, catId, 100, 0),
       ebaySearch(token, kw, "bestMatch",     `${baseFilter},buyingOptions:{FIXED_PRICE}`, null, catId, 100, 0),
     ]);
 
-    const cats    = [entity.category];
-    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
-    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, cats));
+    const cats     = [entity.category];
+    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithCDNFix(i, cats));
+    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithCDNFix(i, cats));
 
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
@@ -615,8 +657,6 @@ app.get("/api/search", async (req, res) => {
 });
 
 // ─── Playlist definitions — individual terms, fetched in parallel ─────────────
-// eBay Browse API does NOT support OR keyword syntax in `q`.
-// Fix: one API call per term, results merged & interleaved.
 const PLAYLIST_DEFS = {
   "nba-finals-stars": {
     terms:        ["Victor Wembanyama", "Jalen Brunson", "Karl-Anthony Towns",
@@ -625,7 +665,7 @@ const PLAYLIST_DEFS = {
     categoryId:   "261328",
     categoryHint: "Basketball",
     perTerm:      12,
-    minPrice:     75, // Elevated minimum floor to clear junk matches
+    minPrice:     75,
   },
   "trending-pokemon": {
     terms:        ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
@@ -634,14 +674,14 @@ const PLAYLIST_DEFS = {
     categoryId:   "183050",
     categoryHint: "Pokemon",
     perTerm:      12,
-    minPrice:     50, // Pure alternative art/premium cards pricing threshold
+    minPrice:     50,
   },
   "high-end-showcase": {
     terms:        ["PSA 10", "BGS 9.5", "Auto Patch", "Logoman", "RPA", "1/1", "/1 ", "/10", "/25"],
-    categoryId:   "261328", // Corrected sports card category ID structure mapping
-    categoryHint: null,    // mixed sports — detect from title
+    categoryId:   "261328",
+    categoryHint: null,
     perTerm:      25,
-    minPrice:     250, // Holy Grail premium baseline
+    minPrice:     250,
   },
 };
 
@@ -667,15 +707,40 @@ app.get("/api/playlist", async (req, res) => {
     //   return res.json({ items: cached, fromCache: true });
     // }
 
-    // ── 2. eBay fetch ────────────────────────────────────────────────────────
     const token = await getEbayToken();
     let items   = [];
 
-    // Global luxury tags used to clean custom inputs and match sets
     const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
 
+    const localMapItem = (item, selectedCats) => {
+      const forceMaximumHD = (url) => {
+        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        try {
+          let cleanUrl = url.split('?')[0];
+          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+          }
+          return cleanUrl;
+        } catch (e) { return url; }
+      };
+      return {
+        id:          item.itemId,
+        name:        item.title || "Unknown Card",
+        category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+        image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+        images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
+        currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+        currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+        grade:       detectGrade(item.title || ""),
+        ebayUrl:     buildAffiliateUrl(item),
+        endTime:     item.itemEndDate || null,
+        watchCount:  item.watchCount || 0,
+        condition:   item.condition || "",
+        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+      };
+    };
+
     if (def) {
-      // PRESET: parallel per-term calls, round-robin interleave
       const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
       const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
       const hintCats = categoryHint ? [categoryHint] : [];
@@ -683,12 +748,11 @@ app.get("/api/playlist", async (req, res) => {
       const buckets = await Promise.all(
         terms.map(async (term) => {
           try {
-            // Automatically weave luxury requirements into preset search loops
             const fullPremiumTerm = `${term}${premiumLuxuryModifiers}`;
             const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
-              .map((i) => mapItem(i, hintCats));
+              .map((i) => localMapItem(i, hintCats));
           } catch (e) {
             console.warn(`[playlist] term "${term}" failed:`, e.message);
             return [];
@@ -696,7 +760,6 @@ app.get("/api/playlist", async (req, res) => {
         })
       );
 
-      // Interleave: one card from each term, round-robin
       const maxLen = Math.max(...buckets.map((b) => b.length), 0);
       for (let i = 0; i < maxLen; i++) {
         for (const bucket of buckets) {
@@ -704,7 +767,6 @@ app.get("/api/playlist", async (req, res) => {
         }
       }
 
-      // Deduplicate by eBay item ID
       const seen = new Set();
       items = items.filter((c) => {
         if (seen.has(c.id)) return false;
@@ -713,17 +775,12 @@ app.get("/api/playlist", async (req, res) => {
       }).slice(0, 100);
 
     } else {
-      // CUSTOM KEYWORD: single call
       let q = String(customQuery).trim();
-
-      // Safety rule to force luxury specifications onto vanilla customer keyword strings
       if (!q.toLowerCase().includes("psa") && !q.toLowerCase().includes("auto") && !q.toLowerCase().includes("patch") && !q.toLowerCase().includes("1/1")) {
         q += premiumLuxuryModifiers;
       }
 
       const sortVal      = isAuctionsOnly ? "endingSoonest" : "bestMatch";
-
-      // Set high-end price floor filter parameter down on custom searches ($75 minimum)
       const filterParts = ["price:[75..],priceCurrency:USD"];
       if (isAuctionsOnly) filterParts.push("buyingOptions:{AUCTION}");
       const filterStr   = filterParts.join(",");
@@ -731,12 +788,10 @@ app.get("/api/playlist", async (req, res) => {
       const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
       items = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
-        .map((i) => mapItem(i, []));
+        .map((i) => localMapItem(i, []));
     }
 
-    // ── 3. Write to Supabase cache (async, non-blocking) ────────────────────
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
-
     console.log(`[playlist] ${cacheKey} → ${items.length} cards`);
     return res.json({ items, fromCache: false });
 
@@ -753,7 +808,7 @@ app.get("/api/ebay/search", async (req, res) => {
     const {
       categories  = "",
       sort        = "bestMatch",
-      minPrice    = "75", // Updated base floor minimum parameter default to 75
+      minPrice    = "75",
       maxPrice    = "",
       query       = "",
       conditions  = "",
@@ -767,7 +822,6 @@ app.get("/api/ebay/search", async (req, res) => {
     const sortVal = SORT_MAP[sort] || "bestMatch";
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    // Enforce high tier floor across custom dashboard query parameters
     const min = Math.max(75, parseFloat(minPrice) || 0);
     const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
     const filterParts = [`price:[${min}..${max}],priceCurrency:USD`];
@@ -777,7 +831,6 @@ app.get("/api/ebay/search", async (req, res) => {
     else if (listingType === "Buy It Now") filterParts.push("buyingOptions:{FIXED_PRICE}");
     const filterStr  = filterParts.join(",");
 
-    // Extended exclusions target list for search engines
     const cleanPremiumExclusions = `${BULK_EXCLUSION} -base -reprint -unopened`;
     const bulkSuffix = showBulk === "true" ? "" : ` ${cleanPremiumExclusions}`;
 
@@ -788,6 +841,34 @@ app.get("/api/ebay/search", async (req, res) => {
     }
 
     const gradeFilter = buildGradeFilter(conds);
+
+    const localMapItem = (item, selectedCats) => {
+      const forceMaximumHD = (url) => {
+        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        try {
+          let cleanUrl = url.split('?')[0];
+          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+          }
+          return cleanUrl;
+        } catch (e) { return url; }
+      };
+      return {
+        id:          item.itemId,
+        name:        item.title || "Unknown Card",
+        category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+        image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+        images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
+        currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+        currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+        grade:       detectGrade(item.title || ""),
+        ebayUrl:     buildAffiliateUrl(item),
+        endTime:     item.itemEndDate || null,
+        watchCount:  item.watchCount || 0,
+        condition:   item.condition || "",
+        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+      };
+    };
 
     if (ebayOffset === 0) {
       const cacheKey = buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk);
@@ -804,7 +885,7 @@ app.get("/api/ebay/search", async (req, res) => {
       if (cats.length === 0) {
         const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
         const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, 0);
-        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
+        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
       } else {
         const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
         const results = await Promise.all(cats.map(async (cat) => {
@@ -812,7 +893,7 @@ app.get("/api/ebay/search", async (req, res) => {
           const baseKw      = CAT_BASE_KEYWORD[cat] || `${cat} card`;
           const q          = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
           const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
-          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
+          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
         }));
         const maxLen = Math.max(...results.map((r) => r.length));
         for (let i = 0; i < maxLen; i++) {
@@ -835,7 +916,7 @@ app.get("/api/ebay/search", async (req, res) => {
     if (cats.length === 0) {
       const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
       const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
-      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
+      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
     } else {
       const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
       const results = await Promise.all(cats.map(async (cat) => {
@@ -843,7 +924,7 @@ app.get("/api/ebay/search", async (req, res) => {
         const baseKw = CAT_BASE_KEYWORD[cat] || `${cat} card`;
         const q      = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
         const data   = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
-        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
+        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
       }));
       const maxLen = Math.max(...results.map((r) => r.length));
       for (let i = 0; i < maxLen; i++) {
