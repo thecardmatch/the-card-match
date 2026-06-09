@@ -549,8 +549,13 @@ app.get("/api/search", async (req, res) => {
 
     const token  = await getEbayToken();
     const catId  = CATEGORY_IDS[entity.category] ?? null;
-    const kw     = `${entity.ebay_keyword}`;
-    const baseFilter = "price:[1..],priceCurrency:USD";
+
+    // Auto-inject high-end target modifiers (including 1-of-1 Superfractor tags) into the entity query
+    const luxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
+    const kw     = `${entity.ebay_keyword}${luxuryModifiers}`;
+
+    // Set a high-end price floor ($75) to filter out common base cards instantly
+    const baseFilter = "price:[75..],priceCurrency:USD";
 
     const [auctionData, binData] = await Promise.all([
       ebaySearch(token, kw, "endingSoonest", `${baseFilter},buyingOptions:{AUCTION}`,    null, catId, 100, 0),
@@ -583,7 +588,7 @@ const PLAYLIST_DEFS = {
     categoryId:   "261328",
     categoryHint: "Basketball",
     perTerm:      12,
-    minPrice:     1,
+    minPrice:     75, // Elevated minimum floor to clear junk matches
   },
   "trending-pokemon": {
     terms:        ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
@@ -592,20 +597,18 @@ const PLAYLIST_DEFS = {
     categoryId:   "183050",
     categoryHint: "Pokemon",
     perTerm:      12,
-    minPrice:     1,
+    minPrice:     50, // Pure alternative art/premium cards pricing threshold
   },
   "high-end-showcase": {
-    terms:        ["PSA 10 card", "BGS 9.5 card", "Auto Patch card", "1/1 Logoman"],
-    categoryId:   "212",
+    terms:        ["PSA 10", "BGS 9.5", "Auto Patch", "Logoman", "RPA", "1/1", "/1 ", "/10", "/25"],
+    categoryId:   "261328", // Corrected sports card category ID structure mapping
     categoryHint: null,    // mixed sports — detect from title
     perTerm:      25,
-    minPrice:     200,
+    minPrice:     250, // Holy Grail premium baseline
   },
 };
 
 // ─── GET /api/playlist ────────────────────────────────────────────────────────
-// ?id=<presetId>   → parallel per-term eBay calls, merged result (cached 15 min)
-// ?query=<keyword> → single eBay call for any keyword (cached 15 min)
 app.get("/api/playlist", async (req, res) => {
   try {
     const { id, query: customQuery, auctionsOnly } = req.query;
@@ -631,16 +634,21 @@ app.get("/api/playlist", async (req, res) => {
     const token = await getEbayToken();
     let items   = [];
 
+    // Global luxury tags used to clean custom inputs and match sets
+    const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
+
     if (def) {
       // PRESET: parallel per-term calls, round-robin interleave
       const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
       const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
-
       const hintCats = categoryHint ? [categoryHint] : [];
+
       const buckets = await Promise.all(
         terms.map(async (term) => {
           try {
-            const data = await ebaySearch(token, term, "bestMatch", filterStr, null, categoryId, perTerm, 0);
+            // Automatically weave luxury requirements into preset search loops
+            const fullPremiumTerm = `${term}${premiumLuxuryModifiers}`;
+            const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
               .map((i) => mapItem(i, hintCats));
@@ -669,11 +677,20 @@ app.get("/api/playlist", async (req, res) => {
 
     } else {
       // CUSTOM KEYWORD: single call
-      const q           = String(customQuery).trim();
-      const sortVal     = isAuctionsOnly ? "endingSoonest" : "bestMatch";
-      const filterParts = ["price:[1..],priceCurrency:USD"];
+      let q = String(customQuery).trim();
+
+      // Safety rule to force luxury specifications onto vanilla customer keyword strings
+      if (!q.toLowerCase().includes("psa") && !q.toLowerCase().includes("auto") && !q.toLowerCase().includes("patch") && !q.toLowerCase().includes("1/1")) {
+        q += premiumLuxuryModifiers;
+      }
+
+      const sortVal      = isAuctionsOnly ? "endingSoonest" : "bestMatch";
+
+      // Set high-end price floor filter parameter down on custom searches ($75 minimum)
+      const filterParts = ["price:[75..],priceCurrency:USD"];
       if (isAuctionsOnly) filterParts.push("buyingOptions:{AUCTION}");
       const filterStr   = filterParts.join(",");
+
       const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
       items = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
@@ -699,7 +716,7 @@ app.get("/api/ebay/search", async (req, res) => {
     const {
       categories  = "",
       sort        = "bestMatch",
-      minPrice    = "0",
+      minPrice    = "75", // Updated base floor minimum parameter default to 75
       maxPrice    = "",
       query       = "",
       conditions  = "",
@@ -713,7 +730,8 @@ app.get("/api/ebay/search", async (req, res) => {
     const sortVal = SORT_MAP[sort] || "bestMatch";
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    const min = Math.max(1, parseFloat(minPrice) || 0);
+    // Enforce high tier floor across custom dashboard query parameters
+    const min = Math.max(75, parseFloat(minPrice) || 0);
     const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
     const filterParts = [`price:[${min}..${max}],priceCurrency:USD`];
     const { conditionFilter, aspectFilter } = buildConditionParams(conds);
@@ -721,8 +739,17 @@ app.get("/api/ebay/search", async (req, res) => {
     if (listingType === "Auction")      filterParts.push("buyingOptions:{AUCTION}");
     else if (listingType === "Buy It Now") filterParts.push("buyingOptions:{FIXED_PRICE}");
     const filterStr  = filterParts.join(",");
-    const bulkSuffix = showBulk === "true" ? "" : ` ${BULK_EXCLUSION}`;
-    const playerQ    = query.trim();
+
+    // Extended exclusions target list for search engines
+    const cleanPremiumExclusions = `${BULK_EXCLUSION} -base -reprint -unopened`;
+    const bulkSuffix = showBulk === "true" ? "" : ` ${cleanPremiumExclusions}`;
+
+    const luxuryTags = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5)";
+    let playerQ = query.trim();
+    if (playerQ && !playerQ.toLowerCase().includes("psa") && !playerQ.toLowerCase().includes("auto") && !playerQ.toLowerCase().includes("1/1")) {
+      playerQ += luxuryTags;
+    }
+
     const gradeFilter = buildGradeFilter(conds);
 
     if (ebayOffset === 0) {
@@ -736,7 +763,7 @@ app.get("/api/ebay/search", async (req, res) => {
       const PAGE_SIZE = 200;
 
       if (cats.length === 0) {
-        const baseQ = playerQ ? `${playerQ} card` : "card";
+        const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
         const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, 0);
         allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
       } else {
@@ -744,7 +771,7 @@ app.get("/api/ebay/search", async (req, res) => {
         const results = await Promise.all(cats.map(async (cat) => {
           const catId      = CATEGORY_IDS[cat] || null;
           const baseKw     = CAT_BASE_KEYWORD[cat] || `${cat} card`;
-          const q          = playerQ ? `${playerQ} card${bulkSuffix}` : `${baseKw}${bulkSuffix}`;
+          const q          = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
           const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
           return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
         }));
@@ -767,7 +794,7 @@ app.get("/api/ebay/search", async (req, res) => {
     let allItems = [];
 
     if (cats.length === 0) {
-      const baseQ = playerQ ? `${playerQ} card` : "card";
+      const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
       const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
       allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, []));
     } else {
@@ -775,7 +802,7 @@ app.get("/api/ebay/search", async (req, res) => {
       const results = await Promise.all(cats.map(async (cat) => {
         const catId  = CATEGORY_IDS[cat] || null;
         const baseKw = CAT_BASE_KEYWORD[cat] || `${cat} card`;
-        const q      = playerQ ? `${playerQ} card${bulkSuffix}` : `${baseKw}${bulkSuffix}`;
+        const q      = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
         const data   = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
         return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
       }));
