@@ -60,25 +60,7 @@ export default function App() {
         if (auctionsOnly) params.set("auctionsOnly", "true");
       }
 
-      // ── ULTRA-FIX: Automatically route live static site requests to the active Replit container ──
-      let baseUrl = "";
-      if (typeof window !== "undefined") {
-        const hostname = window.location.hostname;
-        const origin = window.location.origin;
-
-        if (hostname.includes("localhost") || hostname.includes("127.0.0.1")) {
-          // Inside local preview environment
-          baseUrl = ""; 
-        } else if (hostname.includes(".replit.app")) {
-          // If viewing on a raw live Replit app deployment domain, bridge over to port 3001
-          baseUrl = origin.replace(".replit.app", "-3001.replit.app");
-        } else {
-          // If you are using a custom domain (e.g., thecardmatch.com), fall back safely
-          baseUrl = origin;
-        }
-      }
-
-      const res  = await fetch(`${baseUrl}/api/playlist?${params}`);
+      const res  = await fetch(`/api/playlist?${params}`);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
 
