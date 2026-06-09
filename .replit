@@ -55,9 +55,10 @@ run = ["bash", "-c", "PORT=5000 node server/index.js"]
 [userenv]
 
 [userenv.shared]
-SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co/rest/v1/"
+SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co"
 SUPABASE_ANON_KEY = "sb_publishable_zxfBEAi2JmjFYKiXqP9s3w_5ztQ_h-7"
 VITE_SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co"
 VITE_SUPABASE_ANON_KEY = "sb_publishable_zxfBEAi2JmjFYKiXqP9s3w_5ztQ_h-7"
 EBAY_CLIENT_ID = "JosephPe-TheCardM-PRD-a84c0e5fe-2341975d"
 EBAY_CLIENT_SECRET = "PRD-84c0e5fed192-99f6-4cb9-8357-5a36"
+SUPABASE_SERVICE_ROLE_KEY = "sb_secret_jDVXfkS04b0WRWcQsFkdUQ_A6_nLw9o"
