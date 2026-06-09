@@ -395,10 +395,31 @@ function buildAffiliateUrl(item) {
   return "";
 }
 
-function mapItem(item, selectedCats) {
-  const primaryImg     = item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "";
-  const additionalImgs = (item.additionalImages || []).map((i) => i.imageUrl).filter(Boolean);
-  const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
+  function mapItem(item, selectedCats) {
+    // Grab the base URL string
+    let primaryImg = item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "";
+
+    // High-Definition Upgrader: Intercept eBay's thumbnail suffix and upgrade it to raw 1600px resolution
+    if (primaryImg.includes("ebayimg.com")) {
+      // Replaces tiny thumbnail sizing codes (like s-l225, s-l300, etc.) with max resolution (s-l1600)
+      primaryImg = primaryImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, "s-l1600.$1");
+      // Handles older legacy eBay image formats mapping templates ($_.JPG variants)
+      primaryImg = primaryImg.replace(/\$_\d+\.(jpg|png|jpeg)/i, "$_57.$1");
+    }
+
+    // Do the same optimization loop for any additional background gallery images
+    const additionalImgs = (item.additionalImages || [])
+      .map((i) => {
+        let url = i.imageUrl;
+        if (url && url.includes("ebayimg.com")) {
+          url = url.replace(/s-l\d+\.(jpg|png|jpeg)/i, "s-l1600.$1");
+          url = url.replace(/\$_\d+\.(jpg|png|jpeg)/i, "$_57.$1");
+        }
+        return url;
+      })
+      .filter(Boolean);
+
+    const allImages = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
   const buyingOptions  = item.buyingOptions || [];
   const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
   const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
