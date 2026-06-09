@@ -395,35 +395,47 @@ function buildAffiliateUrl(item) {
   return "";
 }
 
-  function mapItem(item, selectedCats) {
-    // Grab the base URL string
-    let primaryImg = item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl || "";
+// ─── Ultra High-Definition Image Parsing Engine ──────────────────────────────
+function mapItem(item, selectedCats) {
+  // Deep extraction function to scale past all eBay query throttles and asset sizes
+  const forceMaximumHD = (url) => {
+    if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
 
-    // High-Definition Upgrader: Intercept eBay's thumbnail suffix and upgrade it to raw 1600px resolution
-    if (primaryImg.includes("ebayimg.com")) {
-      // Replaces tiny thumbnail sizing codes (like s-l225, s-l300, etc.) with max resolution (s-l1600)
-      primaryImg = primaryImg.replace(/s-l\d+\.(jpg|png|jpeg)/i, "s-l1600.$1");
-      // Handles older legacy eBay image formats mapping templates ($_.JPG variants)
-      primaryImg = primaryImg.replace(/\$_\d+\.(jpg|png|jpeg)/i, "$_57.$1");
+    try {
+      // 1. Drop any trailing query params like ?set_id= which restrict mobile scaling
+      let cleanUrl = url.split('?')[0];
+
+      // 2. Intercept standard scales (e.g., s-l225, s-l300 -> scale directly to max s-l1600)
+      if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+        return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+      }
+
+      // 3. Handle old dynamic legacy template tags ($_.JPG -> $_57.JPG raw upload)
+      if (/\$_\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
+        return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.$1");
+      }
+
+      // 4. Default structural append if an image is missing a size label signature completely
+      if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.png')) {
+        return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l1600.$1");
+      }
+
+      return cleanUrl;
+    } catch (e) {
+      return url;
     }
+  };
 
-    // Do the same optimization loop for any additional background gallery images
-    const additionalImgs = (item.additionalImages || [])
-      .map((i) => {
-        let url = i.imageUrl;
-        if (url && url.includes("ebayimg.com")) {
-          url = url.replace(/s-l\d+\.(jpg|png|jpeg)/i, "s-l1600.$1");
-          url = url.replace(/\$_\d+\.(jpg|png|jpeg)/i, "$_57.$1");
-        }
-        return url;
-      })
-      .filter(Boolean);
+  // Convert both the primary display tile and supplementary nested image collections
+  const primaryImg     = forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl);
+  const additionalImgs = (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean);
+  const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
 
-    const allImages = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
-  const buyingOptions  = item.buyingOptions || [];
+  const buyingOptions   = item.buyingOptions || [];
   const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
   const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
   const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
+
   return {
     id:          item.itemId,
     name:        item.title || "Unknown Card",
@@ -491,7 +503,6 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   const params = new URLSearchParams({ sort: sortVal, limit: String(limit), fieldgroups: "MATCHING_ITEMS,EXTENDED" });
   if (offset > 0) params.set("offset", String(offset));
 
-  // Clean up user searches and apply mandatory trading card bulk clean-out parameters
   if (q && q.trim()) {
     let targetQuery = q.trim();
     if (!targetQuery.toLowerCase().includes("-lot")) {
@@ -503,8 +514,6 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   if (filterStr) params.set("filter", filterStr);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
 
-  // Only restrict by category when one is explicitly provided.
-  // Passing multiple IDs triggers a 400 from Browse API (max 1 allowed).
   if (categoryId) {
     params.set("category_ids", categoryId);
   }
@@ -524,7 +533,6 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   }
   return res.json();
 }
-
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   if (!supabase) return res.json({ entities: [] });
