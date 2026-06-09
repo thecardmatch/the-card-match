@@ -410,19 +410,20 @@ function mapItem(item, selectedCats) {
         cleanUrl = cleanUrl.replace("/thumbs/", "/");
       }
 
-      // 3. Intercept standard scales (e.g., s-l225, s-l300 -> scale directly to max s-l1600)
+      // 3. THE TEXTURE CRISPNESS FIX: Force max resolution code AND convert extension to uppercase (.JPG)
+      // This forces eBay's asset delivery network to serve the original, massive raw image upload.
       if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-        return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+        return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.JPG");
       }
 
-      // 4. Handle old dynamic legacy template tags ($_.JPG -> $_57.JPG raw upload)
+      // 4. Handle old dynamic legacy template tags ($_.jpg -> $_57.JPG raw upload)
       if (/\$_\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-        return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.$1");
+        return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.JPG");
       }
 
       // 5. Default structural append if an image is missing a size label signature completely
       if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.png')) {
-        return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l1600.$1");
+        return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l1600.JPG");
       }
 
       return cleanUrl;
@@ -539,6 +540,7 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   return res.json();
 }
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
+// ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   if (!supabase) return res.json({ entities: [] });
   const { q = "", limit = "8" } = req.query;
@@ -564,14 +566,15 @@ app.get("/api/search", async (req, res) => {
     const { entityId } = req.query;
     if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
 
-    const cached = await getEntityCache(entityId);
-    if (cached && cached.length > 0) {
-      const now    = new Date();
-      const active = cached.filter((c) =>
-        c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
-      );
-      return res.json({ items: active, fromCache: true });
-    }
+    // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
+    // const cached = await getEntityCache(entityId);
+    // if (cached && cached.length > 0) {
+    //   const now    = new Date();
+    //   const active = cached.filter((c) =>
+    //     c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
+    //   );
+    //   return res.json({ items: active, fromCache: true });
+    // }
 
     if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
     const { data: entity, error: eErr } = await supabase
@@ -657,12 +660,12 @@ app.get("/api/playlist", async (req, res) => {
       ? `pl5:${id}`
       : `qs5:${isAuctionsOnly ? "a:" : ""}${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
 
-    // ── 1. Supabase cache (15-min TTL) ──────────────────────────────────────
-    const cached = await getBroadCache(cacheKey);
-    if (cached && cached.length > 0) {
-      console.log(`[playlist] cache hit: ${cacheKey} (${cached.length} cards)`);
-      return res.json({ items: cached, fromCache: true });
-    }
+    // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
+    // const cached = await getBroadCache(cacheKey);
+    // if (cached && cached.length > 0) {
+    //   console.log(`[playlist] cache hit: ${cacheKey} (${cached.length} cards)`);
+    //   return res.json({ items: cached, fromCache: true });
+    // }
 
     // ── 2. eBay fetch ────────────────────────────────────────────────────────
     const token = await getEbayToken();
@@ -788,10 +791,12 @@ app.get("/api/ebay/search", async (req, res) => {
 
     if (ebayOffset === 0) {
       const cacheKey = buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk);
-      const cached   = await getBroadCache(cacheKey);
-      if (cached && cached.length > 0) {
-        return res.json({ items: cached, total: cached.length, fromCache: true });
-      }
+
+      // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
+      // const cached   = await getBroadCache(cacheKey);
+      // if (cached && cached.length > 0) {
+      //   return res.json({ items: cached, total: cached.length, fromCache: true });
+      // }
 
       let allItems = [];
       const PAGE_SIZE = 200;
@@ -804,7 +809,7 @@ app.get("/api/ebay/search", async (req, res) => {
         const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
         const results = await Promise.all(cats.map(async (cat) => {
           const catId      = CATEGORY_IDS[cat] || null;
-          const baseKw     = CAT_BASE_KEYWORD[cat] || `${cat} card`;
+          const baseKw      = CAT_BASE_KEYWORD[cat] || `${cat} card`;
           const q          = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
           const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
           return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItem(i, [cat]));
