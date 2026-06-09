@@ -67,6 +67,25 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-0 overflow-hidden cursor-pointer"
             onClick={handleImageClick}
           >
+            {/* ─── VISUAL DEBUGGER OVERLAY ─── */}
+            <div style={{ 
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              background: '#000000e6', 
+              color: '#00ff00', 
+              fontFamily: 'monospace', 
+              fontSize: '10px', 
+              padding: '8px', 
+              wordBreak: 'break-all',
+              zIndex: 50,
+              borderBottom: '1px solid #333'
+            }}>
+              URL IN VIEW: {allImages[imgIndex] || 'Undefined Property Link'}
+            </div>
+            {/* ───────────────────────────────── */}
+
             {/* Blurry Ambient Background Layer - Eliminates negative white borders */}
             <img 
               src={allImages[imgIndex]} 
@@ -79,7 +98,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             <img
               src={allImages[imgIndex]}
               alt={card.name}
-              className="relative z-10 w-full h-full object-contain p-1.5 drop-shadow-[0_10px_15px_rgba(0,0,0,0.6)] select-none"
+              className="relative z-10 w-full h-full object-contain p-1.5 pt-10 drop-shadow-[0_10px_15px_rgba(0,0,0,0.6)] select-none"
               draggable={false}
               loading="eager"
             />
@@ -99,8 +118,8 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
 
             {isTop && (
               <div className="pointer-events-none z-30">
-                <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60 backdrop-blur-sm">SAVE</motion.div>
-                <motion.div style={{ opacity: passOpacity }} className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[12deg] bg-black/60 backdrop-blur-sm">PASS</motion.div>
+                <motion.div style={{ opacity: saveOpacity }} className="absolute top-12 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60 backdrop-blur-sm">SAVE</motion.div>
+                <motion.div style={{ opacity: passOpacity }} className="absolute top-12 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[12deg] bg-black/60 backdrop-blur-sm">PASS</motion.div>
                 <motion.div style={{ opacity: buyOpacity }} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 border-yellow-400 text-yellow-400 text-3xl font-black rounded-xl bg-black/80 backdrop-blur-md">BUY NOW</motion.div>
               </div>
             )}
