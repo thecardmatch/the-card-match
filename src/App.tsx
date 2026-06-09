@@ -60,7 +60,12 @@ export default function App() {
         if (auctionsOnly) params.set("auctionsOnly", "true");
       }
 
-      const res  = await fetch(`/api/playlist?${params}`);
+      // ── FIXED: Resolves live domain dynamically instead of local proxy box paths ──
+      const baseUrl = typeof window !== "undefined" && window.location.origin.includes("localhost")
+        ? "" 
+        : typeof window !== "undefined" ? window.location.origin : "";
+
+      const res  = await fetch(`${baseUrl}/api/playlist?${params}`);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
 
