@@ -540,7 +540,6 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   return res.json();
 }
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
-// ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   if (!supabase) return res.json({ entities: [] });
   const { q = "", limit = "8" } = req.query;
@@ -592,19 +591,33 @@ app.get("/api/search", async (req, res) => {
 
     const baseFilter = "price:[75..],priceCurrency:USD";
 
-    // Adjusting mapItem internally right before mapping to apply safe high-res paths
-    const mapItemWithCDNFix = (item, selectedCats) => {
+    // ULTRA BULLETPROOF HIGH-DEFINITION INTERCEPTOR ENGINE
+    const mapItemWithAbsoluteHD = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
         if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
         try {
+          // Drop trailing query throttles completely
           let cleanUrl = url.split('?')[0];
-          // Replace any thumbnail size identifier (e.g., s-l225, s-l300, s-l500) with pristine s-l1600
-          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
+
+          // 1. Force structural swap if it uses the modern /thumbs/ map variant
+          if (cleanUrl.includes("/thumbs/")) {
+            cleanUrl = cleanUrl.replace("/thumbs/", "/");
           }
-          if (/\$_\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-            return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.$1");
+
+          // 2. Heavy wildcard catch: intercept s-lXX patterns anywhere in the string
+          if (/s-l\d+/i.test(cleanUrl)) {
+            cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          } 
+          // 3. Catch structural legacy parameters ($_.JPG / $_1.JPG -> $_57.JPG)
+          else if (/\$_\d+/i.test(cleanUrl)) {
+            cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           }
+
+          // 4. Force a clean extension fallback pattern if matching missed it
+          if (!cleanUrl.includes("s-l1600") && !cleanUrl.includes("$_57")) {
+            cleanUrl = cleanUrl.replace(/\.(jpg|jpeg|png|webp)$/i, "/s-l1600.$1");
+          }
+
           return cleanUrl;
         } catch (e) {
           return url;
@@ -642,8 +655,8 @@ app.get("/api/search", async (req, res) => {
     ]);
 
     const cats     = [entity.category];
-    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithCDNFix(i, cats));
-    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithCDNFix(i, cats));
+    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
+    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
 
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
@@ -717,9 +730,9 @@ app.get("/api/playlist", async (req, res) => {
         if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
         try {
           let cleanUrl = url.split('?')[0];
-          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
-          }
+          if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
         } catch (e) { return url; }
       };
@@ -847,9 +860,9 @@ app.get("/api/ebay/search", async (req, res) => {
         if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
         try {
           let cleanUrl = url.split('?')[0];
-          if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-            return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
-          }
+          if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
         } catch (e) { return url; }
       };
