@@ -540,6 +540,7 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   return res.json();
 }
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
+// ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   if (!supabase) return res.json({ entities: [] });
   const { q = "", limit = "8" } = req.query;
@@ -565,16 +566,7 @@ app.get("/api/search", async (req, res) => {
     const { entityId } = req.query;
     if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
 
-    // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
-    // const cached = await getEntityCache(entityId);
-    // if (cached && cached.length > 0) {
-    //   const now    = new Date();
-    //   const active = cached.filter((c) =>
-    //     c.listingType !== "Auction" || !c.endTime || new Date(c.endTime) > now
-    //   );
-    //   return res.json({ items: active, fromCache: true });
-    // }
-
+    // CACHE PURGE ACTIVE — IGNORE SUPABASE READS
     if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
     const { data: entity, error: eErr } = await supabase
       .from("searchable_entities")
@@ -588,35 +580,29 @@ app.get("/api/search", async (req, res) => {
 
     const luxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
     const kw     = `${entity.ebay_keyword}${luxuryModifiers}`;
-
     const baseFilter = "price:[75..],priceCurrency:USD";
 
-    // ULTRA BULLETPROOF HIGH-DEFINITION INTERCEPTOR ENGINE
-    const mapItemWithAbsoluteHD = (item, selectedCats) => {
+    // DIAGNOSTIC MAPPER ENGINE
+    const mapItemWithLogging = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
-        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        if (!url || typeof url !== 'string') return url || "";
+
+        const rawUrl = url;
         try {
-          // Drop trailing query throttles completely
           let cleanUrl = url.split('?')[0];
 
-          // 1. Force structural swap if it uses the modern /thumbs/ map variant
           if (cleanUrl.includes("/thumbs/")) {
             cleanUrl = cleanUrl.replace("/thumbs/", "/");
           }
 
-          // 2. Heavy wildcard catch: intercept s-lXX patterns anywhere in the string
           if (/s-l\d+/i.test(cleanUrl)) {
             cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
-          } 
-          // 3. Catch structural legacy parameters ($_.JPG / $_1.JPG -> $_57.JPG)
-          else if (/\$_\d+/i.test(cleanUrl)) {
+          } else if (/\$_\d+/i.test(cleanUrl)) {
             cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           }
 
-          // 4. Force a clean extension fallback pattern if matching missed it
-          if (!cleanUrl.includes("s-l1600") && !cleanUrl.includes("$_57")) {
-            cleanUrl = cleanUrl.replace(/\.(jpg|jpeg|png|webp)$/i, "/s-l1600.$1");
-          }
+          // Print exactly what's happening to your server terminal console
+          console.log(`[IMAGE REWRITE DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
 
           return cleanUrl;
         } catch (e) {
@@ -655,8 +641,8 @@ app.get("/api/search", async (req, res) => {
     ]);
 
     const cats     = [entity.category];
-    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
-    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
+    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithLogging(i, cats));
+    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithLogging(i, cats));
 
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
@@ -713,26 +699,22 @@ app.get("/api/playlist", async (req, res) => {
       ? `pl5:${id}`
       : `qs5:${isAuctionsOnly ? "a:" : ""}${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
 
-    // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
-    // const cached = await getBroadCache(cacheKey);
-    // if (cached && cached.length > 0) {
-    //   console.log(`[playlist] cache hit: ${cacheKey} (${cached.length} cards)`);
-    //   return res.json({ items: cached, fromCache: true });
-    // }
-
     const token = await getEbayToken();
     let items   = [];
 
     const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
 
-    const localMapItem = (item, selectedCats) => {
+    const localMapItemWithLogging = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
-        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        if (!url || typeof url !== 'string') return url || "";
+        const rawUrl = url;
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
           if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
+
+          console.log(`[PLAYLIST DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
           return cleanUrl;
         } catch (e) { return url; }
       };
@@ -765,7 +747,7 @@ app.get("/api/playlist", async (req, res) => {
             const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
-              .map((i) => localMapItem(i, hintCats));
+              .map((i) => localMapItemWithLogging(i, hintCats));
           } catch (e) {
             console.warn(`[playlist] term "${term}" failed:`, e.message);
             return [];
@@ -801,11 +783,10 @@ app.get("/api/playlist", async (req, res) => {
       const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
       items = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
-        .map((i) => localMapItem(i, []));
+        .map((i) => localMapItemWithLogging(i, []));
     }
 
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
-    console.log(`[playlist] ${cacheKey} → ${items.length} cards`);
     return res.json({ items, fromCache: false });
 
   } catch (err) {
@@ -855,14 +836,17 @@ app.get("/api/ebay/search", async (req, res) => {
 
     const gradeFilter = buildGradeFilter(conds);
 
-    const localMapItem = (item, selectedCats) => {
+    const localMapItemWithLogging = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
-        if (!url || typeof url !== 'string' || !url.includes("ebayimg.com")) return url || "";
+        if (!url || typeof url !== 'string') return url || "";
+        const rawUrl = url;
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
           if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
+
+          console.log(`[GLOBAL SEARCH DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
           return cleanUrl;
         } catch (e) { return url; }
       };
@@ -886,19 +870,13 @@ app.get("/api/ebay/search", async (req, res) => {
     if (ebayOffset === 0) {
       const cacheKey = buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk);
 
-      // TEMPORARILY DISABLED TO PURGE BLURRY IMAGES FROM CACHE
-      // const cached   = await getBroadCache(cacheKey);
-      // if (cached && cached.length > 0) {
-      //   return res.json({ items: cached, total: cached.length, fromCache: true });
-      // }
-
       let allItems = [];
       const PAGE_SIZE = 200;
 
       if (cats.length === 0) {
         const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
         const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, 0);
-        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
+        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, []));
       } else {
         const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
         const results = await Promise.all(cats.map(async (cat) => {
@@ -906,7 +884,7 @@ app.get("/api/ebay/search", async (req, res) => {
           const baseKw      = CAT_BASE_KEYWORD[cat] || `${cat} card`;
           const q          = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
           const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
-          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
+          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, [cat]));
         }));
         const maxLen = Math.max(...results.map((r) => r.length));
         for (let i = 0; i < maxLen; i++) {
@@ -929,7 +907,7 @@ app.get("/api/ebay/search", async (req, res) => {
     if (cats.length === 0) {
       const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
       const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
-      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
+      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, []));
     } else {
       const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
       const results = await Promise.all(cats.map(async (cat) => {
@@ -937,7 +915,7 @@ app.get("/api/ebay/search", async (req, res) => {
         const baseKw = CAT_BASE_KEYWORD[cat] || `${cat} card`;
         const q      = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
         const data   = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
-        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
+        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, [cat]));
       }));
       const maxLen = Math.max(...results.map((r) => r.length));
       for (let i = 0; i < maxLen; i++) {
