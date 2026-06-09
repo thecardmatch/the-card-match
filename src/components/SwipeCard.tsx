@@ -62,25 +62,35 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       >
         <div className="h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
 
-          {/* Image */}
+          {/* Optimized Image Stage Viewport */}
           <div
-            className="relative flex-1 bg-muted/30 flex items-center justify-center p-4 min-h-0 cursor-pointer"
+            className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-0 overflow-hidden cursor-pointer"
             onClick={handleImageClick}
           >
-            <img
-              src={allImages[imgIndex]}
-              alt={card.name}
-              className="max-w-full max-h-full w-auto h-auto object-contain drop-shadow-xl"
+            {/* Blurry Ambient Background Layer - Eliminates negative white borders */}
+            <img 
+              src={allImages[imgIndex]} 
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 scale-110 pointer-events-none select-none"
               draggable={false}
             />
 
+            {/* Crisp High-Res Trading Card foreground alignment */}
+            <img
+              src={allImages[imgIndex]}
+              alt={card.name}
+              className="relative z-10 w-full h-full object-contain p-1.5 drop-shadow-[0_10px_15px_rgba(0,0,0,0.6)] select-none"
+              draggable={false}
+              loading="eager"
+            />
+
             {allImages.length > 1 && (
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-20 bg-black/40 backdrop-blur-md px-2.5 py-1 rounded-full">
                 {allImages.map((_, i) => (
                   <div
                     key={i}
                     className={`h-1.5 rounded-full transition-all ${
-                      i === imgIndex ? "w-4 bg-primary" : "w-1.5 bg-primary/20"
+                      i === imgIndex ? "w-4 bg-white" : "w-1.5 bg-white/40"
                     }`}
                   />
                 ))}
@@ -88,7 +98,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             )}
 
             {isTop && (
-              <div className="pointer-events-none">
+              <div className="pointer-events-none z-30">
                 <motion.div style={{ opacity: saveOpacity }} className="absolute top-6 left-6 px-4 py-2 border-4 border-green-500 text-green-500 text-2xl font-black rounded-lg rotate-[-12deg] bg-black/60 backdrop-blur-sm">SAVE</motion.div>
                 <motion.div style={{ opacity: passOpacity }} className="absolute top-6 right-6 px-4 py-2 border-4 border-red-500 text-red-500 text-2xl font-black rounded-lg rotate-[12deg] bg-black/60 backdrop-blur-sm">PASS</motion.div>
                 <motion.div style={{ opacity: buyOpacity }} className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-6 py-3 border-4 border-yellow-400 text-yellow-400 text-3xl font-black rounded-xl bg-black/80 backdrop-blur-md">BUY NOW</motion.div>
@@ -96,8 +106,8 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             )}
           </div>
 
-          {/* Info */}
-          <div className="p-4 bg-card border-t border-border shrink-0">
+          {/* Info Block Layout */}
+          <div className="p-4 bg-card border-t border-border shrink-0 z-10">
             <div className="flex flex-wrap gap-1.5 mb-2">
               <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
                 {card.category === "Pokemon" ? "Pokémon TCG" : card.category}
