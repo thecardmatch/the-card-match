@@ -405,17 +405,22 @@ function mapItem(item, selectedCats) {
       // 1. Drop any trailing query params like ?set_id= which restrict mobile scaling
       let cleanUrl = url.split('?')[0];
 
-      // 2. Intercept standard scales (e.g., s-l225, s-l300 -> scale directly to max s-l1600)
+      // 2. ESCAPE THE THUMBNAIL SUBDIRECTORY: Switch /thumbs/images/g/ to /images/g/
+      if (cleanUrl.includes("/thumbs/")) {
+        cleanUrl = cleanUrl.replace("/thumbs/", "/");
+      }
+
+      // 3. Intercept standard scales (e.g., s-l225, s-l300 -> scale directly to max s-l1600)
       if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
         return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.$1");
       }
 
-      // 3. Handle old dynamic legacy template tags ($_.JPG -> $_57.JPG raw upload)
+      // 4. Handle old dynamic legacy template tags ($_.JPG -> $_57.JPG raw upload)
       if (/\$_\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
         return cleanUrl.replace(/\$_\d+\.(jpg|png|jpeg|webp)/i, "$_57.$1");
       }
 
-      // 4. Default structural append if an image is missing a size label signature completely
+      // 5. Default structural append if an image is missing a size label signature completely
       if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.png')) {
         return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l1600.$1");
       }
