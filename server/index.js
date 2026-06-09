@@ -540,7 +540,6 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   return res.json();
 }
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
-// ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   if (!supabase) return res.json({ entities: [] });
   const { q = "", limit = "8" } = req.query;
@@ -566,7 +565,7 @@ app.get("/api/search", async (req, res) => {
     const { entityId } = req.query;
     if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
 
-    // CACHE PURGE ACTIVE — IGNORE SUPABASE READS
+    // FORCE CACHE BYPASS TO OVERWRITE OLD DATA
     if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
     const { data: entity, error: eErr } = await supabase
       .from("searchable_entities")
@@ -582,32 +581,16 @@ app.get("/api/search", async (req, res) => {
     const kw     = `${entity.ebay_keyword}${luxuryModifiers}`;
     const baseFilter = "price:[75..],priceCurrency:USD";
 
-    // DIAGNOSTIC MAPPER ENGINE
-    const mapItemWithLogging = (item, selectedCats) => {
+    const mapItemWithAbsoluteHD = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
         if (!url || typeof url !== 'string') return url || "";
-
-        const rawUrl = url;
         try {
           let cleanUrl = url.split('?')[0];
-
-          if (cleanUrl.includes("/thumbs/")) {
-            cleanUrl = cleanUrl.replace("/thumbs/", "/");
-          }
-
-          if (/s-l\d+/i.test(cleanUrl)) {
-            cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
-          } else if (/\$_\d+/i.test(cleanUrl)) {
-            cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
-          }
-
-          // Print exactly what's happening to your server terminal console
-          console.log(`[IMAGE REWRITE DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
-
+          if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
-        } catch (e) {
-          return url;
-        }
+        } catch (e) { return url; }
       };
 
       const primaryImg     = forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl);
@@ -615,16 +598,14 @@ app.get("/api/search", async (req, res) => {
       const allImages      = primaryImg ? [primaryImg, ...additionalImgs.filter((u) => u !== primaryImg)] : additionalImgs;
       const buyingOptions   = item.buyingOptions || [];
       const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
-      const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
-      const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
 
       return {
         id:          item.itemId,
         name:        item.title || "Unknown Card",
-        category:    detectCategory(item.title || "", selectedCats, itemCategoryIds),
+        category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
         image:       primaryImg,
         images:      allImages,
-        currentBid:  bidValue,
+        currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
         currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
         grade:       detectGrade(item.title || ""),
         ebayUrl:     buildAffiliateUrl(item),
@@ -641,13 +622,14 @@ app.get("/api/search", async (req, res) => {
     ]);
 
     const cats     = [entity.category];
-    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithLogging(i, cats));
-    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithLogging(i, cats));
+    const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
+    const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
 
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
     const merged     = [...auctions, ...uniqueBin];
 
+    // Force write clean data back to cache
     setEntityCache(entityId, merged).catch(() => {});
     return res.json({ items: merged, fromCache: false });
   } catch (err) {
@@ -704,17 +686,14 @@ app.get("/api/playlist", async (req, res) => {
 
     const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
 
-    const localMapItemWithLogging = (item, selectedCats) => {
+    const localMapItem = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
         if (!url || typeof url !== 'string') return url || "";
-        const rawUrl = url;
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
           if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
-
-          console.log(`[PLAYLIST DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
           return cleanUrl;
         } catch (e) { return url; }
       };
@@ -747,7 +726,7 @@ app.get("/api/playlist", async (req, res) => {
             const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
             return (data.itemSummaries || [])
               .filter((i) => !isSuppliesCategory(i))
-              .map((i) => localMapItemWithLogging(i, hintCats));
+              .map((i) => localMapItem(i, hintCats));
           } catch (e) {
             console.warn(`[playlist] term "${term}" failed:`, e.message);
             return [];
@@ -783,7 +762,7 @@ app.get("/api/playlist", async (req, res) => {
       const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
       items = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
-        .map((i) => localMapItemWithLogging(i, []));
+        .map((i) => localMapItem(i, []));
     }
 
     if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
@@ -836,17 +815,14 @@ app.get("/api/ebay/search", async (req, res) => {
 
     const gradeFilter = buildGradeFilter(conds);
 
-    const localMapItemWithLogging = (item, selectedCats) => {
+    const localMapItem = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
         if (!url || typeof url !== 'string') return url || "";
-        const rawUrl = url;
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
           if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
-
-          console.log(`[GLOBAL SEARCH DIAGNOSTIC]\n  - BEFORE: ${rawUrl}\n  - AFTER:  ${cleanUrl}\n`);
           return cleanUrl;
         } catch (e) { return url; }
       };
@@ -876,7 +852,7 @@ app.get("/api/ebay/search", async (req, res) => {
       if (cats.length === 0) {
         const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
         const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, 0);
-        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, []));
+        allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
       } else {
         const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
         const results = await Promise.all(cats.map(async (cat) => {
@@ -884,7 +860,7 @@ app.get("/api/ebay/search", async (req, res) => {
           const baseKw      = CAT_BASE_KEYWORD[cat] || `${cat} card`;
           const q          = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
           const data       = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, 0);
-          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, [cat]));
+          return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
         }));
         const maxLen = Math.max(...results.map((r) => r.length));
         for (let i = 0; i < maxLen; i++) {
@@ -907,7 +883,7 @@ app.get("/api/ebay/search", async (req, res) => {
     if (cats.length === 0) {
       const baseQ = playerQ ? `${playerQ}` : `card ${luxuryTags}`;
       const data  = await ebaySearch(token, `${baseQ}${bulkSuffix}`, sortVal, filterStr, aspectFilter, null, PAGE_SIZE, ebayOffset);
-      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, []));
+      allItems = (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, []));
     } else {
       const perCat  = Math.max(10, Math.floor(PAGE_SIZE / cats.length));
       const results = await Promise.all(cats.map(async (cat) => {
@@ -915,7 +891,7 @@ app.get("/api/ebay/search", async (req, res) => {
         const baseKw = CAT_BASE_KEYWORD[cat] || `${cat} card`;
         const q      = playerQ ? `${playerQ}${bulkSuffix}` : `${baseKw} ${luxuryTags}${bulkSuffix}`;
         const data   = await ebaySearch(token, q, sortVal, filterStr, aspectFilter, catId, perCat, ebayOffset);
-        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItemWithLogging(i, [cat]));
+        return (data.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => localMapItem(i, [cat]));
       }));
       const maxLen = Math.max(...results.map((r) => r.length));
       for (let i = 0; i < maxLen; i++) {
