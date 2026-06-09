@@ -60,7 +60,9 @@ export default function App() {
         if (auctionsOnly) params.set("auctionsOnly", "true");
       }
 
-      const res  = await fetch(`/api/playlist?${params}`);
+      // Hardcode direct path to the functional backend to bypass Cloudflare directory proxying
+      const targetApiUrl = "https://e2b906c4-d9e2-4d61-8633-82d4515522d7-00-3cojdwfwn144m.kirk.replit.dev/api/playlist";
+      const res  = await fetch(`${targetApiUrl}?${params}`);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
 
