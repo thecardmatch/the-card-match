@@ -28,9 +28,14 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       const base = card.image ? [card.image] : [];
       const extras = card.images?.length ? card.images : [];
       const combined = [...base, ...extras];
-      // Filter out empty strings and remove duplicates while maintaining order
       return combined.filter((url, index) => url && combined.indexOf(url) === index);
     })();
+
+    // Lightweight asset reference for the ambient background blur effect
+    const currentImageUrl = allImages[imgIndex] || "";
+    const lowResBackgroundUrl = currentImageUrl.includes("s-l600") 
+      ? currentImageUrl.replace("s-l600", "s-l225") 
+      : currentImageUrl;
 
     const handleDragEnd = (_: any, info: PanInfo) => {
       const threshold         = 100;
@@ -75,17 +80,18 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             className="relative flex-1 bg-zinc-950 flex items-center justify-center min-h-0 overflow-hidden cursor-pointer"
             onClick={handleImageClick}
           >
-            {/* Blurry Ambient Background Layer */}
+            {/* FAST BACKGROUND: Uses a lightweight asset since it is heavily blurred anyway */}
             <img 
-              src={allImages[imgIndex]} 
+              src={lowResBackgroundUrl} 
               alt=""
               className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-40 scale-110 pointer-events-none select-none"
               draggable={false}
+              loading="lazy"
             />
 
-            {/* Crisp High-Res Trading Card foreground alignment */}
+            {/* Crisp foreground trading card image */}
             <img
-              src={allImages[imgIndex]}
+              src={currentImageUrl}
               alt={card.name}
               className="relative z-10 w-full h-full object-contain p-1.5 drop-shadow-[0_10px_15px_rgba(0,0,0,0.6)] select-none"
               draggable={false}

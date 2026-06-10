@@ -410,10 +410,9 @@ function mapItem(item, selectedCats) {
         cleanUrl = cleanUrl.replace("/thumbs/", "/");
       }
 
-      // 3. THE TEXTURE CRISPNESS FIX: Force max resolution code AND convert extension to uppercase (.JPG)
-      // This forces eBay's asset delivery network to serve the original, massive raw image upload.
+      // 3. THE TEXTURE CRISPNESS FIX: Force optimized resolution code AND convert extension to uppercase (.JPG)
       if (/s-l\d+\.(jpg|png|jpeg|webp)/i.test(cleanUrl)) {
-        return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l1600.JPG");
+        return cleanUrl.replace(/s-l\d+\.(jpg|png|jpeg|webp)/i, "s-l600.JPG");
       }
 
       // 4. Handle old dynamic legacy template tags ($_.jpg -> $_57.JPG raw upload)
@@ -423,7 +422,7 @@ function mapItem(item, selectedCats) {
 
       // 5. Default structural append if an image is missing a size label signature completely
       if (cleanUrl.endsWith('.jpg') || cleanUrl.endsWith('.jpeg') || cleanUrl.endsWith('.png')) {
-        return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l1600.JPG");
+        return cleanUrl.replace(/\.(jpg|jpeg|png)$/i, "/s-l600.JPG");
       }
 
       return cleanUrl;
@@ -587,7 +586,7 @@ app.get("/api/search", async (req, res) => {
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
-          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
         } catch (e) { return url; }
@@ -692,7 +691,7 @@ app.get("/api/playlist", async (req, res) => {
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
-          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
         } catch (e) { return url; }
@@ -821,7 +820,7 @@ app.get("/api/ebay/search", async (req, res) => {
         try {
           let cleanUrl = url.split('?')[0];
           if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
-          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l1600");
+          if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l600");
           else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
           return cleanUrl;
         } catch (e) { return url; }
