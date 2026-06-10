@@ -14,6 +14,30 @@ const PORT = parseInt(process.env.PORT || "3001");
 app.use(cors({ origin: true }));
 app.use(express.json());
 
+// ─── CLOUDFLARE NATIVE VARIABLE BRIDGE (ES MODULES) ─────────────────────────
+let supabaseUrl = undefined;
+let supabaseServiceKey = undefined;
+
+// 1. Try pulling from Cloudflare's global bindings first (Production)
+if (typeof globalThis !== 'undefined') {
+  supabaseUrl = globalThis.SUPABASE_URL || globalThis.VITE_SUPABASE_URL;
+  supabaseServiceKey = globalThis.SUPABASE_SERVICE_ROLE_KEY;
+}
+
+// 2. Fall back to process.env if global bindings are empty (Local Dev Mode)
+if (!supabaseUrl || !supabaseServiceKey) {
+  supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+
+// Initialize the Admin Shield Client
+const supabase = (supabaseUrl && supabaseServiceKey)
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : null;
+
+if (!supabase) {
+  console.warn("[Cache Warning] SUPABASE_SERVICE_ROLE_KEY or URL not detected. Running offline without cache.");
+}
 // ─── HARDCODED PARTNER CREDENTIALS // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
 const EPN_CAMP_ID = "5339150952";
 
