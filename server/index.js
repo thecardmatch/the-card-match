@@ -14,18 +14,21 @@ const PORT = parseInt(process.env.PORT || "3001");
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
+// ─── HARDCODED PARTNER CREDENTIALS // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
 const EPN_CAMP_ID = "5339150952";
 
-// ─── Supabase admin client (server-side caching) ──────────────────────────────
-// Requires SUPABASE_SERVICE_ROLE_KEY in Replit Secrets.
-// If not set the app degrades gracefully — no caching, direct eBay calls.
+// ─── Supabase admin client (Unified Cloudflare Environment Bridge) ────────────
+// Fallback layout checks for both standalone and frontend-prefixed properties
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
 const supabase = (SUPABASE_URL && SUPABASE_SRK)
   ? createClient(SUPABASE_URL, SUPABASE_SRK)
   : null;
-if (!supabase) console.warn("[cache] SUPABASE_SERVICE_ROLE_KEY not set — caching disabled");
+
+if (!supabase) {
+  console.warn("[cache] SUPABASE_SERVICE_ROLE_KEY or URL missing — caching disabled");
+}
 
 // ─── Cache TTLs ───────────────────────────────────────────────────────────────
 const ENTITY_TTL_MS = 30 * 60 * 1000;  // 30 min
@@ -665,7 +668,7 @@ const PLAYLIST_DEFS = {
   },
 };
 
-// ─── GET /api/playlist ────────────────────────────────────────────────────────
+....// ─── GET /api/playlist ────────────────────────────────────────────────────────
 // ── Core Playlist Data Routing Endpoint ───────────────────────────────────
 app.get("/api/playlist", async (req, res) => {
   try {
