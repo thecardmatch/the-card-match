@@ -21,10 +21,14 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     const buyOpacity  = useTransform(y, [-80, 0], [1, 0]);
 
     const [imgIndex, setImgIndex] = useState(0);
-    const countdown  = useCountdown(card.endTime);
-    const allImages  = card.images?.length ? card.images : [card.image];
+    const countdown    = useCountdown(card.endTime);
+    const allImages    = card.images?.length ? card.images : [card.image];
+    const wasDragRef   = useRef(false);
 
     const handleDragEnd = (_: any, info: PanInfo) => {
+      const dist = Math.sqrt(info.offset.x ** 2 + info.offset.y ** 2);
+      wasDragRef.current = dist > 6;
+
       const threshold         = 100;
       const velocityThreshold = 500;
       if (info.offset.y < -threshold || info.velocity.y < -velocityThreshold) {
@@ -37,6 +41,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     };
 
     const handleImageClick = (e: React.MouseEvent) => {
+      if (wasDragRef.current) { wasDragRef.current = false; return; }
       if (!isTop || allImages.length <= 1) return;
       const rect   = e.currentTarget.getBoundingClientRect();
       const isLeft = e.clientX - rect.left < rect.width / 2;
