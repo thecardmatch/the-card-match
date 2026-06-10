@@ -666,6 +666,7 @@ const PLAYLIST_DEFS = {
 };
 
 // ─── GET /api/playlist ────────────────────────────────────────────────────────
+// ── Core Playlist Data Routing Endpoint ───────────────────────────────────
 app.get("/api/playlist", async (req, res) => {
   try {
     const { id, query: customQuery, auctionsOnly } = req.query;
@@ -675,17 +676,26 @@ app.get("/api/playlist", async (req, res) => {
       return res.status(400).json({ error: "id or query required", items: [] });
     }
 
-    const def      = id ? PLAYLIST_DEFS[id] : null;
-    const cacheKey = id
-      ? `pl5:${id}`
-      : `qs5:${isAuctionsOnly ? "a:" : ""}${String(customQuery).trim().toLowerCase().slice(0, 120)}`;
+    // 1. SAFETY ISOLATION VALVE: Bypass table cache for custom user query engine runs
+    if (!id || id === 'custom') {
+      console.log(`[LIVE QUERY] Executing targeted search engine run for keyword: "${customQuery}"`);
 
-    const token = await getEbayToken();
-    let items   = [];
+      let q = String(customQuery).trim();
+      if (!q) return res.json({ items: [] });
 
-    const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
+      const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
 
-    const localMapItem = (item, selectedCats) => {
+      if (!q.toLowerCase().includes("psa") && !q.toLowerCase().includes("auto") && !q.toLowerCase().includes("patch") && !q.toLowerCase().includes("1/1")) {
+        q += premiumLuxuryModifiers;
+      }
+
+      const token = await getEbayToken();
+      const sortVal = isAuctionsOnly ? "endingSoonest" : "bestMatch";
+      const filterParts = ["price:[75..],priceCurrency:USD"];
+      if (isAuctionsOnly) filterParts.push("buyingOptions:{AUCTION}");
+      const filterStr = filterParts.join(",");
+
+      // Local Item Object Normalization Parser
       const forceMaximumHD = (url) => {
         if (!url || typeof url !== 'string') return url || "";
         try {
@@ -696,10 +706,11 @@ app.get("/api/playlist", async (req, res) => {
           return cleanUrl;
         } catch (e) { return url; }
       };
-      return {
+
+      const localMapItem = (item) => ({
         id:          item.itemId,
         name:        item.title || "Unknown Card",
-        category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+        category:    detectCategory(item.title || "", [], (item.categories || []).map((c) => String(c.categoryId))),
         image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
         images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
         currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
@@ -710,61 +721,124 @@ app.get("/api/playlist", async (req, res) => {
         watchCount:  item.watchCount || 0,
         condition:   item.condition || "",
         listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
-      };
-    };
+      });
 
-    if (def) {
-      const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
-      const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
-      const hintCats = categoryHint ? [categoryHint] : [];
-
-      const buckets = await Promise.all(
-        terms.map(async (term) => {
-          try {
-            const fullPremiumTerm = `${term}${premiumLuxuryModifiers}`;
-            const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
-            return (data.itemSummaries || [])
-              .filter((i) => !isSuppliesCategory(i))
-              .map((i) => localMapItem(i, hintCats));
-          } catch (e) {
-            console.warn(`[playlist] term "${term}" failed:`, e.message);
-            return [];
-          }
-        })
-      );
-
-      const maxLen = Math.max(...buckets.map((b) => b.length), 0);
-      for (let i = 0; i < maxLen; i++) {
-        for (const bucket of buckets) {
-          if (i < bucket.length) items.push(bucket[i]);
-        }
-      }
-
-      const seen = new Set();
-      items = items.filter((c) => {
-        if (seen.has(c.id)) return false;
-        seen.add(c.id);
-        return true;
-      }).slice(0, 100);
-
-    } else {
-      let q = String(customQuery).trim();
-      if (!q.toLowerCase().includes("psa") && !q.toLowerCase().includes("auto") && !q.toLowerCase().includes("patch") && !q.toLowerCase().includes("1/1")) {
-        q += premiumLuxuryModifiers;
-      }
-
-      const sortVal      = isAuctionsOnly ? "endingSoonest" : "bestMatch";
-      const filterParts = ["price:[75..],priceCurrency:USD"];
-      if (isAuctionsOnly) filterParts.push("buyingOptions:{AUCTION}");
-      const filterStr   = filterParts.join(",");
-
-      const data        = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
-      items = (data.itemSummaries || [])
+      const data = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
+      const customItems = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
-        .map((i) => localMapItem(i, []));
+        .map((i) => localMapItem(i));
+
+      return res.json({ items: customItems, fromCache: false });
     }
 
-    if (items.length > 0) setBroadCache(cacheKey, items).catch(() => {});
+    // 2. PRESET PLATFORM ROUTING: Shield system limits using Supabase cache table
+    const playlistId = id.trim();
+    if (!PLAYLIST_DEFS[playlistId]) {
+      return res.status(404).json({ error: `Playlist profile '${playlistId}' not found.` });
+    }
+
+    // A. READ DATA LAYER: Inspect the high-traffic protection cache
+    const { data: cache } = await supabase
+      .from('playlist_cache')
+      .select('*')
+      .eq('id', playlistId)
+      .single();
+
+    // Establish hard Cache validation expiration boundary rules (30 Minutes)
+    const CACHE_TTL_LIMIT = 30 * 60 * 1000;
+    const isCacheFresh = cache && (Date.now() - new Date(cache.updated_at).getTime() < CACHE_TTL_LIMIT);
+
+    if (isCacheFresh) {
+      console.log(`[HIGH-END CACHE HIT] Delivering '${playlistId}' snapshot instantly from Supabase.`);
+      return res.json({ items: cache.items, fromCache: true });
+    }
+
+    // B. CACHE MISS PROCEDURES: Re-fetch external data when entries degrade
+    console.log(`[CACHE MISS] Snapshot for '${playlistId}' missing or stale. Running compiler sequence...`);
+
+    const def = PLAYLIST_DEFS[playlistId];
+    const token = await getEbayToken();
+    let items = [];
+
+    const premiumLuxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
+
+    const forceMaximumHD = (url) => {
+      if (!url || typeof url !== 'string') return url || "";
+      try {
+        let cleanUrl = url.split('?')[0];
+        if (cleanUrl.includes("/thumbs/")) cleanUrl = cleanUrl.replace("/thumbs/", "/");
+        if (/s-l\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/s-l\d+/i, "s-l600");
+        else if (/\$_\d+/i.test(cleanUrl)) cleanUrl = cleanUrl.replace(/\$_\d+/i, "$_57");
+        return cleanUrl;
+      } catch (e) { return url; }
+    };
+
+    const localMapItem = (item, selectedCats) => ({
+      id:          item.itemId,
+      name:        item.title || "Unknown Card",
+      category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+      image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+      images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
+      currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+      currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+      grade:       detectGrade(item.title || ""),
+      ebayUrl:     buildAffiliateUrl(item),
+      endTime:     item.itemEndDate || null,
+      watchCount:  item.watchCount || 0,
+      condition:   item.condition || "",
+      listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+    });
+
+    const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
+    const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
+    const hintCats = categoryHint ? [categoryHint] : [];
+
+    const buckets = await Promise.all(
+      terms.map(async (term) => {
+        try {
+          const fullPremiumTerm = `${term}${premiumLuxuryModifiers}`;
+          const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
+          return (data.itemSummaries || [])
+            .filter((i) => !isSuppliesCategory(i))
+            .map((i) => localMapItem(i, hintCats));
+        } catch (e) {
+          console.warn(`[playlist] term "${term}" failed:`, e.message);
+          return [];
+        }
+      })
+    );
+
+    const maxLen = Math.max(...buckets.map((b) => b.length), 0);
+    for (let i = 0; i < maxLen; i++) {
+      for (const bucket of buckets) {
+        if (i < bucket.length) items.push(bucket[i]);
+      }
+    }
+
+    const seen = new Set();
+    items = items.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    }).slice(0, 100);
+
+    // C. WRITE BACK UPSTREAM: Commit compiled block to persistent cache table
+    if (items.length > 0) {
+      const { error: upsertError } = await supabase
+        .from('playlist_cache')
+        .upsert({
+          id: playlistId,
+          items: items,
+          updated_at: new Date().toISOString()
+        });
+
+      if (upsertError) {
+        console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError);
+      } else {
+        console.log(`[HIGH-END CACHE WRITE] Successfully updated snapshot table for target: '${playlistId}'`);
+      }
+    }
+
     return res.json({ items, fromCache: false });
 
   } catch (err) {
