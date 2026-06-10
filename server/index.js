@@ -20,7 +20,7 @@ const EPN_CAMP_ID = "5339150952";
 // ─── Supabase admin client (server-side caching) ──────────────────────────────
 // Requires SUPABASE_SERVICE_ROLE_KEY in Replit Secrets.
 // If not set the app degrades gracefully — no caching, direct eBay calls.
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = (SUPABASE_URL && SUPABASE_SRK)
   ? createClient(SUPABASE_URL, SUPABASE_SRK)
