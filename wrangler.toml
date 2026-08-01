@@ -1,0 +1,10 @@
+name = "the-card-match"
+pages_build_output_dir = "dist"
+
+# This tells Cloudflare to wake up your server once a day at midnight UTC
+[triggers]
+crons = ["0 0 * * *"]
+
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "f020f616225a424395af267b463d6b71"

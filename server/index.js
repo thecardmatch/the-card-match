@@ -3,7 +3,6 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync } from "fs";
-import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -14,98 +13,54 @@ const PORT = parseInt(process.env.PORT || "3001");
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// ─── CLOUDFLARE NATIVE VARIABLE BRIDGE (ES MODULES) ─────────────────────────
-let supabaseUrl = undefined;
-let supabaseServiceKey = undefined;
-
-// 1. Try pulling from Cloudflare's global bindings first (Production)
-if (typeof globalThis !== 'undefined') {
-  supabaseUrl = globalThis.SUPABASE_URL || globalThis.VITE_SUPABASE_URL;
-  supabaseServiceKey = globalThis.SUPABASE_SERVICE_ROLE_KEY;
-}
-
-// 2. Fall back to process.env if global bindings are empty (Local Dev Mode)
-if (!supabaseUrl || !supabaseServiceKey) {
-  supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-  supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-}
-
-// Initialize the Admin Shield Client
-const supabase = (supabaseUrl && supabaseServiceKey)
-  ? createClient(supabaseUrl, supabaseServiceKey)
-  : null;
-
-if (!supabase) {
-  console.warn("[Cache Warning] SUPABASE_SERVICE_ROLE_KEY or URL not detected. Running offline without cache.");
-}
-// ─── HARDCODED PARTNER CREDENTIALS // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
+// ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
 const EPN_CAMP_ID = "5339150952";
 
-// ─── Supabase admin client (Unified Cloudflare Environment Bridge) ────────────
-// Fallback layout checks for both standalone and frontend-prefixed properties
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const SUPABASE_SRK = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// ─── Cache TTLs (Converted to seconds for Cloudflare KV) ──────────────────────
+const ENTITY_TTL_SEC = 30 * 60;  // 30 min
+const BROAD_TTL_SEC  = 15 * 60;  // 15 min
 
-const supabase = (SUPABASE_URL && SUPABASE_SRK)
-  ? createClient(SUPABASE_URL, SUPABASE_SRK)
-  : null;
+// ─── Cloudflare KV Binding Helper ─────────────────────────────────────────────
+const getKV = () => {
+  if (typeof CACHE_KV !== 'undefined') return CACHE_KV;
+  if (typeof globalThis !== 'undefined' && globalThis.CACHE_KV) return globalThis.CACHE_KV;
+  return null;
+};
 
-if (!supabase) {
-  console.warn("[cache] SUPABASE_SERVICE_ROLE_KEY or URL missing — caching disabled");
-}
-
-// ─── Cache TTLs ───────────────────────────────────────────────────────────────
-const ENTITY_TTL_MS = 30 * 60 * 1000;  // 30 min
-const BROAD_TTL_MS  = 15 * 60 * 1000;  // 15 min
-
-// ─── Cache helpers ────────────────────────────────────────────────────────────
+// ─── Cache helpers (Cloudflare KV) ────────────────────────────────────────────
 async function getEntityCache(entityId) {
-  if (!supabase) return null;
+  const kv = getKV();
+  if (!kv) return null;
   try {
-    const { data } = await supabase
-      .from("entity_card_cache")
-      .select("cards")
-      .eq("entity_id", entityId)
-      .gt("expires_at", new Date().toISOString())
-      .maybeSingle();
+    const data = await kv.get(`entity_${entityId}`, "json");
     return data?.cards ?? null;
   } catch { return null; }
 }
 
 async function setEntityCache(entityId, cards) {
-  if (!supabase) return;
+  const kv = getKV();
+  if (!kv) return;
   try {
-    await supabase.from("entity_card_cache").upsert({
-      entity_id:  entityId,
-      cards,
-      fetched_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + ENTITY_TTL_MS).toISOString(),
-    }, { onConflict: "entity_id" });
+    const value = { cards, fetched_at: new Date().toISOString() };
+    await kv.put(`entity_${entityId}`, JSON.stringify(value), { expirationTtl: ENTITY_TTL_SEC });
   } catch (e) { console.warn("[cache] entity write failed:", e.message); }
 }
 
 async function getBroadCache(cacheKey) {
-  if (!supabase) return null;
+  const kv = getKV();
+  if (!kv) return null;
   try {
-    const { data } = await supabase
-      .from("broad_category_cache")
-      .select("cards")
-      .eq("cache_key", cacheKey)
-      .gt("expires_at", new Date().toISOString())
-      .maybeSingle();
+    const data = await kv.get(`broad_${cacheKey}`, "json");
     return data?.cards ?? null;
   } catch { return null; }
 }
 
 async function setBroadCache(cacheKey, cards) {
-  if (!supabase) return;
+  const kv = getKV();
+  if (!kv) return;
   try {
-    await supabase.from("broad_category_cache").upsert({
-      cache_key:  cacheKey,
-      cards,
-      fetched_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + BROAD_TTL_MS).toISOString(),
-    }, { onConflict: "cache_key" });
+    const value = { cards, fetched_at: new Date().toISOString() };
+    await kv.put(`broad_${cacheKey}`, JSON.stringify(value), { expirationTtl: BROAD_TTL_SEC });
   } catch (e) { console.warn("[cache] broad write failed:", e.message); }
 }
 
@@ -120,7 +75,6 @@ function buildBroadCacheKey(cats, sort, conds, listingType, min, max, showBulk) 
     String(showBulk),
   ].join("|");
 }
-
 // ─── eBay OAuth token cache ───────────────────────────────────────────────────
 let _token = null;
 let _tokenExpiry = 0;
@@ -567,44 +521,56 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
 }
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
-  if (!supabase) return res.json({ entities: [] });
+  const kv = getKV();
+  if (!kv) return res.json({ entities: [] });
   const { q = "", limit = "8" } = req.query;
-  const trimmed = q.trim();
+  const trimmed = q.trim().toLowerCase();
   if (trimmed.length < 2) return res.json({ entities: [] });
   try {
-    const { data, error } = await supabase
-      .from("searchable_entities")
-      .select("id, name, category, ebay_keyword")
-      .ilike("name", `%${trimmed}%`)
-      .order("name")
-      .limit(parseInt(limit, 10));
-    if (error) throw error;
-    return res.json({ entities: data ?? [] });
+    const allEntities = (await kv.get("searchable_entities", "json")) || [];
+    const matched = allEntities
+      .filter((e) => e.name && e.name.toLowerCase().includes(trimmed))
+      .slice(0, parseInt(limit, 10));
+    return res.json({ entities: matched });
   } catch (err) {
     return res.json({ entities: [] });
   }
 });
 
-// ─── GET /api/search — entity-specific card deck (with Supabase cache) ────────
+// ─── GET /api/search — entity-specific card deck (with KV cache & direct fallback) ──────────────
 app.get("/api/search", async (req, res) => {
   try {
-    const { entityId } = req.query;
-    if (!entityId) return res.status(400).json({ error: "entityId required", items: [] });
+    const { entityId, q } = req.query;
+    const searchTerm = (q || entityId || "").trim();
+    if (!searchTerm) return res.status(400).json({ error: "entityId or q required", items: [] });
 
-    // FORCE CACHE BYPASS TO OVERWRITE OLD DATA
-    if (!supabase) return res.status(503).json({ error: "Supabase not configured", items: [] });
-    const { data: entity, error: eErr } = await supabase
-      .from("searchable_entities")
-      .select("*")
-      .eq("id", entityId)
-      .maybeSingle();
-    if (eErr || !entity) return res.status(404).json({ error: "Entity not found", items: [] });
+    // 1. Check entity cache first
+    const cachedCards = await getEntityCache(searchTerm);
+    if (cachedCards && cachedCards.length > 0) {
+      return res.json({ items: cachedCards, fromCache: true });
+    }
+
+    // 2. Look up entity in KV if present, otherwise fallback to using searchTerm directly
+    const kv = getKV();
+    let ebayKeyword = searchTerm;
+    let category = null;
+
+    if (kv) {
+      try {
+        const allEntities = (await kv.get("searchable_entities", "json")) || [];
+        const found = allEntities.find((e) => String(e.id) === String(searchTerm) || (e.name && e.name.toLowerCase() === searchTerm.toLowerCase()));
+        if (found) {
+          ebayKeyword = found.ebay_keyword || found.name;
+          category = found.category || null;
+        }
+      } catch (err) { /* fallback to searchTerm */ }
+    }
 
     const token  = await getEbayToken();
-    const catId  = CATEGORY_IDS[entity.category] ?? null;
+    const catId  = category ? (CATEGORY_IDS[category] ?? null) : null;
 
     const luxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
-    const kw     = `${entity.ebay_keyword}${luxuryModifiers}`;
+    const kw     = `${ebayKeyword}${luxuryModifiers}`;
     const baseFilter = "price:[75..],priceCurrency:USD";
 
     const mapItemWithAbsoluteHD = (item, selectedCats) => {
@@ -647,7 +613,7 @@ app.get("/api/search", async (req, res) => {
       ebaySearch(token, kw, "bestMatch",     `${baseFilter},buyingOptions:{FIXED_PRICE}`, null, catId, 100, 0),
     ]);
 
-    const cats     = [entity.category];
+    const cats     = category ? [category] : [];
     const auctions = (auctionData.itemSummaries || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
     const bin      = (binData.itemSummaries    || []).filter((i) => !isSuppliesCategory(i)).map((i) => mapItemWithAbsoluteHD(i, cats));
 
@@ -656,7 +622,9 @@ app.get("/api/search", async (req, res) => {
     const merged     = [...auctions, ...uniqueBin];
 
     // Force write clean data back to cache
-    setEntityCache(entityId, merged).catch(() => {});
+    if (merged.length > 0) {
+      setEntityCache(searchTerm, merged).catch(() => {});
+    }
     return res.json({ items: merged, fromCache: false });
   } catch (err) {
     return res.status(500).json({ error: err.message, items: [] });
@@ -691,7 +659,6 @@ const PLAYLIST_DEFS = {
     minPrice:     250,
   },
 };
-
 ....// ─── GET /api/playlist ────────────────────────────────────────────────────────
 // ── Core Playlist Data Routing Endpoint ───────────────────────────────────
 app.get("/api/playlist", async (req, res) => {
@@ -758,25 +725,27 @@ app.get("/api/playlist", async (req, res) => {
       return res.json({ items: customItems, fromCache: false });
     }
 
-    // 2. PRESET PLATFORM ROUTING: Shield system limits using Supabase cache table
+// 2. PRESET PLATFORM ROUTING: Shield system limits using Cloudflare KV cache
     const playlistId = id.trim();
     if (!PLAYLIST_DEFS[playlistId]) {
       return res.status(404).json({ error: `Playlist profile '${playlistId}' not found.` });
     }
 
     // A. READ DATA LAYER: Inspect the high-traffic protection cache
-    const { data: cache } = await supabase
-      .from('playlist_cache')
-      .select('*')
-      .eq('id', playlistId)
-      .single();
+    const kv = getKV();
+    let cache = null;
+    if (kv) {
+      try {
+        cache = await kv.get(`playlist_${playlistId}`, "json");
+      } catch (e) { cache = null; }
+    }
 
     // Establish hard Cache validation expiration boundary rules (30 Minutes)
     const CACHE_TTL_LIMIT = 30 * 60 * 1000;
-    const isCacheFresh = cache && (Date.now() - new Date(cache.updated_at).getTime() < CACHE_TTL_LIMIT);
+    const isCacheFresh = cache && cache.updated_at && (Date.now() - new Date(cache.updated_at).getTime() < CACHE_TTL_LIMIT);
 
     if (isCacheFresh) {
-      console.log(`[HIGH-END CACHE HIT] Delivering '${playlistId}' snapshot instantly from Supabase.`);
+      console.log(`[HIGH-END CACHE HIT] Delivering '${playlistId}' snapshot instantly from Cloudflare KV.`);
       return res.json({ items: cache.items, fromCache: true });
     }
 
@@ -849,20 +818,17 @@ app.get("/api/playlist", async (req, res) => {
       return true;
     }).slice(0, 100);
 
-    // C. WRITE BACK UPSTREAM: Commit compiled block to persistent cache table
-    if (items.length > 0) {
-      const { error: upsertError } = await supabase
-        .from('playlist_cache')
-        .upsert({
-          id: playlistId,
+    // C. WRITE BACK UPSTREAM: Commit compiled block to persistent KV namespace
+    if (items.length > 0 && kv) {
+      try {
+        const cachePayload = {
           items: items,
           updated_at: new Date().toISOString()
-        });
-
-      if (upsertError) {
-        console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError);
-      } else {
+        };
+        await kv.put(`playlist_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
         console.log(`[HIGH-END CACHE WRITE] Successfully updated snapshot table for target: '${playlistId}'`);
+      } catch (upsertError) {
+        console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError.message);
       }
     }
 
@@ -1009,7 +975,7 @@ app.get("/api/ebay/search", async (req, res) => {
   }
 });
 
-app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!supabase }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!getKV() }));
 
 // ── Production: serve built React app + SPA catch-all ─────────────────────
 const distPath = path.join(__dirname, "..", "dist");
