@@ -1,31 +1,71 @@
 import { useState } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import { Search, ChevronRight, Zap, Trophy, Star } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const PLAYLISTS = [
+// ── Playlist registry ────────────────────────────────────────────────────────
+const SPORTS_PLAYLISTS = [
   {
     id: "nfl-preseason-preview",
     emoji: "🏈",
-    label: "NFL Preseason Preview",
-    sub: "Autos, patches & rookies — football cards",
+    label: "NFL Football",
+    sub: "Autos · Patches · Rookies",
+    accent: "from-orange-500/20 to-amber-500/10 border-orange-500/30",
+    textAccent: "text-orange-400",
+  },
+  {
+    id: "nba-showcase",
+    emoji: "🏀",
+    label: "NBA Basketball",
+    sub: "Autos · Patches · Rookies",
+    accent: "from-red-500/20 to-orange-400/10 border-red-500/30",
+    textAccent: "text-red-400",
+  },
+  {
+    id: "mlb-showcase",
+    emoji: "⚾",
+    label: "MLB Baseball",
+    sub: "Autos · Patches · Rookies",
+    accent: "from-blue-600/20 to-blue-400/10 border-blue-500/30",
+    textAccent: "text-blue-400",
+  },
+  {
+    id: "nhl-showcase",
+    emoji: "🏒",
+    label: "NHL Hockey",
+    sub: "Autos · Patches · Rookies",
+    accent: "from-cyan-500/20 to-sky-400/10 border-cyan-500/30",
+    textAccent: "text-cyan-400",
   },
   {
     id: "soccer-kickoff",
     emoji: "⚽",
-    label: "Soccer Kickoff",
-    sub: "Autos, patches & rookies — soccer cards",
+    label: "Soccer / Fútbol",
+    sub: "Autos · Patches · Rookies",
+    accent: "from-green-500/20 to-emerald-400/10 border-green-500/30",
+    textAccent: "text-green-400",
   },
+] as const;
+
+const FEATURE_PLAYLISTS = [
   {
     id: "trending-pokemon",
     emoji: "⚡",
     label: "Trending Pokémon",
-    sub: "Current market chase cards",
+    sub: "SIR · Alt Art · 1st Ed · Gold Star · PSA 10",
+    accent: "from-yellow-400/20 via-purple-500/15 to-pink-500/10 border-yellow-400/30",
+    textAccent: "text-yellow-300",
+    badge: "TCG",
+    badgeColor: "bg-yellow-400/20 text-yellow-300",
   },
   {
     id: "high-end-showcase",
     emoji: "💎",
     label: "High-End Showcase",
-    sub: "Premium graded — $250+ only",
+    sub: "PSA 10 · BGS 9.5 · 1/1 · Logomans · $250+",
+    accent: "from-violet-500/20 via-fuchsia-500/15 to-rose-500/10 border-violet-400/30",
+    textAccent: "text-violet-300",
+    badge: "$250+",
+    badgeColor: "bg-violet-400/20 text-violet-300",
   },
 ] as const;
 
@@ -35,9 +75,9 @@ type Props = {
 };
 
 export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
-  const [customQuery,   setCustomQuery]   = useState("");
-  const [customOpen,    setCustomOpen]    = useState(false);
-  const [auctionsOnly,  setAuctionsOnly]  = useState(false);
+  const [customQuery,  setCustomQuery]  = useState("");
+  const [customOpen,   setCustomOpen]   = useState(false);
+  const [auctionsOnly, setAuctionsOnly] = useState(false);
 
   function submitCustom() {
     const q = customQuery.trim();
@@ -48,11 +88,12 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
     setCustomOpen(false);
   }
 
-  // ── Panel mode (compact dropdown from deck header) ───────────────────────
+  // ── Compact panel mode (deck header dropdown) ─────────────────────────────
   if (mode === "panel") {
+    const all = [...SPORTS_PLAYLISTS, ...FEATURE_PLAYLISTS];
     return (
       <div className="py-1">
-        {PLAYLISTS.map((pl) => (
+        {all.map((pl) => (
           <button
             key={pl.id}
             onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
@@ -125,114 +166,146 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
     );
   }
 
-  // ── Home mode (full-screen) ───────────────────────────────────────────────
+  // ── Full home screen ──────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-background overflow-y-auto">
 
-      <div className="flex items-center gap-3 px-5 pt-6 pb-2 shrink-0">
-        <img src="/logo.png" alt="Logo" className="w-10 h-10 rounded-xl" />
-        <div>
-          <h1 className="text-base font-black uppercase tracking-tight text-foreground leading-none">
-            The Card Match
-          </h1>
-          <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest">
-            Swipe. Watch. Win.
-          </p>
+      {/* ── Header ── */}
+      <div className="px-5 pt-6 pb-5 shrink-0">
+        <div className="flex items-center gap-3 mb-4">
+          <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-2xl shadow-lg" />
+          <div>
+            <h1 className="text-lg font-black uppercase tracking-tight text-foreground leading-none">
+              The Card Match
+            </h1>
+            <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-widest mt-0.5">
+              Swipe · Watch · Win
+            </p>
+          </div>
         </div>
+
+        {/* Custom search bar — always visible */}
+        <div className="relative">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <form onSubmit={(e) => { e.preventDefault(); submitCustom(); }}>
+            <input
+              type="search"
+              enterKeyHint="search"
+              value={customQuery}
+              onChange={(e) => setCustomQuery(e.target.value)}
+              placeholder="Search any player, set, or keyword…"
+              className="w-full pl-10 pr-20 py-3 rounded-2xl bg-card border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <button
+              type="submit"
+              disabled={!customQuery.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 px-3.5 py-1.5 bg-primary text-primary-foreground text-xs font-bold rounded-xl disabled:opacity-40 transition-opacity"
+            >
+              Go
+            </button>
+          </form>
+        </div>
+
+        {/* Auctions toggle */}
+        <label className="flex items-center gap-2 mt-2.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={auctionsOnly}
+            onChange={(e) => setAuctionsOnly(e.target.checked)}
+            className="w-3.5 h-3.5 rounded accent-primary cursor-pointer"
+          />
+          <span className="text-xs text-muted-foreground">Auctions only — ending soonest first</span>
+        </label>
       </div>
 
-      <div className="px-5 pt-4 pb-6 shrink-0">
-        <h2 className="text-2xl font-black tracking-tight text-foreground leading-tight">
-          Featured Playlists
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Swipe live eBay auctions — right to watch, up to buy.
-        </p>
-      </div>
+      {/* ── Sports grid ── */}
+      <section className="px-4 shrink-0">
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy className="w-3.5 h-3.5 text-muted-foreground" />
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            Sports Cards
+          </h2>
+        </div>
 
-      <div className="px-4 flex flex-col gap-3 shrink-0">
-        {PLAYLISTS.map((pl, i) => (
-          <motion.button
-            key={pl.id}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-            onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
-            className="group w-full flex items-center gap-4 bg-card border border-border rounded-2xl px-5 py-4 text-left hover:border-primary/40 hover:shadow-md active:scale-[0.98] transition-all"
-          >
-            <span className="text-3xl shrink-0">{pl.emoji}</span>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-base text-foreground leading-tight">{pl.label}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{pl.sub}</p>
-            </div>
-            <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors shrink-0" />
-          </motion.button>
-        ))}
+        <div className="grid grid-cols-2 gap-2.5">
+          {SPORTS_PLAYLISTS.map((pl, i) => (
+            <motion.button
+              key={pl.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
+              onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
+              className={`group relative flex flex-col items-start gap-1.5 bg-gradient-to-br ${pl.accent} border rounded-2xl px-4 py-3.5 text-left active:scale-[0.97] transition-transform`}
+            >
+              <span className="text-2xl leading-none">{pl.emoji}</span>
+              <div>
+                <p className={`font-bold text-sm text-foreground leading-tight`}>{pl.label}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{pl.sub}</p>
+              </div>
+            </motion.button>
+          ))}
+        </div>
+      </section>
 
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: PLAYLISTS.length * 0.06 }}
-          className="bg-card border border-border rounded-2xl overflow-hidden"
-        >
-          <button
-            onClick={() => setCustomOpen((o) => !o)}
-            className="group w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-muted/40 transition-colors"
-          >
-            <span className="text-3xl shrink-0">🔍</span>
-            <div className="flex-1 min-w-0">
-              <p className="font-bold text-base text-foreground leading-tight">Custom Search</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Any player, set, or keyword</p>
-            </div>
-            <motion.div animate={{ rotate: customOpen ? 90 : 0 }} transition={{ duration: 0.15 }}>
-              <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-            </motion.div>
-          </button>
+      {/* ── Featured playlists ── */}
+      <section className="px-4 mt-5 shrink-0">
+        <div className="flex items-center gap-2 mb-3">
+          <Star className="w-3.5 h-3.5 text-muted-foreground" />
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+            Featured
+          </h2>
+        </div>
 
-          <AnimatePresence>
-            {customOpen && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden border-t border-border/50"
-              >
-                <form
-                  onSubmit={(e) => { e.preventDefault(); submitCustom(); }}
-                  className="flex gap-2 px-4 pt-4 pb-3"
-                >
-                  <input
-                    autoFocus
-                    type="search"
-                    enterKeyHint="search"
-                    value={customQuery}
-                    onChange={(e) => setCustomQuery(e.target.value)}
-                    placeholder="e.g. Charizard, LeBron James, PSA 10…"
-                    className="flex-1 text-sm px-4 py-2.5 bg-background rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!customQuery.trim()}
-                    className="px-4 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-xl disabled:opacity-40 active:scale-95 transition-transform"
-                  >
-                    Go
-                  </button>
-                </form>
-                <label className="flex items-center gap-2.5 px-4 pb-4 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={auctionsOnly}
-                    onChange={(e) => setAuctionsOnly(e.target.checked)}
-                    className="w-4 h-4 rounded accent-primary cursor-pointer"
-                  />
-                  <span className="text-sm text-muted-foreground">Auctions only — ending soonest first</span>
-                </label>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-      </div>
+        <div className="flex flex-col gap-2.5">
+          {FEATURE_PLAYLISTS.map((pl, i) => (
+            <motion.button
+              key={pl.id}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: SPORTS_PLAYLISTS.length * 0.05 + i * 0.05 }}
+              onClick={() => onLoadPlaylist(pl.id, `${pl.emoji} ${pl.label}`)}
+              className={`group w-full flex items-center gap-4 bg-gradient-to-r ${pl.accent} border rounded-2xl px-5 py-4 text-left active:scale-[0.98] transition-transform`}
+            >
+              <span className="text-3xl shrink-0 leading-none">{pl.emoji}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="font-bold text-sm text-foreground leading-tight">{pl.label}</p>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${pl.badgeColor} shrink-0`}>
+                    {pl.badge}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug">{pl.sub}</p>
+              </div>
+              <ChevronRight className={`w-4 h-4 ${pl.textAccent} shrink-0 opacity-60 group-hover:opacity-100 transition-opacity`} />
+            </motion.button>
+          ))}
+        </div>
+      </section>
+
+      {/* ── How it works ── */}
+      <section className="px-4 mt-5 mb-6 shrink-0">
+        <div className="bg-card border border-border rounded-2xl px-5 py-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap className="w-3.5 h-3.5 text-primary" />
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              How it works
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            {[
+              { icon: "👆", label: "Swipe Up", desc: "Buy on eBay" },
+              { icon: "👉", label: "Swipe Right", desc: "Add to watchlist" },
+              { icon: "👈", label: "Swipe Left", desc: "Pass" },
+            ].map(({ icon, label, desc }) => (
+              <div key={label} className="flex flex-col items-center gap-1">
+                <span className="text-xl">{icon}</span>
+                <p className="text-[11px] font-bold text-foreground leading-tight">{label}</p>
+                <p className="text-[10px] text-muted-foreground leading-tight">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

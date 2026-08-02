@@ -99,14 +99,15 @@ async function getEbayToken() {
 
 // ─── UNIVERSAL TRADING CARD CATEGORY FIXED MAPPINGS ──────────────────────────
 const CATEGORY_IDS = {
-  Pokemon:      "183050", // Correct CCG Category (Was non-sport 183454)
-  Basketball:   "261328", // Correct Sports Cards Category (Was Automotive 214!)
-  Baseball:     "261328", // Correct Sports Cards Category (Was 213)
-  Football:     "261328", // Correct Sports Cards Category (Was 217)
-  Hockey:       "261328", // Correct Sports Cards Category (Was 216)
-  Soccer:       "261328", // Correct Sports Cards Category (Was 260)
+  Football:     "215",    // eBay: Football Cards
+  Basketball:   "214",    // eBay: Basketball Cards
+  Baseball:     "213",    // eBay: Baseball Cards
+  Hockey:       "216",    // eBay: Ice Hockey Cards
+  Soccer:       "183444", // eBay: Soccer Cards
+  Pokemon:      "183050", // eBay: Pokémon / CCG Singles
+  Sports:       "261328", // eBay: Sports Trading Cards (general)
   "Formula 1":  "261328",
-  WWE:          "261328"
+  WWE:          "261328",
 };
 
 const CAT_BASE_KEYWORD = {
@@ -631,37 +632,56 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-// ─── Playlist definitions — individual terms, fetched in parallel ─────────────
+// ─── Playlist definitions ─────────────────────────────────────────────────────
 const PLAYLIST_DEFS = {
   "nfl-preseason-preview": {
-    terms:        ["(auto, patch, rpa, 1/1, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened"],
     categoryId:   "215",
     categoryHint: "Football",
+    terms:        ['football NFL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
     minPrice:     50,
     skipModifiers: true,
   },
   "soccer-kickoff": {
-    terms:        ["(auto, patch, rpa, 1/1, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened"],
-    categoryId:   "214",
+    categoryId:   "183444",
     categoryHint: "Soccer",
+    terms:        ['soccer (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    minPrice:     50,
+    skipModifiers: true,
+  },
+  "nhl-showcase": {
+    categoryId:   "216",
+    categoryHint: "Hockey",
+    terms:        ['hockey NHL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    minPrice:     50,
+    skipModifiers: true,
+  },
+  "nba-showcase": {
+    categoryId:   "214",
+    categoryHint: "Basketball",
+    terms:        ['basketball NBA (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    minPrice:     50,
+    skipModifiers: true,
+  },
+  "mlb-showcase": {
+    categoryId:   "213",
+    categoryHint: "Baseball",
+    terms:        ['baseball MLB (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
     minPrice:     50,
     skipModifiers: true,
   },
   "trending-pokemon": {
-    terms:        ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
-                   "Umbreon VMAX Alt", "Charizard ex SIR", "Pikachu ex SIR",
-                   "Team Rocket Mewtwo", "Dragapult ex"],
     categoryId:   "183050",
     categoryHint: "Pokemon",
-    perTerm:      12,
-    minPrice:     50,
+    terms:        ['pokemon (psa 10, bgs 9.5, sir, "alt art", "1st edition", shadowless, gold star, sar, illustration) -code -digital -online'],
+    minPrice:     40,
+    skipModifiers: true,
   },
   "high-end-showcase": {
-    terms:        ["PSA 10", "BGS 9.5", "Auto Patch", "Logoman", "RPA", "1/1", "/1 ", "/10", "/25"],
     categoryId:   "261328",
     categoryHint: null,
-    perTerm:      25,
+    terms:        ['(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened'],
     minPrice:     250,
+    skipModifiers: true,
   },
 };
 // ─── GET /api/playlist ────────────────────────────────────────────────────────
