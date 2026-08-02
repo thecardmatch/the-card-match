@@ -633,7 +633,7 @@ app.get("/api/search", async (req, res) => {
 });
 
 // ─── Shared exclusion suffix to strip memorabilia from all card searches ──────
-const CARD_ONLY = "-helmet -pennant -poster -bobblehead -figurine -plaque -jersey -\"signed ball\" -\"game used\" -\"game worn\" -\"cut signature\" -photograph -photo -lithograph -ticket -program";
+const CARD_ONLY = "-helmet -pennant -poster -bobblehead -figurine -plaque -jersey -\"signed ball\" -\"cut signature\" -photograph -photo -lithograph -ticket -program";
 
 // ─── Playlist definitions ─────────────────────────────────────────────────────
 const PLAYLIST_DEFS = {
