@@ -673,20 +673,41 @@ const PLAYLIST_DEFS = {
     categoryId:   "215",
     categoryHint: "Football",
     terms: [
-      // NFL Chunk 1 (1-15)
-      `("Josh Allen", "Drake Maye", "Saquon Barkley", "Jaxon Smith-Njigba", "Jayden Daniels", "Patrick Mahomes", "Jalen Hurts", "Caleb Williams", "Jordan Love", "Micah Parsons", "Bo Nix", "Christian McCaffrey", "Justin Jefferson", "Aidan Hutchinson", "T.J. Watt") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NFL Chunk 1 (1-5)
+      `(Josh Allen, Drake Maye, Saquon Barkley, Jaxon Smith-Njigba, Jayden Daniels) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NFL Chunk 2 (16-30)
-      `("Jahmyr Gibbs", "Amon-Ra St. Brown", "Brock Purdy", "Lamar Jackson", "C.J. Stroud", "CeeDee Lamb", "Cooper DeJean", "George Kittle", "Puka Nacua", "Fred Warner", "Joe Burrow", "Jaxson Dart", "Baker Mayfield", "Travis Kelce", "Maxx Crosby") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NFL Chunk 2 (6-10)
+      `(Patrick Mahomes, Jalen Hurts, Caleb Williams, Jordan Love, Micah Parsons) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NFL Chunk 3 (31-40)
-      `("Shedeur Sanders", "Justin Herbert", "Patrick Surtain", "Ashton Jeanty", "Cam Skattebo", "Jared Goff", "Cam Ward", "Malik Nabers", "Tyreek Hill", "Mike Evans") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NFL Chunk 3 (11-15)
+      `(Bo Nix, Christian McCaffrey, Justin Jefferson, Aidan Hutchinson, T.J. Watt) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NFL Chunk 4 (41-50)
-      `("Cooper Kupp", "Travis Hunter", "DK Metcalf", "Aaron Rodgers", "Ja'Marr Chase", "Derrick Henry", "Bijan Robinson", "Nick Bosa", "Sam Darnold", "A.J. Brown") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NFL Chunk 4 (16-20)
+      `(Jahmyr Gibbs, Amon-Ra St. Brown, Brock Purdy, Lamar Jackson, C.J. Stroud) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NFL Chunk 5 (2026 Draft Class)
-      `("Caleb Downs", "Fernando Mendoza", "Jeremiyah Love", "Malachi Lawrence", "Jacob Rodriguez", "Chris Johnson", "Caleb Lomu", "Drew Allar", "Dillon Thieneman", "David Bailey") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+      // NFL Chunk 5 (21-25)
+      `(CeeDee Lamb, Cooper DeJean, George Kittle, Puka Nacua, Fred Warner) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 6 (26-30)
+      `(Joe Burrow, Jaxson Dart, Baker Mayfield, Travis Kelce, Maxx Crosby) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 7 (31-35)
+      `(Shedeur Sanders, Justin Herbert, Patrick Surtain, Ashton Jeanty, Cam Skattebo) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 8 (36-40)
+      `(Jared Goff, Cam Ward, Malik Nabers, Tyreek Hill, Mike Evans) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 9 (41-45)
+      `(Cooper Kupp, Travis Hunter, DK Metcalf, Aaron Rodgers, Ja'Marr Chase) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 10 (46-50)
+      `(Derrick Henry, Bijan Robinson, Nick Bosa, Sam Darnold, A.J. Brown) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 11 (2026 Draft Class 51-55)
+      `(Caleb Downs, Fernando Mendoza, Jeremiyah Love, Malachi Lawrence, Jacob Rodriguez) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 12 (2026 Draft Class 56-60)
+      `(Chris Johnson, Caleb Lomu, Drew Allar, Dillon Thieneman, David Bailey) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
     ],
     minPrice:     50,
     skipModifiers: true,
@@ -696,14 +717,29 @@ const PLAYLIST_DEFS = {
     categoryId:   "183444",
     categoryHint: "Soccer",
     terms: [
-      // Soccer Chunk 1 (1-14)
-      `("Lionel Messi", "Kylian Mbappe", "Lamine Yamal", "Erling Haaland", "Vinicius Jr", "Jude Bellingham", "Cristiano Ronaldo", "Pedri", "Rodri", "Ousmane Dembele", "Jamal Musiala", "Bukayo Saka", "Florian Wirtz", "Kevin De Bruyne") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // Soccer Chunk 1 (1-5)
+      `(Lionel Messi, Kylian Mbappe, Lamine Yamal, Erling Haaland, Vinicius Jr) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // Soccer Chunk 2 (Breakouts 15-23)
-      `("Johan Manzambi", "Ismael Saibari", "Ayyoub Bouaddi", "Vozinha", "Andreas Schjelderup", "Alex Freeman", "Deniz Undav", "Michael Olise", "Julio Enciso") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // Soccer Chunk 2 (6-10)
+      `(Jude Bellingham, Cristiano Ronaldo, Pedri, Rodri, Ousmane Dembele) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // Soccer Chunk 3 (Club & Jersey Mainstays)
-      `("Achraf Hakimi", "Hakim Ziyech", "Neymar", "Marcus Rashford", "Declan Rice", "Gavi", "Nico Williams", "Federico Valverde", "Alexander Isak", "Victor Osimhen", "Jules Kounde", "Ousmane Demba", "Cole Palmer") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+      // Soccer Chunk 3 (11-14)
+      `(Jamal Musiala, Bukayo Saka, Florian Wirtz, Kevin De Bruyne) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 4 (Breakouts 15-19)
+      `(Johan Manzambi, Ismael Saibari, Ayyoub Bouaddi, Vozinha, Andreas Schjelderup) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 5 (Breakouts 20-23)
+      `(Alex Freeman, Deniz Undav, Michael Olise, Julio Enciso) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 6 (Club Mainstays 24-28)
+      `(Achraf Hakimi, Hakim Ziyech, Neymar, Marcus Rashford, Declan Rice) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 7 (Club Mainstays 29-32)
+      `(Gavi, Nico Williams, Federico Valverde, Alexander Isak) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 8 (Club Mainstays 33-36)
+      `(Victor Osimhen, Jules Kounde, Ousmane Demba, Cole Palmer) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
     ],
     minPrice:     50,
     skipModifiers: true,
@@ -713,11 +749,17 @@ const PLAYLIST_DEFS = {
     categoryId:   "216",
     categoryHint: "Hockey",
     terms: [
-      // NHL Chunk 1 (1-10)
-      `("Connor Bedard", "Alex Ovechkin", "Sidney Crosby", "Jack Hughes", "Connor McDavid", "Nathan MacKinnon", "Cale Makar", "David Pastrnak", "Auston Matthews", "Macklin Celebrini") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NHL Chunk 1 (1-5)
+      `(Connor Bedard, Alex Ovechkin, Sidney Crosby, Jack Hughes, Connor McDavid) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NHL Chunk 2 (High Demand Extras)
-      `("Brad Marchand", "Johnny Gaudreau", "Artemi Panarin", "Mika Zibanejad", "Leon Draisaitl", "Matthew Tkachuk", "Sebastian Aho", "Andrei Svechnikov", "Igor Shesterkin") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+      // NHL Chunk 2 (6-10)
+      `(Nathan MacKinnon, Cale Makar, David Pastrnak, Auston Matthews, Macklin Celebrini) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NHL Chunk 3 (11-15)
+      `(Brad Marchand, Johnny Gaudreau, Artemi Panarin, Mika Zibanejad, Leon Draisaitl) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NHL Chunk 4 (16-19)
+      `(Matthew Tkachuk, Sebastian Aho, Andrei Svechnikov, Igor Shesterkin) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
     ],
     minPrice:     50,
     skipModifiers: true,
@@ -727,14 +769,23 @@ const PLAYLIST_DEFS = {
     categoryId:   "214",
     categoryHint: "Basketball",
     terms: [
-      // NBA Chunk 1 (1-15)
-      `("Stephen Curry", "Luka Doncic", "Jalen Brunson", "Victor Wembanyama", "LeBron James", "Anthony Edwards", "Jayson Tatum", "Shai Gilgeous-Alexander", "Cooper Flagg", "Nikola Jokic", "Kevin Durant", "Tyrese Maxey", "Devin Booker", "Cade Cunningham", "LaMelo Ball") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NBA Chunk 1 (1-5)
+      `(Stephen Curry, Luka Doncic, Jalen Brunson, Victor Wembanyama, LeBron James) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NBA Chunk 2 (Mainstay Stars)
-      `("Giannis Antetokounmpo", "Jaylen Brown", "Kawhi Leonard", "Donovan Mitchell", "Jamal Murray", "Ja Morant", "Zion Williamson", "Paolo Banchero", "Chet Holmgren") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // NBA Chunk 2 (6-10)
+      `(Anthony Edwards, Jayson Tatum, Shai Gilgeous-Alexander, Cooper Flagg, Nikola Jokic) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // NBA Chunk 3 (2026 Draft Class)
-      `("AJ Dybantsa", "Darryn Peterson", "Cameron Boozer", "Caleb Wilson", "Morez Johnson", "Yaxel Lendeborg", "Nicolas Lopez") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+      // NBA Chunk 3 (11-15)
+      `(Kevin Durant, Tyrese Maxey, Devin Booker, Cade Cunningham, LaMelo Ball) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NBA Chunk 4 (16-20)
+      `(Giannis Antetokounmpo, Jaylen Brown, Kawhi Leonard, Donovan Mitchell, Jamal Murray) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NBA Chunk 5 (21-24)
+      `(Ja Morant, Zion Williamson, Paolo Banchero, Chet Holmgren) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NBA Chunk 6 (2026 Draft Class 25-31)
+      `(AJ Dybantsa, Darryn Peterson, Cameron Boozer, Caleb Wilson, Morez Johnson, Yaxel Lendeborg, Nicolas Lopez) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
     ],
     minPrice:     50,
     skipModifiers: true,
@@ -744,17 +795,32 @@ const PLAYLIST_DEFS = {
     categoryId:   "213",
     categoryHint: "Baseball",
     terms: [
-      // MLB Chunk 1 (1-15)
-      `("Shohei Ohtani", "Yoshinobu Yamamoto", "Aaron Judge", "Cal Raleigh", "Mookie Betts", "Nolan Arenado", "Freddie Freeman", "Pete Alonso", "Roman Anthony", "Pete Crow-Armstrong", "Kyle Schwarber", "Kike Hernandez", "Bryce Harper", "Juan Soto", "Vladimir Guerrero") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // MLB Chunk 1 (1-5)
+      `(Shohei Ohtani, Yoshinobu Yamamoto, Aaron Judge, Cal Raleigh, Mookie Betts) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // MLB Chunk 2 (16-25)
-      `("Francisco Lindor", "Ronald Acuna", "Paul Skenes", "Rafael Devers", "Elly De La Cruz", "Jarren Duran", "Manny Machado", "Fernando Tatis", "Jose Altuve", "Mike Trout") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // MLB Chunk 2 (6-10)
+      `(Nolan Arenado, Freddie Freeman, Pete Alonso, Roman Anthony, Pete Crow-Armstrong) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // MLB Chunk 3 (Prospects 26-35)
-      `("Jesus Made", "Konnor Griffin", "JJ Wetherholt", "Kevin McGonigle", "Leo De Vries", "Colt Emerson", "Bryce Eldridge", "Samuel Basallo", "Carson Benge", "Sal Stewart") (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      // MLB Chunk 3 (11-15)
+      `(Kyle Schwarber, Kike Hernandez, Bryce Harper, Juan Soto, Vladimir Guerrero) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
 
-      // MLB Chunk 4 (Prospects 36-45)
-      `("Carter Jensen", "Bubba Chandler", "Trey Yesavage", "Nolan McLean", "Cam Schlittler", "Max Clark", "Josue De Paula", "Kaeden Kent", "Termarr Johnson", "Walker Jenkins") (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+      // MLB Chunk 4 (16-20)
+      `(Francisco Lindor, Ronald Acuna, Paul Skenes, Rafael Devers, Elly De La Cruz) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 5 (21-25)
+      `(Jarren Duran, Manny Machado, Fernando Tatis, Jose Altuve, Mike Trout) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 6 (Prospects 26-30)
+      `(Jesus Made, Konnor Griffin, JJ Wetherholt, Kevin McGonigle, Leo De Vries) (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 7 (Prospects 31-35)
+      `(Colt Emerson, Bryce Eldridge, Samuel Basallo, Carson Benge, Sal Stewart) (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 8 (Prospects 36-40)
+      `(Carter Jensen, Bubba Chandler, Trey Yesavage, Nolan McLean, Cam Schlittler) (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 9 (Prospects 41-45)
+      `(Max Clark, Josue De Paula, Kaeden Kent, Termarr Johnson, Walker Jenkins) (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
     ],
     minPrice:     50,
     skipModifiers: true,
@@ -764,11 +830,17 @@ const PLAYLIST_DEFS = {
     categoryId:   "183050",
     categoryHint: "Pokemon",
     terms: [
-      // Pokémon Chunk 1 (2026 Era & Modern Chases)
-      `("Mega Gengar", "Mega Greninja", "Umbreon ex", "Lillie's Clefairy", "Meowth ex", "Mega Dragonite", "Pikachu ex", "Lillie's Determination", "Boss's Orders", "Mega Dragalge", "Froakie", "Frogadier", "Mega Rayquaza") (psa 10, bgs 9.5, sir, sar, "alt art", "illustration rare") -code -digital -online`,
+      // Pokémon Chunk 1
+      `(Mega Gengar, Mega Greninja, Umbreon ex, Lillie's Clefairy, Meowth ex, Mega Dragonite) (psa 10, bgs 9.5, sir, sar, "alt art", "illustration rare") -code -digital -online`,
 
-      // Pokémon Chunk 2 (Anniversary, Vintage Grails & Legendary Cards)
-      `("Charizard", "Gengar", "Pikachu", "Mewtwo", "Rayquaza", "Umbreon", "Lugia", "Mew", "Blastoise", "Eevee", "Giratina", "Mega Darkrai", "Umbreon VMAX", "Charizard ex") (psa 10, bgs 9.5, "1st edition", shadowless, "gold star", sir, "alt art") -code -digital -online`
+      // Pokémon Chunk 2
+      `(Pikachu ex, Lillie's Determination, Boss's Orders, Mega Dragalge, Froakie, Frogadier, Mega Rayquaza) (psa 10, bgs 9.5, sir, sar, "alt art", "illustration rare") -code -digital -online`,
+
+      // Pokémon Chunk 3
+      `(Charizard, Gengar, Pikachu, Mewtwo, Rayquaza, Umbreon) (psa 10, bgs 9.5, "1st edition", shadowless, "gold star", sir, "alt art") -code -digital -online`,
+
+      // Pokémon Chunk 4
+      `(Lugia, Mew, Blastoise, Eevee, Giratina, Mega Darkrai, Umbreon VMAX, Charizard ex) (psa 10, bgs 9.5, "1st edition", shadowless, "gold star", sir, "alt art") -code -digital -online`
     ],
     minPrice:     40,
     skipModifiers: true,
@@ -868,10 +940,9 @@ app.get("/api/playlist", async (req, res) => {
     let cache = null;
     if (kv) {
       try {
-        cache = await kv.get(`playlist_v5_${playlistId}`, "json");
+        cache = await kv.get(`playlist_v10_${playlistId}`, "json");
       } catch (e) { cache = null; }
     }
-
     // Establish hard Cache validation expiration boundary rules (30 Minutes)
     const CACHE_TTL_LIMIT = 30 * 60 * 1000;
     const isCacheFresh = cache && cache.updated_at && (Date.now() - new Date(cache.updated_at).getTime() < CACHE_TTL_LIMIT);
@@ -984,7 +1055,7 @@ app.get("/api/playlist", async (req, res) => {
           items: items,
           updated_at: new Date().toISOString()
         };
-        await kv.put(`playlist_v5_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
+    await kv.put(`playlist_v10_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
         console.log(`[HIGH-END CACHE WRITE] Successfully updated snapshot table for target: '${playlistId}'`);
       } catch (upsertError) {
         console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError.message);
