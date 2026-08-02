@@ -28,9 +28,9 @@ export async function suggestEntities(q: string, limit = 8): Promise<SearchableE
  * Load the unified card deck for one specific entity.
  *
  * Server flow:
- *  1. Check Supabase entity_card_cache (30-min TTL) — return immediately on hit.
- *  2. On miss: two parallel eBay Browse API calls (endingSoonest auctions + BuyItNow).
- *  3. Merge, deduplicate, write to cache, return.
+ *  1. Check Cloudflare KV cache (30-min TTL) — return immediately on hit.
+ *  2. On miss: two parallel eBay Browse API calls (endingSoonest auctions + BuyItNow bestMatch).
+ *  3. Merge, deduplicate, write to KV, return.
  *
  * The list is UNFILTERED by price/condition so the 30-min cache is reusable
  * for any user's filter settings. Call filterEntityCards() to apply prefs.

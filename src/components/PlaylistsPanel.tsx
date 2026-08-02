@@ -4,10 +4,16 @@ import { motion, AnimatePresence } from "framer-motion";
 
 const PLAYLISTS = [
   {
-    id: "nba-finals-stars",
-    emoji: "🏆",
-    label: "NBA Finals Stars",
-    sub: "Top marquee stars — auctions ending soon",
+    id: "nfl-preseason-preview",
+    emoji: "🏈",
+    label: "NFL Preseason Preview",
+    sub: "Autos, patches & rookies — football cards",
+  },
+  {
+    id: "soccer-kickoff",
+    emoji: "⚽",
+    label: "Soccer Kickoff",
+    sub: "Autos, patches & rookies — soccer cards",
   },
   {
     id: "trending-pokemon",
@@ -19,7 +25,7 @@ const PLAYLISTS = [
     id: "high-end-showcase",
     emoji: "💎",
     label: "High-End Showcase",
-    sub: "Premium graded — $200+ only",
+    sub: "Premium graded — $250+ only",
   },
 ] as const;
 

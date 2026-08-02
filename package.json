@@ -7,7 +7,7 @@
     "dev": "concurrently -n \"API,VITE\" -c \"cyan,green\" \"node server/index.js\" \"vite\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "seed": "node scripts/seed-entities.js"
+    "clean": "rimraf dist"
   },
   "dependencies": {
     "cors": "^2.8.6",

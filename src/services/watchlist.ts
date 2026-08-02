@@ -1,56 +1,41 @@
-import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
+/**
+ * Watchlist persistence — pure localStorage, no backend required.
+ * Key: "cardmatch:watchlist"
+ */
 import type { TradingCard } from "@/data/pokemon";
 
-export type WatchlistRow = {
-  id: number;
-  user_id: string;
-  card_id: string;
-  card: TradingCard;
-  created_at: string;
-};
+const KEY = "cardmatch:watchlist";
 
-export async function fetchWatchlist(): Promise<TradingCard[]> {
-  if (!isSupabaseReady) return [];
-  const { data, error } = await supabase
-    .from("watchlist")
-    .select("card, created_at")
-    .order("created_at", { ascending: false });
-  if (error) {
-    console.warn("[watchlist] fetch failed", error.message);
+function readStore(): TradingCard[] {
+  try {
+    return JSON.parse(localStorage.getItem(KEY) ?? "[]");
+  } catch {
     return [];
   }
-  return (data ?? []).map((r) => r.card as TradingCard);
+}
+
+function writeStore(cards: TradingCard[]): void {
+  localStorage.setItem(KEY, JSON.stringify(cards));
+}
+
+export async function fetchWatchlist(): Promise<TradingCard[]> {
+  return readStore();
 }
 
 export async function addToWatchlist(
-  userId: string,
+  _userId: string,
   card: TradingCard,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!isSupabaseReady) return { ok: false, error: "Supabase not configured" };
-  const { error } = await supabase
-    .from("watchlist")
-    .upsert(
-      { user_id: userId, card_id: card.id, card },
-      { onConflict: "user_id,card_id" },
-    );
-  if (error) {
-    console.warn("[watchlist] add failed", error.message);
-    return { ok: false, error: error.message };
+  const cards = readStore();
+  if (!cards.find((c) => c.id === card.id)) {
+    writeStore([card, ...cards]);
   }
   return { ok: true };
 }
 
-// CHANGED: Added userId to ensure the delete is authorized and sticks in the DB
-export async function removeFromWatchlist(userId: string, cardId: string): Promise<void> {
-  if (!isSupabaseReady) return;
-
-  const { error } = await supabase
-    .from("watchlist")
-    .delete()
-    .eq("user_id", userId)
-    .eq("card_id", cardId);
-
-  if (error) {
-    console.warn("[watchlist] remove failed", error.message);
-  }
+export async function removeFromWatchlist(
+  _userId: string,
+  cardId: string,
+): Promise<void> {
+  writeStore(readStore().filter((c) => c.id !== cardId));
 }

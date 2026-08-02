@@ -633,14 +633,19 @@ app.get("/api/search", async (req, res) => {
 
 // ─── Playlist definitions — individual terms, fetched in parallel ─────────────
 const PLAYLIST_DEFS = {
-  "nba-finals-stars": {
-    terms:        ["Victor Wembanyama", "Jalen Brunson", "Karl-Anthony Towns",
-                   "De'Aaron Fox", "Devin Vassell", "Mikal Bridges",
-                   "Josh Hart", "OG Anunoby", "Stephon Castle", "Dylan Harper"],
-    categoryId:   "261328",
-    categoryHint: "Basketball",
-    perTerm:      12,
-    minPrice:     75,
+  "nfl-preseason-preview": {
+    terms:        ["(auto, patch, rpa, 1/1, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened"],
+    categoryId:   "215",
+    categoryHint: "Football",
+    minPrice:     50,
+    skipModifiers: true,
+  },
+  "soccer-kickoff": {
+    terms:        ["(auto, patch, rpa, 1/1, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened"],
+    categoryId:   "214",
+    categoryHint: "Soccer",
+    minPrice:     50,
+    skipModifiers: true,
   },
   "trending-pokemon": {
     terms:        ["Mega Greninja ex", "Umbreon ex SIR", "Snorlax Legendary",
@@ -659,7 +664,7 @@ const PLAYLIST_DEFS = {
     minPrice:     250,
   },
 };
-....// ─── GET /api/playlist ────────────────────────────────────────────────────────
+// ─── GET /api/playlist ────────────────────────────────────────────────────────
 // ── Core Playlist Data Routing Endpoint ───────────────────────────────────
 app.get("/api/playlist", async (req, res) => {
   try {
@@ -785,28 +790,47 @@ app.get("/api/playlist", async (req, res) => {
       listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
     });
 
-    const { terms, categoryId, categoryHint, perTerm, minPrice } = def;
-    const filterStr = `price:[${minPrice}..],priceCurrency:USD`;
+    const { terms, categoryId, categoryHint, minPrice, skipModifiers } = def;
+    const baseFilterPrice = `price:[${minPrice}..],priceCurrency:USD`;
     const hintCats = categoryHint ? [categoryHint] : [];
 
-    const buckets = await Promise.all(
-      terms.map(async (term) => {
-        try {
-          const fullPremiumTerm = `${term}${premiumLuxuryModifiers}`;
-          const data = await ebaySearch(token, fullPremiumTerm, "bestMatch", filterStr, null, categoryId, perTerm, 0);
-          return (data.itemSummaries || [])
-            .filter((i) => !isSuppliesCategory(i))
-            .map((i) => localMapItem(i, hintCats));
-        } catch (e) {
-          console.warn(`[playlist] term "${term}" failed:`, e.message);
-          return [];
-        }
+    // Dual-format parallel fetch: AUCTION (endingSoonest, 200) + FIXED_PRICE (bestMatch, 200)
+    const allBuckets = await Promise.all(
+      terms.flatMap((term) => {
+        const q = skipModifiers ? term : `${term}${premiumLuxuryModifiers}`;
+        const auctionFilter    = `${baseFilterPrice},buyingOptions:{AUCTION}`;
+        const fixedFilter      = `${baseFilterPrice},buyingOptions:{FIXED_PRICE}`;
+        return [
+          (async () => {
+            try {
+              const data = await ebaySearch(token, q, "endingSoonest", auctionFilter, null, categoryId, 200, 0);
+              return (data.itemSummaries || [])
+                .filter((i) => !isSuppliesCategory(i))
+                .map((i) => localMapItem(i, hintCats));
+            } catch (e) {
+              console.warn(`[playlist] auction term "${term}" failed:`, e.message);
+              return [];
+            }
+          })(),
+          (async () => {
+            try {
+              const data = await ebaySearch(token, q, "bestMatch", fixedFilter, null, categoryId, 200, 0);
+              return (data.itemSummaries || [])
+                .filter((i) => !isSuppliesCategory(i))
+                .map((i) => localMapItem(i, hintCats));
+            } catch (e) {
+              console.warn(`[playlist] fixed term "${term}" failed:`, e.message);
+              return [];
+            }
+          })(),
+        ];
       })
     );
 
-    const maxLen = Math.max(...buckets.map((b) => b.length), 0);
+    // Interleave auction + fixed buckets so both listing types appear throughout the deck
+    const maxLen = Math.max(...allBuckets.map((b) => b.length), 0);
     for (let i = 0; i < maxLen; i++) {
-      for (const bucket of buckets) {
+      for (const bucket of allBuckets) {
         if (i < bucket.length) items.push(bucket[i]);
       }
     }
@@ -816,7 +840,7 @@ app.get("/api/playlist", async (req, res) => {
       if (seen.has(c.id)) return false;
       seen.add(c.id);
       return true;
-    }).slice(0, 100);
+    }).slice(0, 400);
 
     // C. WRITE BACK UPSTREAM: Commit compiled block to persistent KV namespace
     if (items.length > 0 && kv) {

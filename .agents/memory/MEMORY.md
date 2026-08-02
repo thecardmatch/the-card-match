@@ -1,3 +1,2 @@
-- [Entity search cache architecture](entity-cache-arch.md) — dual-mode app: entity search (Supabase-cached, client-filtered) coexists with category browse (broad cache).
-- [Supabase service role key](supabase-srk.md) — server uses SUPABASE_SERVICE_ROLE_KEY for cache writes; app degrades gracefully (direct eBay) if not set.
+- [Cache architecture](cache-arch.md) — all caching is Cloudflare KV only; Supabase fully removed as of Aug 2026.
 - [eBay Browse API OR queries](ebay-or-query.md) — `q` param does NOT support OR keyword; fix is parallel per-term calls merged server-side.

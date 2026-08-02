@@ -1,37 +1,17 @@
-import { useEffect, useState } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
-
+/**
+ * Auth stub — Supabase auth has been removed.
+ * Returns a permanently-null session so components that check `user` work
+ * without errors. Sign-in / sign-up are no-ops.
+ */
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!isSupabaseReady) {
-      setLoading(false);
-      return;
-    }
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
-      setSession(s);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
-
-  const user: User | null = session?.user ?? null;
-
-  async function signUp(email: string, password: string) {
-    return supabase.auth.signUp({ email, password });
-  }
-  async function signIn(email: string, password: string) {
-    return supabase.auth.signInWithPassword({ email, password });
-  }
-  async function signOut() {
-    return supabase.auth.signOut();
-  }
-
-  return { session, user, loading, signUp, signIn, signOut };
+  return {
+    session: null,
+    user: null,
+    loading: false,
+    signUp: async (_email: string, _password: string) =>
+      ({ data: { session: null }, error: null }) as any,
+    signIn: async (_email: string, _password: string) =>
+      ({ data: { session: null }, error: null }) as any,
+    signOut: async () => ({ error: null }) as any,
+  };
 }

@@ -33,11 +33,11 @@ export default function App() {
 
   const seenIds = useRef(new Set<string>());
 
-  // ── Deep-link: ?playlist=finals_2026 → auto-load NBA Finals Stars ─────────
+  // ── Deep-link: ?playlist=nfl → auto-load NFL Preseason Preview ───────────
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
-    if (sp.get("playlist") === "finals_2026") {
-      loadPlaylist("nba-finals-stars", "🏆 NBA Finals Stars");
+    if (sp.get("playlist") === "nfl") {
+      loadPlaylist("nfl-preseason-preview", "🏈 NFL Preseason Preview");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
