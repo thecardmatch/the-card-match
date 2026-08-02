@@ -8,7 +8,6 @@ const SPORTS_PLAYLISTS = [
     id: "nfl-preseason-preview",
     emoji: "🏈",
     label: "NFL Football",
-    sub: "Autos · Patches · Rookies",
     accent: "from-orange-500/20 to-amber-500/10 border-orange-500/30",
     textAccent: "text-orange-400",
   },
@@ -16,7 +15,6 @@ const SPORTS_PLAYLISTS = [
     id: "nba-showcase",
     emoji: "🏀",
     label: "NBA Basketball",
-    sub: "Autos · Patches · Rookies",
     accent: "from-red-500/20 to-orange-400/10 border-red-500/30",
     textAccent: "text-red-400",
   },
@@ -24,7 +22,6 @@ const SPORTS_PLAYLISTS = [
     id: "mlb-showcase",
     emoji: "⚾",
     label: "MLB Baseball",
-    sub: "Autos · Patches · Rookies",
     accent: "from-blue-600/20 to-blue-400/10 border-blue-500/30",
     textAccent: "text-blue-400",
   },
@@ -32,7 +29,6 @@ const SPORTS_PLAYLISTS = [
     id: "nhl-showcase",
     emoji: "🏒",
     label: "NHL Hockey",
-    sub: "Autos · Patches · Rookies",
     accent: "from-cyan-500/20 to-sky-400/10 border-cyan-500/30",
     textAccent: "text-cyan-400",
   },
@@ -40,7 +36,6 @@ const SPORTS_PLAYLISTS = [
     id: "soccer-kickoff",
     emoji: "⚽",
     label: "Soccer / Fútbol",
-    sub: "Autos · Patches · Rookies",
     accent: "from-green-500/20 to-emerald-400/10 border-green-500/30",
     textAccent: "text-green-400",
   },
@@ -102,7 +97,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
             <span className="text-xl shrink-0">{pl.emoji}</span>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-foreground leading-tight">{pl.label}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{pl.sub}</p>
+              {"sub" in pl && <p className="text-[11px] text-muted-foreground truncate">{pl.sub}</p>}
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
           </button>
@@ -238,10 +233,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
               className={`group relative flex flex-col items-start gap-1.5 bg-gradient-to-br ${pl.accent} border rounded-2xl px-4 py-3.5 text-left active:scale-[0.97] transition-transform`}
             >
               <span className="text-2xl leading-none">{pl.emoji}</span>
-              <div>
-                <p className={`font-bold text-sm text-foreground leading-tight`}>{pl.label}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{pl.sub}</p>
-              </div>
+              <p className="font-bold text-sm text-foreground leading-tight">{pl.label}</p>
             </motion.button>
           ))}
         </div>

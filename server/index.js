@@ -632,40 +632,43 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
+// ─── Shared exclusion suffix to strip memorabilia from all card searches ──────
+const CARD_ONLY = "-helmet -pennant -poster -bobblehead -figurine -plaque -jersey -\"signed ball\" -\"game used\" -\"game worn\" -\"cut signature\" -photograph -photo -lithograph -ticket -program";
+
 // ─── Playlist definitions ─────────────────────────────────────────────────────
 const PLAYLIST_DEFS = {
   "nfl-preseason-preview": {
     categoryId:   "215",
     categoryHint: "Football",
-    terms:        ['football NFL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    terms:        [`football NFL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     50,
     skipModifiers: true,
   },
   "soccer-kickoff": {
     categoryId:   "183444",
     categoryHint: "Soccer",
-    terms:        ['soccer (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    terms:        [`soccer (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     50,
     skipModifiers: true,
   },
   "nhl-showcase": {
     categoryId:   "216",
     categoryHint: "Hockey",
-    terms:        ['hockey NHL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    terms:        [`hockey NHL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     50,
     skipModifiers: true,
   },
   "nba-showcase": {
     categoryId:   "214",
     categoryHint: "Basketball",
-    terms:        ['basketball NBA (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    terms:        [`basketball NBA (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     50,
     skipModifiers: true,
   },
   "mlb-showcase": {
     categoryId:   "213",
     categoryHint: "Baseball",
-    terms:        ['baseball MLB (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened'],
+    terms:        [`baseball MLB (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     50,
     skipModifiers: true,
   },
@@ -679,7 +682,7 @@ const PLAYLIST_DEFS = {
   "high-end-showcase": {
     categoryId:   "261328",
     categoryHint: null,
-    terms:        ['(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened'],
+    terms:        [`(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened ${CARD_ONLY}`],
     minPrice:     250,
     skipModifiers: true,
   },
