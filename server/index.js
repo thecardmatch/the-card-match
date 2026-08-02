@@ -803,7 +803,7 @@ app.get("/api/playlist", async (req, res) => {
     let cache = null;
     if (kv) {
       try {
-        cache = await kv.get(`playlist_${playlistId}`, "json");
+        cache = await kv.get(`playlist_v5_${playlistId}`, "json");
       } catch (e) { cache = null; }
     }
 
@@ -919,7 +919,7 @@ app.get("/api/playlist", async (req, res) => {
           items: items,
           updated_at: new Date().toISOString()
         };
-        await kv.put(`playlist_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
+        await kv.put(`playlist_v5_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
         console.log(`[HIGH-END CACHE WRITE] Successfully updated snapshot table for target: '${playlistId}'`);
       } catch (upsertError) {
         console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError.message);
