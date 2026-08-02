@@ -672,49 +672,114 @@ const PLAYLIST_DEFS = {
   "nfl-preseason-preview": {
     categoryId:   "215",
     categoryHint: "Football",
-    terms:        [`football NFL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      // NFL Chunk 1 (1-15)
+      `("Josh Allen" OR "Drake Maye" OR "Saquon Barkley" OR "Jaxon Smith-Njigba" OR "Jayden Daniels" OR "Patrick Mahomes" OR "Jalen Hurts" OR "Caleb Williams" OR "Jordan Love" OR "Micah Parsons" OR "Bo Nix" OR "Christian McCaffrey" OR "Justin Jefferson" OR "Aidan Hutchinson" OR "T.J. Watt") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 2 (16-30)
+      `("Jahmyr Gibbs" OR "Amon-Ra St. Brown" OR "Brock Purdy" OR "Lamar Jackson" OR "C.J. Stroud" OR "CeeDee Lamb" OR "Cooper DeJean" OR "George Kittle" OR "Puka Nacua" OR "Fred Warner" OR "Joe Burrow" OR "Jaxson Dart" OR "Baker Mayfield" OR "Travis Kelce" OR "Maxx Crosby") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 3 (31-40)
+      `("Shedeur Sanders" OR "Justin Herbert" OR "Patrick Surtain" OR "Ashton Jeanty" OR "Cam Skattebo" OR "Jared Goff" OR "Cam Ward" OR "Malik Nabers" OR "Tyreek Hill" OR "Mike Evans") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 4 (41-50)
+      `("Cooper Kupp" OR "Travis Hunter" OR "DK Metcalf" OR "Aaron Rodgers" OR "Ja'Marr Chase" OR "Derrick Henry" OR "Bijan Robinson" OR "Nick Bosa" OR "Sam Darnold" OR "A.J. Brown") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NFL Chunk 5 (2026 Draft Class)
+      `("Caleb Downs" OR "Fernando Mendoza" OR "Jeremiyah Love" OR "Malachi Lawrence" OR "Jacob Rodriguez" OR "Chris Johnson" OR "Caleb Lomu" OR "Drew Allar" OR "Dillon Thieneman" OR "David Bailey") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     50,
     skipModifiers: true,
   },
+
   "soccer-kickoff": {
     categoryId:   "183444",
     categoryHint: "Soccer",
-    terms:        [`soccer (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      // Soccer Chunk 1 (1-14)
+      `("Lionel Messi" OR "Kylian Mbappe" OR "Lamine Yamal" OR "Erling Haaland" OR "Vinicius Jr" OR "Jude Bellingham" OR "Cristiano Ronaldo" OR "Pedri" OR "Rodri" OR "Ousmane Dembele" OR "Jamal Musiala" OR "Bukayo Saka" OR "Florian Wirtz" OR "Kevin De Bruyne") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 2 (Breakouts 15-23)
+      `("Johan Manzambi" OR "Ismael Saibari" OR "Ayyoub Bouaddi" OR "Vozinha" OR "Andreas Schjelderup" OR "Alex Freeman" OR "Deniz Undav" OR "Michael Olise" OR "Julio Enciso") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // Soccer Chunk 3 (Club & Jersey Mainstays)
+      `("Achraf Hakimi" OR "Hakim Ziyech" OR "Neymar" OR "Marcus Rashford" OR "Declan Rice" OR "Gavi" OR "Nico Williams" OR "Federico Valverde" OR "Alexander Isak" OR "Victor Osimhen" OR "Jules Kounde" OR "Ousmane Demba" OR "Cole Palmer") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     50,
     skipModifiers: true,
   },
+
   "nhl-showcase": {
     categoryId:   "216",
     categoryHint: "Hockey",
-    terms:        [`hockey NHL (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      // NHL Chunk 1 (1-10)
+      `("Connor Bedard" OR "Alex Ovechkin" OR "Sidney Crosby" OR "Jack Hughes" OR "Connor McDavid" OR "Nathan MacKinnon" OR "Cale Makar" OR "David Pastrnak" OR "Auston Matthews" OR "Macklin Celebrini") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NHL Chunk 2 (High Demand Extras)
+      `("Brad Marchand" OR "Johnny Gaudreau" OR "Artemi Panarin" OR "Mika Zibanejad" OR "Leon Draisaitl" OR "Matthew Tkachuk" OR "Sebastian Aho" OR "Andrei Svechnikov" OR "Igor Shesterkin") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     50,
     skipModifiers: true,
   },
+
   "nba-showcase": {
     categoryId:   "214",
     categoryHint: "Basketball",
-    terms:        [`basketball NBA (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      // NBA Chunk 1 (1-15)
+      `("Stephen Curry" OR "Luka Doncic" OR "Jalen Brunson" OR "Victor Wembanyama" OR "LeBron James" OR "Anthony Edwards" OR "Jayson Tatum" OR "Shai Gilgeous-Alexander" OR "Cooper Flagg" OR "Nikola Jokic" OR "Kevin Durant" OR "Tyrese Maxey" OR "Devin Booker" OR "Cade Cunningham" OR "LaMelo Ball") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NBA Chunk 2 (Mainstay Stars)
+      `("Giannis Antetokounmpo" OR "Jaylen Brown" OR "Kawhi Leonard" OR "Donovan Mitchell" OR "Jamal Murray" OR "Ja Morant" OR "Zion Williamson" OR "Paolo Banchero" OR "Chet Holmgren") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // NBA Chunk 3 (2026 Draft Class)
+      `("AJ Dybantsa" OR "Darryn Peterson" OR "Cameron Boozer" OR "Caleb Wilson" OR "Morez Johnson" OR "Yaxel Lendeborg" OR "Nicolas Lopez") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     50,
     skipModifiers: true,
   },
+
   "mlb-showcase": {
     categoryId:   "213",
     categoryHint: "Baseball",
-    terms:        [`baseball MLB (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      // MLB Chunk 1 (1-15)
+      `("Shohei Ohtani" OR "Yoshinobu Yamamoto" OR "Aaron Judge" OR "Cal Raleigh" OR "Mookie Betts" OR "Nolan Arenado" OR "Freddie Freeman" OR "Pete Alonso" OR "Roman Anthony" OR "Pete Crow-Armstrong" OR "Kyle Schwarber" OR "Kike Hernandez" OR "Bryce Harper" OR "Juan Soto" OR "Vladimir Guerrero") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 2 (16-25)
+      `("Francisco Lindor" OR "Ronald Acuna" OR "Paul Skenes" OR "Rafael Devers" OR "Elly De La Cruz" OR "Jarren Duran" OR "Manny Machado" OR "Fernando Tatis" OR "Jose Altuve" OR "Mike Trout") (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 3 (Prospects 26-35)
+      `("Jesus Made" OR "Konnor Griffin" OR "JJ Wetherholt" OR "Kevin McGonigle" OR "Leo De Vries" OR "Colt Emerson" OR "Bryce Eldridge" OR "Samuel Basallo" OR "Carson Benge" OR "Sal Stewart") (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+
+      // MLB Chunk 4 (Prospects 36-45)
+      `("Carter Jensen" OR "Bubba Chandler" OR "Trey Yesavage" OR "Nolan McLean" OR "Cam Schlittler" OR "Max Clark" OR "Josue De Paula" OR "Kaeden Kent" OR "Termarr Johnson" OR "Walker Jenkins") (auto, patch, rpa, "1/1", "1st", bowman, /10, /25, /99, psa 10, psa 9, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     50,
     skipModifiers: true,
   },
+
   "trending-pokemon": {
     categoryId:   "183050",
     categoryHint: "Pokemon",
-    terms:        ['pokemon (psa 10, bgs 9.5, sir, "alt art", "1st edition", shadowless, gold star, sar, illustration) -code -digital -online'],
+    terms: [
+      // Pokémon Chunk 1 (2026 Era & Modern Chases)
+      '("Mega Gengar" OR "Mega Greninja" OR "Umbreon ex" OR "Lillie\'s Clefairy" OR "Meowth ex" OR "Mega Dragonite" OR "Pikachu ex" OR "Lillie\'s Determination" OR "Boss\'s Orders" OR "Mega Dragalge" OR "Froakie" OR "Frogadier" OR "Mega Rayquaza") (psa 10, bgs 9.5, sir, sar, "alt art", "illustration rare") -code -digital -online',
+
+      // Pokémon Chunk 2 (Anniversary, Vintage Grails & Legendary Cards)
+      '("Charizard" OR "Gengar" OR "Pikachu" OR "Mewtwo" OR "Rayquaza" OR "Umbreon" OR "Lugia" OR "Mew" OR "Blastoise" OR "Eevee" OR "Giratina" OR "Mega Darkrai" OR "Umbreon VMAX" OR "Charizard ex") (psa 10, bgs 9.5, "1st edition", shadowless, "gold star", sir, "alt art") -code -digital -online'
+    ],
     minPrice:     40,
     skipModifiers: true,
   },
+
   "high-end-showcase": {
     categoryId:   "261328",
     categoryHint: null,
-    terms:        [`(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened ${CARD_ONLY}`],
+    terms: [
+      `(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened ${CARD_ONLY}`
+    ],
     minPrice:     250,
     skipModifiers: true,
   },
