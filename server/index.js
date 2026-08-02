@@ -423,25 +423,53 @@ function mapItem(item, selectedCats) {
   const itemCategoryIds = (item.categories || []).map((c) => String(c.categoryId));
   const bidValue       = parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0;
 
+  const watchCount = item.watchCount || 0;
+  const bidCount   = item.bidCount   || 0;
+
   return {
-    id:          item.itemId,
-    name:        item.title || "Unknown Card",
-    category:    detectCategory(item.title || "", selectedCats, itemCategoryIds),
-    image:       primaryImg,
-    images:      allImages,
-    currentBid:  bidValue,
-    currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-    grade:       detectGrade(item.title || ""),
-    ebayUrl:     buildAffiliateUrl(item),
-    endTime:     item.itemEndDate || null,
-    watchCount:  item.watchCount || 0,
-    condition:   item.condition || "",
+    id:              item.itemId,
+    name:            item.title || "Unknown Card",
+    category:        detectCategory(item.title || "", selectedCats, itemCategoryIds),
+    image:           primaryImg,
+    images:          allImages,
+    currentBid:      bidValue,
+    currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+    grade:           detectGrade(item.title || ""),
+    ebayUrl:         buildAffiliateUrl(item),
+    endTime:         item.itemEndDate || null,
+    watchCount,
+    bidCount,
+    engagementScore: (watchCount * 2) + (bidCount * 3),
+    condition:       item.condition || "",
     listingType,
   };
 }
 
 function isSuppliesCategory(item) {
   return (item.categories || []).some((c) => String(c.categoryId) === "183444" || String(c.categoryId) === "550");
+}
+
+// ─── Engagement helpers ───────────────────────────────────────────────────────
+/**
+ * Split a mapped card array into engaged vs cold, return engaged-first.
+ * Auction: keep if bidCount > 0 OR watchCount > 0
+ * BIN:     keep if watchCount > 0
+ * Safety:  if engaged count < minCount, append cold items at the end.
+ */
+function applyEngagementFilter(cards, minCount = 30) {
+  const engaged = cards.filter((c) =>
+    c.listingType === "Auction"
+      ? c.bidCount > 0 || c.watchCount > 0
+      : c.watchCount > 0
+  );
+  if (engaged.length >= minCount) return engaged;
+  const engagedIds = new Set(engaged.map((c) => c.id));
+  const cold = cards.filter((c) => !engagedIds.has(c.id));
+  return [...engaged, ...cold];
+}
+
+function sortByEngagement(cards) {
+  return [...cards].sort((a, b) => (b.engagementScore || 0) - (a.engagementScore || 0));
 }
 
 const SORT_MAP = {
@@ -592,19 +620,23 @@ app.get("/api/search", async (req, res) => {
       const buyingOptions   = item.buyingOptions || [];
       const listingType    = buyingOptions.includes("AUCTION") ? "Auction" : "Buy It Now";
 
+      const watchCount = item.watchCount || 0;
+      const bidCount   = item.bidCount   || 0;
       return {
-        id:          item.itemId,
-        name:        item.title || "Unknown Card",
-        category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
-        image:       primaryImg,
-        images:      allImages,
-        currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
-        currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-        grade:       detectGrade(item.title || ""),
-        ebayUrl:     buildAffiliateUrl(item),
-        endTime:     item.itemEndDate || null,
-        watchCount:  item.watchCount || 0,
-        condition:   item.condition || "",
+        id:              item.itemId,
+        name:            item.title || "Unknown Card",
+        category:        detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+        image:           primaryImg,
+        images:          allImages,
+        currentBid:      parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+        currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+        grade:           detectGrade(item.title || ""),
+        ebayUrl:         buildAffiliateUrl(item),
+        endTime:         item.itemEndDate || null,
+        watchCount,
+        bidCount,
+        engagementScore: (watchCount * 2) + (bidCount * 3),
+        condition:       item.condition || "",
         listingType,
       };
     };
@@ -620,7 +652,7 @@ app.get("/api/search", async (req, res) => {
 
     const auctionIds = new Set(auctions.map((i) => i.id));
     const uniqueBin  = bin.filter((i) => !auctionIds.has(i.id));
-    const merged     = [...auctions, ...uniqueBin];
+    const merged     = sortByEngagement(applyEngagementFilter([...auctions, ...uniqueBin]));
 
     // Force write clean data back to cache
     if (merged.length > 0) {
@@ -729,26 +761,33 @@ app.get("/api/playlist", async (req, res) => {
         } catch (e) { return url; }
       };
 
-      const localMapItem = (item) => ({
-        id:          item.itemId,
-        name:        item.title || "Unknown Card",
-        category:    detectCategory(item.title || "", [], (item.categories || []).map((c) => String(c.categoryId))),
-        image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
-        images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
-        currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
-        currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-        grade:       detectGrade(item.title || ""),
-        ebayUrl:     buildAffiliateUrl(item),
-        endTime:     item.itemEndDate || null,
-        watchCount:  item.watchCount || 0,
-        condition:   item.condition || "",
-        listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
-      });
+      const localMapItem = (item) => {
+        const watchCount = item.watchCount || 0;
+        const bidCount   = item.bidCount   || 0;
+        return {
+          id:              item.itemId,
+          name:            item.title || "Unknown Card",
+          category:        detectCategory(item.title || "", [], (item.categories || []).map((c) => String(c.categoryId))),
+          image:           forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+          images:          (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
+          currentBid:      parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+          currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+          grade:           detectGrade(item.title || ""),
+          ebayUrl:         buildAffiliateUrl(item),
+          endTime:         item.itemEndDate || null,
+          watchCount,
+          bidCount,
+          engagementScore: (watchCount * 2) + (bidCount * 3),
+          condition:       item.condition || "",
+          listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+        };
+      };
 
       const data = await ebaySearch(token, q, sortVal, filterStr, null, null, 100, 0);
-      const customItems = (data.itemSummaries || [])
+      const rawItems = (data.itemSummaries || [])
         .filter((i) => !isSuppliesCategory(i))
         .map((i) => localMapItem(i));
+      const customItems = sortByEngagement(applyEngagementFilter(rawItems));
 
       return res.json({ items: customItems, fromCache: false });
     }
@@ -797,21 +836,27 @@ app.get("/api/playlist", async (req, res) => {
       } catch (e) { return url; }
     };
 
-    const localMapItem = (item, selectedCats) => ({
-      id:          item.itemId,
-      name:        item.title || "Unknown Card",
-      category:    detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
-      image:       forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
-      images:      (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
-      currentBid:  parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
-      currency:    item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-      grade:       detectGrade(item.title || ""),
-      ebayUrl:     buildAffiliateUrl(item),
-      endTime:     item.itemEndDate || null,
-      watchCount:  item.watchCount || 0,
-      condition:   item.condition || "",
-      listingType: (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
-    });
+    const localMapItem = (item, selectedCats) => {
+      const watchCount = item.watchCount || 0;
+      const bidCount   = item.bidCount   || 0;
+      return {
+        id:              item.itemId,
+        name:            item.title || "Unknown Card",
+        category:        detectCategory(item.title || "", selectedCats, (item.categories || []).map((c) => String(c.categoryId))),
+        image:           forceMaximumHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+        images:          (item.additionalImages || []).map((i) => forceMaximumHD(i.imageUrl)).filter(Boolean),
+        currentBid:      parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+        currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+        grade:           detectGrade(item.title || ""),
+        ebayUrl:         buildAffiliateUrl(item),
+        endTime:         item.itemEndDate || null,
+        watchCount,
+        bidCount,
+        engagementScore: (watchCount * 2) + (bidCount * 3),
+        condition:       item.condition || "",
+        listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+      };
+    };
 
     const { terms, categoryId, categoryHint, minPrice, skipModifiers } = def;
     const baseFilterPrice = `price:[${minPrice}..],priceCurrency:USD`;
@@ -863,7 +908,9 @@ app.get("/api/playlist", async (req, res) => {
       if (seen.has(c.id)) return false;
       seen.add(c.id);
       return true;
-    }).slice(0, 400);
+    });
+
+    items = sortByEngagement(applyEngagementFilter(items)).slice(0, 400);
 
     // C. WRITE BACK UPSTREAM: Commit compiled block to persistent KV namespace
     if (items.length > 0 && kv) {
