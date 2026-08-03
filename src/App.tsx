@@ -116,7 +116,39 @@ export default function App() {
   }
 
   // On mount: if we already have prefs, load feed
+  // Also handle Google OAuth redirect callback (?auth_success=1)
   useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+
+    if (sp.get("auth_success") === "1") {
+      // OAuth returned — store user info and complete onboarding
+      const email   = sp.get("email")   || "";
+      const name    = sp.get("name")    || "";
+      const picture = sp.get("picture") || "";
+      if (email) localStorage.setItem("cardmatch:user", JSON.stringify({ email, name, picture }));
+
+      // Grab swipes that were saved before the OAuth redirect
+      const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
+      const pendingSwipes = pendingRaw ? JSON.parse(pendingRaw) : [];
+      localStorage.removeItem("cardmatch:pending_swipes");
+
+      // Clean URL without reload
+      window.history.replaceState({}, "", window.location.pathname);
+
+      handleOnboardingComplete(pendingSwipes);
+      return;
+    }
+
+    if (sp.get("auth_error")) {
+      // OAuth failed or not configured — clear URL and let user continue
+      const errCode = sp.get("auth_error") || "";
+      console.warn("[auth] OAuth error:", errCode);
+      window.history.replaceState({}, "", window.location.pathname);
+      // If onboarding was already done, still proceed to feed
+      if (localStorage.getItem(ONBOARDING_KEY)) loadFeed(false);
+      return;
+    }
+
     if (appMode === "feed-loading") loadFeed(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

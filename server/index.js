@@ -1521,6 +1521,68 @@ app.get("/api/ebay/search", async (req, res) => {
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, cacheEnabled: !!getKV() }));
 
+// ─── Google OAuth ─────────────────────────────────────────────────────────────
+app.get("/api/auth/google/init", (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    // Not configured — redirect back to app with a clear error flag
+    return res.redirect("/?auth_error=google_not_configured");
+  }
+  const proto       = req.headers["x-forwarded-proto"] || req.protocol;
+  const host        = req.headers["x-forwarded-host"]  || req.get("host");
+  const redirectUri = `${proto}://${host}/api/auth/google/callback`;
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id",     clientId);
+  url.searchParams.set("redirect_uri",  redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope",         "openid email profile");
+  url.searchParams.set("access_type",   "offline");
+  url.searchParams.set("prompt",        "select_account");
+  return res.redirect(url.toString());
+});
+
+app.get("/api/auth/google/callback", async (req, res) => {
+  const { code, error } = req.query;
+  if (error || !code) {
+    return res.redirect(`/?auth_error=${encodeURIComponent(error || "no_code")}`);
+  }
+  try {
+    const clientId     = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const proto        = req.headers["x-forwarded-proto"] || req.protocol;
+    const host         = req.headers["x-forwarded-host"]  || req.get("host");
+    const redirectUri  = `${proto}://${host}/api/auth/google/callback`;
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    new URLSearchParams({
+        code, client_id: clientId, client_secret: clientSecret,
+        redirect_uri: redirectUri, grant_type: "authorization_code",
+      }),
+    });
+    const tokens = await tokenRes.json();
+    if (tokens.error) throw new Error(tokens.error);
+
+    const userRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    const user = await userRes.json();
+
+    const params = new URLSearchParams({
+      auth_success: "1",
+      provider:     "google",
+      email:        user.email   || "",
+      name:         user.name    || "",
+      picture:      user.picture || "",
+    });
+    return res.redirect(`/?${params}`);
+  } catch (err) {
+    console.error("[auth/google/callback]", err.message);
+    return res.redirect(`/?auth_error=${encodeURIComponent(err.message)}`);
+  }
+});
+
 // ── Production: serve built React app + SPA catch-all ─────────────────────
 const distPath = path.join(__dirname, "..", "dist");
 if (existsSync(distPath)) {

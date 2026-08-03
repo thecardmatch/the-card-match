@@ -37,8 +37,10 @@ type Props = {
 // ── Auth modal sub-component ──────────────────────────────────────────────────
 function AuthModal({
   onDone,
+  pendingSwipes,
 }: {
   onDone: (swipesPassedThrough?: SwipeRecord[]) => void;
+  pendingSwipes: SwipeRecord[];
 }) {
   const [email, setEmail] = useState("");
   const [magicSent, setMagicSent] = useState(false);
@@ -48,18 +50,19 @@ function AuthModal({
     e.preventDefault();
     if (!email.trim()) return;
     setBusy(true);
-    // No Supabase — show the confirmation UI then let the user continue
     await new Promise((r) => setTimeout(r, 800));
     setMagicSent(true);
     setBusy(false);
   }
 
   function handleOAuth(provider: "google" | "apple") {
-    // Supabase auth removed — graceful no-op with brief visual feedback
-    const btn = document.getElementById(`oauth-${provider}`);
-    if (btn) {
-      btn.textContent = "Connecting…";
-      setTimeout(() => onDone(), 1200);
+    // Persist swipes so the OAuth redirect callback can complete the flow
+    localStorage.setItem("cardmatch:pending_swipes", JSON.stringify(pendingSwipes));
+    if (provider === "google") {
+      window.location.href = "/api/auth/google/init";
+    } else {
+      // Apple OAuth — requires Apple Developer credentials; skip for now
+      onDone();
     }
   }
 
@@ -416,7 +419,7 @@ export function OnboardingQuiz({ onComplete }: Props) {
       {/* ── Auth modal ───────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {phase === "auth" && (
-          <AuthModal onDone={handleAuthDone} />
+          <AuthModal onDone={handleAuthDone} pendingSwipes={swipes} />
         )}
       </AnimatePresence>
     </div>
