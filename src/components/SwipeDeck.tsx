@@ -7,13 +7,14 @@ import type { TradingCard } from "@/data/pokemon";
 type Props = {
   cards: TradingCard[];
   onLike: (card: TradingCard) => void;
+  onPass?: (card: TradingCard) => void;
   onBuy: (card: TradingCard) => void;
   onNeedMore: () => void;
   isLoadingMore: boolean;
   resetKey: number;
 };
 
-export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, resetKey }: Props) {
+export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingMore, resetKey }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => setCurrentIndex(0), [resetKey]);
@@ -26,6 +27,7 @@ export function SwipeDeck({ cards, onLike, onBuy, onNeedMore, isLoadingMore, res
     const card = cards[currentIndex];
     if (!card) return;
     if (direction === "right") onLike(card);
+    if (direction === "left")  onPass?.(card);
     if (direction === "up")    onBuy(card);
     setCurrentIndex((prev) => prev + 1);
   };

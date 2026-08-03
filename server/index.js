@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -856,6 +856,320 @@ const PLAYLIST_DEFS = {
     skipModifiers: true,
   },
 };
+// ─── GET /api/onboarding — serve 20 static onboarding cards ─────────────────
+app.get("/api/onboarding", (_req, res) => {
+  try {
+    const raw = JSON.parse(
+      readFileSync(path.join(__dirname, "onboarding-cards.json"), "utf8")
+    );
+    const items = raw.map((c) => ({
+      id:              c.id,
+      name:            c.name,
+      category:        c.category,
+      image:           c.image,
+      images:          [],
+      currentBid:      c.current_bid ?? 0,
+      currency:        "USD",
+      grade:           c.grade || "Raw",
+      ebayUrl:         `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(c.name)}`,
+      endTime:         null,
+      listingType:     c.listing_type === "Auction" ? "Auction" : "Buy It Now",
+      watchCount:      0,
+      bidCount:        0,
+      engagementScore: 0,
+      condition:       c.grade || "",
+      playerName:      c.player_name || "",
+      attributes:      c.attributes || {},
+    }));
+    return res.json({ items });
+  } catch (err) {
+    console.error("[onboarding] failed to read cards:", err.message);
+    return res.status(500).json({ error: "Could not load onboarding cards", items: [] });
+  }
+});
+
+// ─── Category → eBay search config (used by /api/onboarding/complete + /api/feed) ──
+const CATEGORY_FEED_CONFIG = {
+  Football: {
+    categoryId: "217",
+    terms: [
+      `(Patrick Mahomes, Jalen Hurts, C.J. Stroud, Lamar Jackson, Brock Purdy) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(CeeDee Lamb, Justin Jefferson, Ja'Marr Chase, Saquon Barkley, Travis Kelce) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cam Ward, Shedeur Sanders, Travis Hunter, Ashton Jeanty, Jaxson Dart) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Basketball: {
+    categoryId: "214",
+    terms: [
+      `(Victor Wembanyama, LeBron James, Stephen Curry, Luka Doncic, Giannis Antetokounmpo) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Zion Williamson, Jayson Tatum, Kevin Durant, Nikola Jokic, Anthony Edwards) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cooper Flagg, Ace Bailey, Dylan Harper, Tre Johnson, VJ Edgecombe) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Baseball: {
+    categoryId: "213",
+    terms: [
+      `(Shohei Ohtani, Aaron Judge, Juan Soto, Fernando Tatis, Vladimir Guerrero) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Paul Skenes, Roman Anthony, Elly De La Cruz, Jackson Holliday, Pete Crow-Armstrong) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Hockey: {
+    categoryId: "216",
+    terms: [
+      `(Connor Bedard, Connor McDavid, Alex Ovechkin, Sidney Crosby, Nathan MacKinnon) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Macklin Celebrini, Matvei Michkov, Cale Makar, David Pastrnak, Auston Matthews) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Soccer: {
+    categoryId: "183444",
+    terms: [
+      `(Lionel Messi, Kylian Mbappe, Erling Haaland, Lamine Yamal, Jude Bellingham) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cristiano Ronaldo, Vinicius Jr, Pedri, Bukayo Saka, Florian Wirtz) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Pokemon: {
+    categoryId: "183050",
+    terms: [
+      `(Charizard, Pikachu, Umbreon, Mewtwo, Eevee) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration", "gold star") -sealed -booster -pack`,
+      `(Gengar, Lugia, Rayquaza, Blastoise, Venusaur) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration") -sealed -booster -pack`,
+    ],
+    minPrice: 30,
+  },
+  MTG: {
+    categoryId: "19107",
+    terms: [
+      `("Black Lotus", "Force of Will", "The One Ring", "Ragavan", "Bowmasters") (psa, bgs, cgc, foil, borderless) -sealed -booster -lot`,
+      `("Sheoldred", "Orcish Bowmasters", "Ulamog", "Mox", "Dual Land") (foil, showcase, psa, bgs) -sealed -booster -lot`,
+    ],
+    minPrice: 50,
+  },
+  Racing: {
+    categoryId: "217",
+    terms: [
+      `(Lewis Hamilton, Max Verstappen, Charles Leclerc, Lando Norris, Fernando Alonso) (auto, patch, "1/1", /10, /25, /99, psa 10, bgs 9.5, topps, f1) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  PopCulture: {
+    categoryId: "182035",
+    terms: [
+      `(Spider-Man, Batman, "Iron Man", "Mickey Mouse", "Star Wars") (psa 10, psa 9, bgs 9.5, auto, "1/1", /10) -sealed -lot`,
+    ],
+    minPrice: 50,
+  },
+};
+
+// Shared HD image normalizer (mirrored from playlist handler)
+function forceHD(url) {
+  if (!url || typeof url !== "string") return url || "";
+  try {
+    let u = url.split("?")[0];
+    if (u.includes("/thumbs/")) u = u.replace("/thumbs/", "/");
+    if (/s-l\d+/i.test(u)) u = u.replace(/s-l\d+/i, "s-l600");
+    else if (/\$_\d+/i.test(u)) u = u.replace(/\$_\d+/i, "$_57");
+    return u;
+  } catch { return url; }
+}
+
+// Shared item mapper for feed endpoints
+function mapFeedItem(item, catHints = []) {
+  const watchCount = item.watchCount || 0;
+  const bidCount   = item.bidCount   || 0;
+  return {
+    id:              item.itemId,
+    name:            item.title || "Unknown Card",
+    category:        detectCategory(item.title || "", catHints, (item.categories || []).map((c) => String(c.categoryId))),
+    image:           forceHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+    images:          (item.additionalImages || []).map((i) => forceHD(i.imageUrl)).filter(Boolean),
+    currentBid:      parseFloat(item.currentBidPrice?.value ?? "") || parseFloat(item.price?.value ?? "") || 0,
+    currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+    grade:           detectGrade(item.title || ""),
+    ebayUrl:         buildAffiliateUrl(item),
+    endTime:         item.itemEndDate || null,
+    watchCount,
+    bidCount,
+    engagementScore: (watchCount * 2) + (bidCount * 3),
+    condition:       item.condition || "",
+    listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+  };
+}
+
+// ─── POST /api/onboarding/complete ────────────────────────────────────────────
+app.post("/api/onboarding/complete", async (req, res) => {
+  try {
+    const { onboardingSwipes = [] } = req.body ?? {};
+
+    // 1. Compute preference scores
+    const categoryScores = {};
+    const eraScores      = {};
+    const styleScores    = {};
+
+    for (const s of onboardingSwipes) {
+      const delta = s.action === "LIKE" ? 1 : -1;
+      categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
+      const era   = s.attributes?.era;
+      const style = s.attributes?.style;
+      if (era)   eraScores[era]     = (eraScores[era]     || 0) + delta;
+      if (style) styleScores[style] = (styleScores[style] || 0) + delta;
+    }
+
+    // 2. Determine top 3 categories (for variety)
+    const topCategories = Object.entries(categoryScores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([cat]) => cat);
+
+    const preferences = { categoryScores, eraScores, styleScores, topCategories };
+    console.log(`[onboarding/complete] prefs:`, preferences);
+
+    // 3. Fetch ~40 live eBay cards for top 2 categories
+    const token = await getEbayToken();
+    const allItems = [];
+
+    for (const cat of topCategories.slice(0, 2)) {
+      const cfg = CATEGORY_FEED_CONFIG[cat];
+      if (!cfg) continue;
+      const { terms, categoryId, minPrice } = cfg;
+      const priceFilter = `price:[${minPrice}..],priceCurrency:USD`;
+
+      for (const term of terms.slice(0, 2)) {
+        try {
+          const [auctData, binData] = await Promise.all([
+            ebaySearch(token, term, "endingSoonest", `${priceFilter},buyingOptions:{AUCTION}`,    null, categoryId, 30, 0),
+            ebaySearch(token, term, "bestMatch",     `${priceFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0),
+          ]);
+          const mapped = [
+            ...(auctData.itemSummaries || []),
+            ...(binData.itemSummaries  || []),
+          ].filter((i) => !isSuppliesCategory(i)).map((i) => mapFeedItem(i, [cat]));
+          allItems.push(...mapped);
+        } catch (e) {
+          console.warn(`[onboarding/complete] fetch failed for ${cat}:`, e.message);
+        }
+      }
+    }
+
+    // 4. Deduplicate, score, sort
+    const seen = new Set();
+    const now  = Date.now();
+    const unique = allItems.filter((i) => {
+      if (seen.has(i.id)) return false;
+      seen.add(i.id);
+      return true;
+    });
+
+    const scored = unique.map((item) => {
+      let urgency = 1;
+      if (item.endTime) {
+        const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
+        if (hrs > 0 && hrs < 2)  urgency = 3;
+        else if (hrs < 12)        urgency = 2;
+      }
+      const catScore = categoryScores[item.category] ?? 0;
+      return { ...item, rankScore: (item.engagementScore + Math.max(catScore, 0) * 5) * urgency };
+    });
+
+    scored.sort((a, b) => b.rankScore - a.rankScore);
+    const cards = scored.slice(0, 40);
+
+    return res.json({ preferences, cards });
+  } catch (err) {
+    console.error("[onboarding/complete]", err.message);
+    return res.status(500).json({ preferences: null, cards: [], error: err.message });
+  }
+});
+
+// ─── GET /api/feed — personalized ranked card feed ───────────────────────────
+app.get("/api/feed", async (req, res) => {
+  try {
+    const {
+      cats  = "",
+      seen  = "",
+      count = "20",
+      scores = "",
+    } = req.query;
+
+    const categories  = cats ? cats.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    const seenSet     = new Set(seen ? seen.split(",").filter(Boolean) : []);
+    const returnCount = Math.min(parseInt(count) || 20, 40);
+
+    // Parse optional per-category score weights (format: "Football:3,Basketball:1")
+    const catScores = {};
+    if (scores) {
+      for (const part of scores.split(",")) {
+        const [cat, val] = part.split(":");
+        if (cat && val) catScores[cat.trim()] = parseFloat(val) || 0;
+      }
+    }
+
+    if (categories.length === 0) return res.json({ items: [] });
+
+    const token = await getEbayToken();
+    const allItems = [];
+
+    // Fetch from top 2 categories in parallel (first cat gets more slots)
+    const fetchPairs = categories.slice(0, 2).flatMap((cat, idx) => {
+      const cfg = CATEGORY_FEED_CONFIG[cat];
+      if (!cfg) return [];
+      const { terms, categoryId, minPrice } = cfg;
+      const priceFilter = `price:[${minPrice}..],priceCurrency:USD`;
+      // More terms for the #1 category
+      const termSlice = terms.slice(0, idx === 0 ? 2 : 1);
+      return termSlice.map((term) => ({ cat, term, categoryId, priceFilter }));
+    });
+
+    await Promise.all(
+      fetchPairs.map(async ({ cat, term, categoryId, priceFilter }) => {
+        try {
+          const [auctData, binData] = await Promise.all([
+            ebaySearch(token, term, "endingSoonest", `${priceFilter},buyingOptions:{AUCTION}`,    null, categoryId, 40, 0),
+            ebaySearch(token, term, "bestMatch",     `${priceFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0),
+          ]);
+          const mapped = [
+            ...(auctData.itemSummaries || []),
+            ...(binData.itemSummaries  || []),
+          ].filter((i) => !isSuppliesCategory(i)).map((i) => mapFeedItem(i, [cat]));
+          allItems.push(...mapped);
+        } catch (e) {
+          console.warn(`[feed] fetch failed for ${cat}:`, e.message);
+        }
+      })
+    );
+
+    // Deduplicate and filter seen
+    const unique = new Set();
+    const fresh  = allItems.filter((i) => {
+      if (seenSet.has(i.id) || unique.has(i.id)) return false;
+      unique.add(i.id);
+      return true;
+    });
+
+    // Apply urgency multiplier + preference weighting
+    const now = Date.now();
+    const scored = fresh.map((item) => {
+      let urgency = 1;
+      if (item.endTime) {
+        const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
+        if (hrs > 0 && hrs < 2)  urgency = 3;
+        else if (hrs >= 2 && hrs < 12) urgency = 2;
+      }
+      const prefBoost = Math.max(catScores[item.category] ?? 0, 0) * 5;
+      return { ...item, rankScore: (item.engagementScore + prefBoost) * urgency };
+    });
+
+    scored.sort((a, b) => b.rankScore - a.rankScore);
+    return res.json({ items: scored.slice(0, returnCount) });
+  } catch (err) {
+    console.error("[feed]", err.message);
+    return res.status(500).json({ items: [], error: err.message });
+  }
+});
+
 // ─── GET /api/playlist ────────────────────────────────────────────────────────
 // ── Core Playlist Data Routing Endpoint ───────────────────────────────────
 app.get("/api/playlist", async (req, res) => {

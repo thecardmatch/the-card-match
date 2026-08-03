@@ -1,356 +1,345 @@
 import { useCallback, useRef, useState, useEffect } from "react";
-import { Search, Heart, LayoutList, X } from "lucide-react";
+import { Heart } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Sidebar } from "@/components/Sidebar";
-import { SwipeDeck } from "@/components/SwipeDeck";
-import { PlaylistsPanel } from "@/components/PlaylistsPanel";
+import { Sidebar }        from "@/components/Sidebar";
+import { SwipeDeck }      from "@/components/SwipeDeck";
+import { OnboardingQuiz } from "@/components/OnboardingQuiz";
 import type { TradingCard } from "@/data/pokemon";
 
-const WATCHLIST_KEY = "cardmatch:watchlist";
+// ── Storage keys ──────────────────────────────────────────────────────────────
+const WATCHLIST_KEY  = "cardmatch:watchlist";
+const ONBOARDING_KEY = "cardmatch:onboarding_done";
+const PREFS_KEY      = "cardmatch:preferences";
 
+// ── Preference shape ──────────────────────────────────────────────────────────
+type Preferences = {
+  categoryScores: Record<string, number>;
+  eraScores:      Record<string, number>;
+  styleScores:    Record<string, number>;
+  topCategories:  string[];
+};
+
+type SwipeRecord = {
+  cardId:     string;
+  action:     "LIKE" | "PASS";
+  category:   string;
+  attributes: Record<string, unknown>;
+};
+
+type AppMode = "onboarding" | "feed-loading" | "feed";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function loadLocalWatchlist(): TradingCard[] {
-  if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(WATCHLIST_KEY);
+    const raw = localStorage.getItem(WATCHLIST_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as TradingCard[]) : [];
+    const p = JSON.parse(raw);
+    return Array.isArray(p) ? (p as TradingCard[]) : [];
   } catch { return []; }
 }
 
-type AppMode = "home" | "loading" | "deck";
+function loadPrefs(): Preferences | null {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Preferences;
+  } catch { return null; }
+}
 
+function getInitialMode(): AppMode {
+  try {
+    return localStorage.getItem(ONBOARDING_KEY) ? "feed-loading" : "onboarding";
+  } catch { return "onboarding"; }
+}
+
+function buildFeedUrl(prefs: Preferences, seenIds: Set<string>): string {
+  const cats   = prefs.topCategories.join(",");
+  const seen   = [...seenIds].slice(-150).join(",");
+  const scores = Object.entries(prefs.categoryScores)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",");
+  return `/api/feed?cats=${encodeURIComponent(cats)}&seen=${encodeURIComponent(seen)}&scores=${encodeURIComponent(scores)}&count=20`;
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [appMode,       setAppMode]       = useState<AppMode>("home");
-  const [deckLabel,     setDeckLabel]     = useState("");
-  const [liked,         setLiked]         = useState<TradingCard[]>(() => loadLocalWatchlist());
-  const [cards,         setCards]         = useState<TradingCard[]>([]);
-  const [watchlistOpen, setWatchlistOpen] = useState(false);
-  const [playlistsOpen, setPlaylistsOpen] = useState(false);
-  const [searchOpen,    setSearchOpen]    = useState(false);
-  const [searchQuery,   setSearchQuery]   = useState("");
-  const [deckResetKey,  setDeckResetKey]  = useState(0);
+  const [appMode,      setAppMode]      = useState<AppMode>(getInitialMode);
+  const [cards,        setCards]        = useState<TradingCard[]>([]);
+  const [liked,        setLiked]        = useState<TradingCard[]>(loadLocalWatchlist);
+  const [prefs,        setPrefs]        = useState<Preferences | null>(loadPrefs);
+  const [isLoadingMore,setIsLoadingMore]= useState(false);
+  const [watchlistOpen,setWatchlistOpen]= useState(false);
+  const [deckResetKey, setDeckResetKey] = useState(0);
 
-  const seenIds = useRef(new Set<string>());
+  // Refs so callbacks always see fresh values without re-registering
+  const prefsRef         = useRef<Preferences | null>(prefs);
+  const seenIds          = useRef(new Set<string>());
+  const isLoadingMoreRef = useRef(false);
 
-  // ── Deep-link: ?playlist=nfl → auto-load NFL Preseason Preview ───────────
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    if (sp.get("playlist") === "nfl") {
-      loadPlaylist("nfl-preseason-preview", "🏈 NFL Preseason Preview");
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+
+  // ── Feed loader ─────────────────────────────────────────────────────────────
+  async function loadFeed(append = false) {
+    const p = prefsRef.current;
+    if (!p?.topCategories?.length) {
+      // No prefs → send back to onboarding
+      localStorage.removeItem(ONBOARDING_KEY);
+      setAppMode("onboarding");
+      return;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── Core loader: calls /api/playlist for presets OR custom keyword search ──
-  async function loadPlaylist(playlistId: string, label: string, query?: string, auctionsOnly?: boolean) {
-    setAppMode("loading");
-    setDeckLabel(label);
-    setPlaylistsOpen(false);
-    setSearchOpen(false);
-    setSearchQuery("");
-    seenIds.current = new Set();
+    if (isLoadingMoreRef.current) return;
+    isLoadingMoreRef.current = true;
+    setIsLoadingMore(true);
+    if (!append) setAppMode("feed-loading");
 
     try {
-      let params: URLSearchParams;
-      if (playlistId !== "custom") {
-        params = new URLSearchParams({ id: playlistId });
-      } else {
-        params = new URLSearchParams({ query: query || "" });
-        if (auctionsOnly) params.set("auctionsOnly", "true");
-      }
-
-      // Hardcode direct path to the functional backend to bypass Cloudflare directory proxying
-      const targetApiUrl = "https://e2b906c4-d9e2-4d61-8633-82d4515522d7-00-3cojdwfwn144m.kirk.replit.dev/api/playlist";
-      const res  = await fetch(`${targetApiUrl}?${params}`);
+      const url = buildFeedUrl(p, seenIds.current);
+      const res  = await fetch(url);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
+      incoming.forEach((c) => seenIds.current.add(c.id));
 
+      if (append) {
+        setCards((prev) => [...prev, ...incoming]);
+      } else {
+        setCards(incoming);
+        setDeckResetKey((k) => k + 1);
+        setAppMode("feed");
+      }
+    } catch (err) {
+      console.warn("[feed] load failed:", err);
+      if (!append) setAppMode("feed");
+    } finally {
+      isLoadingMoreRef.current = false;
+      setIsLoadingMore(false);
+    }
+  }
+
+  // On mount: if we already have prefs, load feed
+  useEffect(() => {
+    if (appMode === "feed-loading") loadFeed(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Onboarding completion ───────────────────────────────────────────────────
+  async function handleOnboardingComplete(swipes: SwipeRecord[]) {
+    localStorage.setItem(ONBOARDING_KEY, "1");
+    setAppMode("feed-loading");
+
+    try {
+      const res  = await fetch("/api/onboarding/complete", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ onboardingSwipes: swipes }),
+      });
+      const data = await res.json();
+
+      if (data.preferences) {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(data.preferences));
+        prefsRef.current = data.preferences;
+        setPrefs(data.preferences);
+      }
+
+      const incoming: TradingCard[] = data.cards ?? [];
       incoming.forEach((c) => seenIds.current.add(c.id));
       setCards(incoming);
       setDeckResetKey((k) => k + 1);
-      setAppMode("deck");
+      setAppMode("feed");
     } catch (err) {
-      console.warn("[playlist] load failed:", err);
-      setCards([]);
-      setAppMode("deck");
+      console.warn("[onboarding/complete] failed:", err);
+      setAppMode("feed");
     }
   }
 
-  function handleSearchSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const q = searchQuery.trim();
-    if (q) loadPlaylist("custom", `🔍 "${q}"`, q);
+  // ── Swipe handlers ──────────────────────────────────────────────────────────
+  function updatePrefsOnSwipe(card: TradingCard, action: "LIKE" | "PASS") {
+    setPrefs((prev) => {
+      const base: Preferences = prev ?? {
+        categoryScores: {}, eraScores: {}, styleScores: {}, topCategories: [],
+      };
+      const delta   = action === "LIKE" ? 1 : -1;
+      const updated = {
+        ...base,
+        categoryScores: {
+          ...base.categoryScores,
+          [card.category]: (base.categoryScores[card.category] || 0) + delta,
+        },
+      };
+      // Re-rank topCategories based on updated scores
+      updated.topCategories = Object.entries(updated.categoryScores)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([cat]) => cat);
+
+      localStorage.setItem(PREFS_KEY, JSON.stringify(updated));
+      prefsRef.current = updated;
+      return updated;
+    });
   }
 
-  // ── Watchlist (localStorage only — no account required) ───────────────────
   function handleLike(card: TradingCard) {
     setLiked((prev) => {
       const next = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
-      window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
       return next;
     });
+    updatePrefsOnSwipe(card, "LIKE");
+  }
+
+  function handlePass(card: TradingCard) {
+    updatePrefsOnSwipe(card, "PASS");
+  }
+
+  function handleBuy(card: TradingCard) {
+    const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
+    if (!url) return;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      window.location.href = url;
+    } else {
+      const tab = window.open(url, "_blank", "noopener,noreferrer");
+      if (!tab) window.location.href = url;
+    }
   }
 
   function handleRemove(cardId: string) {
     setLiked((prev) => {
       const next = prev.filter((c) => c.id !== cardId);
-      window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
       return next;
     });
   }
 
-  // ── Mobile-Optimized Direct Outbound Handling ─────────────────────────────
-  function handleBuy(card: TradingCard) {
-    const targetUrl = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
-    if (!targetUrl) return;
+  const handleNeedMore = useCallback(() => { loadFeed(true); }, []);
 
-    // Detect true mobile devices vs desktop setups
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-    if (isMobile) {
-      // Direct assignment forces the active browser tab over to eBay immediately
-      window.location.href = targetUrl;
-    } else {
-      // Desktop systems still run cleanly inside secondary utility tabs
-      const newTab = window.open(targetUrl, "_blank", "noopener,noreferrer");
-      if (!newTab) window.location.href = targetUrl;
-    }
-  }
-
-  const handleNeedMore = useCallback(() => {}, []);
-
-  // ─────────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
 
-      {/* ── HOME / FEATURED PLAYLISTS ──────────────────────────────────── */}
+      {/* ── ONBOARDING QUIZ ──────────────────────────────────────────────────── */}
       <AnimatePresence>
-        {appMode === "home" && (
+        {appMode === "onboarding" && (
           <motion.div
-            key="home"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 0.97 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-[200] bg-background"
-          >
-            <PlaylistsPanel
-              mode="home"
-              onLoadPlaylist={loadPlaylist}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── LOADING ───────────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {appMode === "loading" && (
-          <motion.div
-            key="loading"
+            key="onboarding"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[190] bg-background flex flex-col items-center justify-center gap-5"
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 z-[300]"
           >
-            <div className="flex gap-2">
-              {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  className="w-3 h-3 rounded-full bg-primary"
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }}
-                />
-              ))}
-            </div>
-            <motion.p
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 1.6, repeat: Infinity }}
-              className="text-sm font-semibold text-muted-foreground tracking-wide"
-            >
-              Fetching cards…
-            </motion.p>
-            {deckLabel && (
-              <p className="text-xs text-muted-foreground/60">{deckLabel}</p>
-            )}
+            <OnboardingQuiz onComplete={handleOnboardingComplete} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── DECK VIEW ────────────────────────────────────────────────────── */}
+      {/* ── FEED LOADING OVERLAY ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {appMode === "feed-loading" && (
+          <motion.div
+            key="feed-loading"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-background flex flex-col items-center justify-center gap-6"
+          >
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: "linear" }}
+              className="text-5xl select-none"
+            >
+              🧬
+            </motion.div>
+            <div className="text-center space-y-1.5">
+              <motion.p
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 1.4, repeat: Infinity }}
+                className="text-base font-black text-foreground tracking-tight"
+              >
+                Building your card feed…
+              </motion.p>
+              <p className="text-xs text-muted-foreground">Pulling live listings from eBay</p>
+            </div>
+            <div className="flex gap-2 mt-1">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <motion.div
+                  key={i}
+                  className="w-1.5 h-1.5 rounded-full bg-primary"
+                  animate={{ scale: [1, 1.6, 1], opacity: [0.3, 1, 0.3] }}
+                  transition={{ duration: 0.7, repeat: Infinity, delay: i * 0.12 }}
+                />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MAIN FEED ─────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* ── Header ──────────────────────────────────────────────────── */}
-        <header className="h-16 px-4 md:px-5 border-b border-border flex items-center gap-3 bg-background z-50 shrink-0">
+        {/* Header */}
+        <header className="h-16 px-4 md:px-5 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
 
-          {/* Logo — taps back to home */}
-          <div
-            className="flex items-center gap-2.5 shrink-0 cursor-pointer group"
-            onClick={() => setAppMode("home")}
-          >
-            <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg" />
-            <div className="hidden sm:block">
-              <h1 className="text-sm font-black uppercase tracking-tight leading-none group-hover:text-primary transition-colors">
+          {/* Logo + wordmark */}
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.png"
+              alt="The Card Match"
+              className="w-10 h-10 rounded-xl shadow-md"
+            />
+            <div>
+              <h1 className="text-sm font-black uppercase tracking-tighter leading-none text-foreground">
                 THE CARD MATCH
               </h1>
-              {deckLabel && (
-                <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-widest truncate max-w-[180px]">
-                  {deckLabel}
-                </p>
-              )}
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
+                Your personalized feed
+              </p>
             </div>
           </div>
 
-          {/* Inline search bar */}
-          <div className="flex-1 min-w-0">
-            <AnimatePresence>
-              {searchOpen && (
-                <motion.form
-                  key="searchbar"
-                  initial={{ opacity: 0, scale: 0.96 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.96 }}
-                  onSubmit={handleSearchSubmit}
-                  className="flex items-center gap-2"
-                >
-                  <input
-                    autoFocus
-                    type="search"
-                    enterKeyHint="search"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search any player, card, or set…"
-                    className="flex-1 text-sm px-4 py-2 bg-muted rounded-full border border-border focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!searchQuery.trim()}
-                    className="px-3 py-2 bg-primary text-primary-foreground text-xs font-bold rounded-full disabled:opacity-40 shrink-0"
-                  >
-                    Go
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setSearchOpen(false); setSearchQuery(""); }}
-                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </motion.form>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* ── 3 Icons ──────────────────────────────────────────────── */}
-          <div className="flex items-center gap-2 shrink-0">
-
-            {/* Search */}
-            <button
-              onClick={() => { setSearchOpen((o) => !o); setPlaylistsOpen(false); }}
-              className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${
-                searchOpen
-                  ? "bg-primary border-primary text-primary-foreground"
-                  : "bg-card hover:bg-accent"
+          {/* Watchlist button */}
+          <button
+            onClick={() => setWatchlistOpen(true)}
+            className="relative w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
+            aria-label="Watchlist"
+          >
+            <Heart
+              className={`w-4.5 h-4.5 transition-colors ${
+                liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"
               }`}
-            >
-              <Search className="w-4 h-4" />
-            </button>
-
-            {/* Playlists */}
-            <div className="relative">
-              <button
-                onClick={() => { setPlaylistsOpen((o) => !o); setSearchOpen(false); setSearchQuery(""); }}
-                className={`w-9 h-9 rounded-full border flex items-center justify-center transition-colors ${
-                  playlistsOpen
-                    ? "bg-primary border-primary text-primary-foreground"
-                    : "bg-card hover:bg-accent"
-                }`}
-              >
-                <LayoutList className="w-4 h-4" />
-              </button>
-
-              <AnimatePresence>
-                {playlistsOpen && (
-                  <>
-                    <motion.div
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      onClick={() => setPlaylistsOpen(false)}
-                      className="fixed inset-0 z-[55]"
-                    />
-                    <motion.div
-                      initial={{ opacity: 0, y: -8, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0,  scale: 1 }}
-                      exit={{ opacity: 0,    y: -8, scale: 0.97 }}
-                      transition={{ duration: 0.12 }}
-                      className="absolute right-0 top-full mt-2 w-72 bg-card border border-border rounded-2xl shadow-2xl z-[60] overflow-hidden"
-                    >
-                      <div className="px-4 pt-3 pb-1">
-                        <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest">
-                          Featured Playlists
-                        </p>
-                      </div>
-                      <PlaylistsPanel
-                        mode="panel"
-                        onLoadPlaylist={loadPlaylist}
-                      />
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Heart — mobile watchlist */}
-            <button
-              onClick={() => setWatchlistOpen(true)}
-              className="relative w-9 h-9 rounded-full bg-card border flex items-center justify-center hover:bg-accent transition-colors md:hidden"
-            >
-              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
-              {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
-                  {liked.length > 99 ? "99" : liked.length}
-                </span>
-              )}
-            </button>
-
-            {/* Heart — desktop (sidebar always visible) */}
-            <button
-              className="relative w-9 h-9 rounded-full bg-card border hidden md:flex items-center justify-center hover:bg-accent transition-colors"
-              title="Watchlist (right panel)"
-            >
-              <Heart className={`w-4 h-4 ${liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"}`} />
-              {liked.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
-                  {liked.length > 99 ? "99" : liked.length}
-                </span>
-              )}
-            </button>
-          </div>
+            />
+            {liked.length > 0 && (
+              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                {liked.length > 99 ? "99" : liked.length}
+              </span>
+            )}
+          </button>
         </header>
 
-        {/* ── Deck area ────────────────────────────────────────────────── */}
+        {/* Deck area */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
-            {appMode === "deck" && cards.length === 0 ? (
+            {appMode === "feed" && cards.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
                 <p className="text-4xl">🃏</p>
-                <p className="text-base font-semibold">No upcoming auctions found</p>
+                <p className="text-base font-semibold">You've seen everything!</p>
                 <p className="text-sm text-muted-foreground">
-                  No upcoming auctions found for this criteria right now. Try another search!
+                  We're pulling fresh listings for you.
                 </p>
                 <button
-                  onClick={() => setAppMode("home")}
+                  onClick={() => loadFeed(false)}
                   className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
                 >
-                  ← Back to Playlists
+                  Refresh Feed ↺
                 </button>
               </div>
             ) : (
               <SwipeDeck
                 cards={cards}
                 onLike={handleLike}
+                onPass={handlePass}
                 onBuy={handleBuy}
                 onNeedMore={handleNeedMore}
-                isLoadingMore={false}
+                isLoadingMore={isLoadingMore}
                 resetKey={deckResetKey}
               />
             )}
@@ -358,33 +347,43 @@ export default function App() {
         </div>
       </main>
 
-      {/* ── Desktop watchlist sidebar ──────────────────────────────────── */}
-      <aside className="hidden md:block w-[350px] border-l border-border bg-card h-full overflow-y-auto shrink-0">
+      {/* ── Desktop watchlist sidebar ─────────────────────────────────────────── */}
+      <aside className="hidden md:block w-[340px] border-l border-border bg-card h-full overflow-y-auto shrink-0">
         <Sidebar
           liked={liked}
           onRemove={handleRemove}
-          onClearAll={() => { setLiked([]); window.localStorage.removeItem(WATCHLIST_KEY); }}
+          onClearAll={() => {
+            setLiked([]);
+            localStorage.removeItem(WATCHLIST_KEY);
+          }}
         />
       </aside>
 
-      {/* ── Mobile watchlist drawer ───────────────────────────────────── */}
+      {/* ── Mobile watchlist drawer ───────────────────────────────────────────── */}
       <AnimatePresence>
         {watchlistOpen && (
           <>
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               onClick={() => setWatchlistOpen(false)}
               className="fixed inset-0 bg-black/60 z-[100] md:hidden"
             />
             <motion.div
-              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 25 }}
               className="fixed inset-y-0 right-0 w-[85%] bg-card z-[110] md:hidden shadow-2xl overflow-y-auto"
             >
               <Sidebar
                 liked={liked}
                 onRemove={handleRemove}
-                onClearAll={() => { setLiked([]); window.localStorage.removeItem(WATCHLIST_KEY); }}
+                onClearAll={() => {
+                  setLiked([]);
+                  localStorage.removeItem(WATCHLIST_KEY);
+                }}
               />
             </motion.div>
           </>
