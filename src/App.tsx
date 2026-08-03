@@ -70,6 +70,7 @@ export default function App() {
   const [isLoadingMore,setIsLoadingMore]= useState(false);
   const [watchlistOpen,setWatchlistOpen]= useState(false);
   const [deckResetKey, setDeckResetKey] = useState(0);
+  const [feedError,    setFeedError]    = useState(false);
 
   // Refs so callbacks always see fresh values without re-registering
   const prefsRef         = useRef<Preferences | null>(prefs);
@@ -91,10 +92,12 @@ export default function App() {
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     if (!append) setAppMode("feed-loading");
+    setFeedError(false);
 
     try {
       const url = buildFeedUrl(p, seenIds.current);
       const res  = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
       incoming.forEach((c) => seenIds.current.add(c.id));
@@ -108,7 +111,10 @@ export default function App() {
       }
     } catch (err) {
       console.warn("[feed] load failed:", err);
-      if (!append) setAppMode("feed");
+      if (!append) {
+        setFeedError(true);
+        setAppMode("feed");
+      }
     } finally {
       isLoadingMoreRef.current = false;
       setIsLoadingMore(false);
@@ -179,6 +185,7 @@ export default function App() {
       setAppMode("feed");
     } catch (err) {
       console.warn("[onboarding/complete] failed:", err);
+      setFeedError(true);
       setAppMode("feed");
     }
   }
@@ -352,17 +359,35 @@ export default function App() {
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
             {appMode === "feed" && cards.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
-                <p className="text-4xl">🃏</p>
-                <p className="text-base font-semibold">You've seen everything!</p>
-                <p className="text-sm text-muted-foreground">
-                  We're pulling fresh listings for you.
-                </p>
-                <button
-                  onClick={() => loadFeed(false)}
-                  className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
-                >
-                  Refresh Feed ↺
-                </button>
+                {feedError ? (
+                  <>
+                    <p className="text-4xl">⚠️</p>
+                    <p className="text-base font-semibold">Couldn't load cards</p>
+                    <p className="text-sm text-muted-foreground">
+                      Check your connection and try again.
+                    </p>
+                    <button
+                      onClick={() => { setFeedError(false); loadFeed(false); }}
+                      className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
+                    >
+                      Try Again ↺
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-4xl">🃏</p>
+                    <p className="text-base font-semibold">You've seen everything!</p>
+                    <p className="text-sm text-muted-foreground">
+                      We're pulling fresh listings for you.
+                    </p>
+                    <button
+                      onClick={() => loadFeed(false)}
+                      className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
+                    >
+                      Refresh Feed ↺
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
               <SwipeDeck
