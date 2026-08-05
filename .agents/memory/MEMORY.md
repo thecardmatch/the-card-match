@@ -1,2 +1,3 @@
 - [Cache architecture](cache-arch.md) — all caching is Cloudflare KV only; Supabase fully removed as of Aug 2026.
 - [eBay Browse API OR queries](ebay-or-query.md) — `q` param does NOT support OR keyword; fix is parallel per-term calls merged server-side.
+- [CF Pages Functions architecture](cf-pages-functions.md) — production API lives in functions/; server/index.js is local-dev only; btoa not Buffer, context.env not process.env.

@@ -1,0 +1,381 @@
+/**
+ * functions/_shared/ebay.js
+ * Shared eBay API helpers for Cloudflare Pages Functions.
+ * Mirror of server/index.js — kept in sync manually.
+ *
+ * Key differences from the Node.js server:
+ *  - btoa()          instead of Buffer.from().toString('base64')
+ *  - env.X           instead of process.env.X
+ *  - KV token cache  instead of module-level _token variable
+ *  - No `fs`, no `express`
+ */
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+export const EPN_CAMP_ID = "5339150952";
+
+const CARD_ONLY =
+  `-helmet -pennant -poster -bobblehead -figurine -plaque -jersey ` +
+  `"-signed ball" "-cut signature" -photograph -photo -lithograph -ticket -program`;
+
+// ── Cloudflare-compatible JSON response ───────────────────────────────────────
+export function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
+// ── CORS preflight ────────────────────────────────────────────────────────────
+export function onRequestOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
+// ── eBay OAuth token (KV-cached) ──────────────────────────────────────────────
+export async function getEbayToken(env) {
+  const kv = env.CACHE_KV || null;
+
+  // Try to reuse a cached token from KV
+  if (kv) {
+    try {
+      const cached = await kv.get("ebay_token", "json");
+      if (cached?.token && cached?.expiry > Date.now()) return cached.token;
+    } catch { /* ignore KV errors */ }
+  }
+
+  const id     = env.EBAY_CLIENT_ID;
+  const secret = env.EBAY_CLIENT_SECRET;
+  if (!id || !secret) throw new Error("Missing EBAY_CLIENT_ID / EBAY_CLIENT_SECRET");
+
+  const creds = btoa(`${id}:${secret}`);
+  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+  });
+
+  if (!res.ok) throw new Error(`eBay token error ${res.status}: ${await res.text()}`);
+  const json = await res.json();
+
+  if (kv && json.access_token) {
+    const expiry = Date.now() + (json.expires_in - 120) * 1000;
+    try {
+      await kv.put(
+        "ebay_token",
+        JSON.stringify({ token: json.access_token, expiry }),
+        { expirationTtl: Math.max(1, json.expires_in - 120) }
+      );
+    } catch { /* ignore KV write errors */ }
+  }
+
+  return json.access_token;
+}
+
+// ── Core eBay Browse API search ───────────────────────────────────────────────
+const BULK_EXCLUSION = "-lot -bundle -box -case -pack";
+
+export async function ebaySearch(
+  token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0
+) {
+  const params = new URLSearchParams({
+    sort: sortVal,
+    limit: String(limit),
+    fieldgroups: "MATCHING_ITEMS,EXTENDED",
+  });
+  if (offset > 0) params.set("offset", String(offset));
+
+  if (q && q.trim()) {
+    let tq = q.trim();
+    if (!tq.toLowerCase().includes("-lot")) tq += ` ${BULK_EXCLUSION}`;
+    params.set("q", tq);
+  }
+  if (filterStr)    params.set("filter", filterStr);
+  if (aspectFilter) params.set("aspect_filter", aspectFilter);
+  if (categoryId)   params.set("category_ids", categoryId);
+
+  const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization:              `Bearer ${token}`,
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+      "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+    },
+  });
+  if (!res.ok) {
+    console.error("[ebay] search error", res.status, (await res.text()).slice(0, 200));
+    return { itemSummaries: [], total: 0 };
+  }
+  return res.json();
+}
+
+// ── Category feed search config ───────────────────────────────────────────────
+export const CATEGORY_FEED_CONFIG = {
+  Football: {
+    categoryId: "217",
+    terms: [
+      `(Patrick Mahomes, Jalen Hurts, C.J. Stroud, Lamar Jackson, Brock Purdy) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(CeeDee Lamb, Justin Jefferson, Ja'Marr Chase, Saquon Barkley, Travis Kelce) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cam Ward, Shedeur Sanders, Travis Hunter, Ashton Jeanty, Jaxson Dart) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Basketball: {
+    categoryId: "214",
+    terms: [
+      `(Victor Wembanyama, LeBron James, Stephen Curry, Luka Doncic, Giannis Antetokounmpo) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Zion Williamson, Jayson Tatum, Kevin Durant, Nikola Jokic, Anthony Edwards) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cooper Flagg, Ace Bailey, Dylan Harper, Tre Johnson, VJ Edgecombe) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Baseball: {
+    categoryId: "213",
+    terms: [
+      `(Shohei Ohtani, Aaron Judge, Juan Soto, Fernando Tatis, Vladimir Guerrero) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Paul Skenes, Roman Anthony, Elly De La Cruz, Jackson Holliday, Pete Crow-Armstrong) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Hockey: {
+    categoryId: "216",
+    terms: [
+      `(Connor Bedard, Connor McDavid, Alex Ovechkin, Sidney Crosby, Nathan MacKinnon) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Macklin Celebrini, Matvei Michkov, Cale Makar, David Pastrnak, Auston Matthews) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Soccer: {
+    categoryId: "183444",
+    terms: [
+      `(Lionel Messi, Kylian Mbappe, Erling Haaland, Lamine Yamal, Jude Bellingham) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+      `(Cristiano Ronaldo, Vinicius Jr, Pedri, Bukayo Saka, Florian Wirtz) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  Pokemon: {
+    categoryId: "183050",
+    terms: [
+      `(Charizard, Pikachu, Umbreon, Mewtwo, Eevee) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration", "gold star") -sealed -booster -pack`,
+      `(Gengar, Lugia, Rayquaza, Blastoise, Venusaur) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration") -sealed -booster -pack`,
+    ],
+    minPrice: 30,
+  },
+  MTG: {
+    categoryId: "19107",
+    terms: [
+      `("Black Lotus", "Force of Will", "The One Ring", "Ragavan", "Bowmasters") (psa, bgs, cgc, foil, borderless) -sealed -booster -lot`,
+      `("Sheoldred", "Orcish Bowmasters", "Ulamog", "Mox", "Dual Land") (foil, showcase, psa, bgs) -sealed -booster -lot`,
+    ],
+    minPrice: 50,
+  },
+  Racing: {
+    categoryId: "217",
+    terms: [
+      `(Lewis Hamilton, Max Verstappen, Charles Leclerc, Lando Norris, Fernando Alonso) (auto, patch, "1/1", /10, /25, /99, psa 10, bgs 9.5, topps, f1) -base -reprint -unopened ${CARD_ONLY}`,
+    ],
+    minPrice: 50,
+  },
+  PopCulture: {
+    categoryId: "182035",
+    terms: [
+      `(Spider-Man, Batman, "Iron Man", "Mickey Mouse", "Star Wars") (psa 10, psa 9, bgs 9.5, auto, "1/1", /10) -sealed -lot`,
+    ],
+    minPrice: 50,
+  },
+};
+
+// ── Item helpers ──────────────────────────────────────────────────────────────
+export function isSuppliesCategory(item) {
+  return (item.categories || []).some(
+    (c) => String(c.categoryId) === "183444" || String(c.categoryId) === "550"
+  );
+}
+
+export function forceHD(url) {
+  if (!url || typeof url !== "string") return url || "";
+  try {
+    let u = url.split("?")[0];
+    if (u.includes("/thumbs/")) u = u.replace("/thumbs/", "/");
+    if (/s-l\d+/i.test(u))   u = u.replace(/s-l\d+/i, "s-l600");
+    else if (/\$_\d+/i.test(u)) u = u.replace(/\$_\d+/i, "$_57");
+    return u;
+  } catch { return url; }
+}
+
+export function detectGrade(title) {
+  const m = title.match(/\b(psa|bgs|sgc|cgc|hga|ags|gma|csg)\s*(\d+(?:\.\d+)?)\b/i);
+  if (m) return `${m[1].toUpperCase()} ${m[2]}`;
+  if (/\bgraded\b/i.test(title)) return "Graded";
+  return "Raw";
+}
+
+export function buildAffiliateUrl(item) {
+  if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
+  const AFF = {
+    campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
+    mkrid: "711-53200-19255-0", customid: "thecardmatch",
+  };
+  const rawUrl = item.itemWebUrl || "";
+  if (rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      const clean = new URL(`${u.origin}${u.pathname}`);
+      Object.entries(AFF).forEach(([k, v]) => clean.searchParams.set(k, v));
+      return clean.toString();
+    } catch { /* fall through */ }
+  }
+  if (item.itemId) {
+    const d = new URL(`https://www.ebay.com/itm/${item.itemId}`);
+    Object.entries(AFF).forEach(([k, v]) => d.searchParams.set(k, v));
+    return d.toString();
+  }
+  return "";
+}
+
+export function detectCategory(title, selectedCats, itemCategoryIds = []) {
+  if (selectedCats.length === 1) return selectedCats[0];
+
+  const catSet = new Set(itemCategoryIds.map(String));
+  if (catSet.has("183050") || catSet.has("183454")) return "Pokemon";
+
+  const t = title.toLowerCase();
+
+  if (t.includes("pokemon") || t.includes(" tcg ") || t.includes("tcg card")) return "Pokemon";
+  if (t.includes("basketball") || t.includes(" nba "))        return "Basketball";
+  if (t.includes("baseball")   || t.includes(" mlb "))        return "Baseball";
+  if (t.includes("football")   || t.includes(" nfl "))        return "Football";
+  if (t.includes("hockey")     || t.includes(" nhl "))        return "Hockey";
+  if (t.includes("soccer")     || t.includes("fifa") || t.includes(" mls ")) return "Soccer";
+  if (t.includes("formula 1")  || /\bf1\b/.test(t))           return "Formula 1";
+  if (t.includes("wwe")        || t.includes("wrestling"))     return "WWE";
+
+  const pokemonNames = [
+    "charizard","pikachu","mewtwo","umbreon","eevee","gengar","snorlax","greninja",
+    "dragapult","rayquaza","lugia","mew ","bulbasaur","squirtle","blastoise","venusaur",
+    "sylveon","espeon","flareon","vaporeon","jolteon","glaceon","leafeon","dragonite",
+    "gyarados","articuno","zapdos","moltres","raichu","clefairy","lapras","ditto",
+    "togepi","entei","suicune","raikou","celebi","latios","latias","jirachi","deoxys",
+    "garchomp","lucario","riolu","togekiss","gallade","rotom","arceus","zekrom",
+    "reshiram","kyurem","xerneas","yveltal","solgaleo","lunala","necrozma","zacian",
+    "zamazenta","calyrex","koraidon","miraidon","terapagos","ogerpon",
+  ];
+  if (pokemonNames.some((n) => t.includes(n))) return "Pokemon";
+  if (/\b(vmax|vstar|ex card|gx card|lv\.x|legend card|prime card|break card|mega \w+ ex)\b/.test(t)) return "Pokemon";
+
+  const nbaPlayers = [
+    "michael jordan","wembanyama","lebron","stephen curry","steph curry","kevin durant",
+    "giannis","luka doncic","brunson","de'aaron fox","devin vassell","mikal bridges",
+    "josh hart","og anunoby","stephon castle","dylan harper","ja morant","embiid",
+    "tatum","devin booker","anthony davis","jaylen brown","zion","bam adebayo",
+    "karl-anthony towns","damian lillard","donovan mitchell","tyrese haliburton",
+    "shai gilgeous","cade cunningham","scottie barnes","franz wagner","paolo banchero",
+    "evan mobley","jalen green","alperen sengun","nikola jokic","lamelo ball",
+    "kobe bryant","shaquille","magic johnson","larry bird","kareem","dirk nowitzki",
+    "dwyane wade","chris paul","allen iverson","charles barkley","patrick ewing",
+    "hakeem olajuwon","tim duncan","julius erving","bill russell","wilt chamberlain",
+    "oscar robertson","kevin garnett","ray allen","vince carter","tracy mcgrady",
+    "kawhi leonard","paul george","kyrie irving","james harden","russell westbrook",
+    "tyrese maxey","joel embiid","klay thompson","draymond green","cooper flagg",
+    "ace bailey","tre johnson",
+  ];
+  if (nbaPlayers.some((n) => t.includes(n))) return "Basketball";
+
+  const nflPlayers = [
+    "mahomes","joe burrow","lamar jackson","josh allen","c.j. stroud","caleb williams",
+    "jayden daniels","bryce young","trevor lawrence","dak prescott","jalen hurts",
+    "justin jefferson","ceedee lamb","cooper kupp","tyreek hill","davante adams",
+    "travis kelce","christian mccaffrey","saquon barkley","derrick henry","nick bosa",
+    "micah parsons","myles garrett","tj watt","tom brady","peyton manning","dan marino",
+    "brett favre","joe montana","john elway","jerry rice","emmitt smith","barry sanders",
+    "walter payton","cam ward","shedeur sanders","travis hunter","ashton jeanty",
+    "bo nix","malik nabers","cam skattebo","jaxson dart",
+  ];
+  if (nflPlayers.some((n) => t.includes(n))) return "Football";
+
+  const mlbPlayers = [
+    "ohtani","mike trout","aaron judge","juan soto","ronald acuna","bryce harper",
+    "corey seager","mookie betts","freddie freeman","fernando tatis","julio rodriguez",
+    "gunnar henderson","elly de la cruz","jackson holliday","paul skenes","griffey",
+    "derek jeter","babe ruth","mickey mantle","ted williams","willie mays","ken griffey",
+    "randy johnson","pete rose","nolan ryan","cal ripken","frank thomas","chipper jones",
+    "ichiro suzuki","roman anthony","pete crow-armstrong","jackson merrill",
+  ];
+  if (mlbPlayers.some((n) => t.includes(n))) return "Baseball";
+
+  const nhlPlayers = [
+    "mcdavid","crosby","ovechkin","auston matthews","draisaitl","nathan mackinnon",
+    "cale makar","roman josi","david pastrnak","kirill kaprizov","trevor zegras",
+    "wayne gretzky","mario lemieux","bobby orr","mark messier","brett hull",
+    "connor bedard","macklin celebrini","matvei michkov",
+  ];
+  if (nhlPlayers.some((n) => t.includes(n))) return "Hockey";
+
+  // Team names
+  const mlbTeams = ["yankees","red sox","dodgers","cubs","cardinals mlb","mets","braves",
+    "athletics","phillies","astros","rangers","mariners","padres","rockies","diamondbacks",
+    "nationals","marlins","brewers","reds","pirates","orioles","tigers","white sox",
+    "indians","guardians","twins","royals","blue jays","rays","angels"];
+  if (mlbTeams.some((n) => t.includes(n))) return "Baseball";
+
+  const nflTeams = ["patriots","cowboys","packers","steelers","bears","49ers","chiefs",
+    "ravens","seahawks","saints","broncos","raiders","colts","bengals","bills","jets",
+    "dolphins","buccaneers","falcons","panthers","rams","chargers","browns","texans",
+    "jaguars","titans","vikings","commanders","lions nfl","giants nfl","eagles nfl"];
+  if (nflTeams.some((n) => t.includes(n))) return "Football";
+
+  const nhlTeams = ["maple leafs","canadiens","bruins","rangers nhl","blackhawks",
+    "penguins","oilers nhl","flyers","red wings","avalanche","blues","lightning",
+    "capitals nhl","golden knights","wild","flames nhl","canucks","senators","sabres",
+    "hurricanes","blue jackets","predators","ducks","stars nhl","devils nhl","islanders"];
+  if (nhlTeams.some((n) => t.includes(n))) return "Hockey";
+
+  if (/\bhoops\b/.test(t) && !t.includes("baseball") && !t.includes("football")) return "Basketball";
+  if (/helmet.*patch|helmet.*relic|mini helmet/.test(t)) return "Football";
+  if (t.includes("prizm nba") || t.includes("optic nba") || t.includes("fleer nba") || t.includes("skybox")) return "Basketball";
+  if (t.includes("prizm nfl") || t.includes("optic nfl") || t.includes("panini nfl")) return "Football";
+  if (t.includes("bowman ") || t.includes("topps now") || t.includes("topps heritage") || t.includes("topps finest")) return "Baseball";
+  if (t.includes("upper deck nhl") || t.includes("o-pee-chee") || t.includes("sp authentic")) return "Hockey";
+
+  return selectedCats[0] || "Unknown";
+}
+
+export function mapFeedItem(item, catHints = []) {
+  const watchCount = item.watchCount || 0;
+  const bidCount   = item.bidCount   || 0;
+  return {
+    id:              item.itemId,
+    name:            item.title || "Unknown Card",
+    category:        detectCategory(
+                       item.title || "",
+                       catHints,
+                       (item.categories || []).map((c) => String(c.categoryId))
+                     ),
+    image:           forceHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
+    images:          (item.additionalImages || []).map((i) => forceHD(i.imageUrl)).filter(Boolean),
+    currentBid:      parseFloat(item.currentBidPrice?.value ?? "") ||
+                     parseFloat(item.price?.value ?? "") || 0,
+    currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
+    grade:           detectGrade(item.title || ""),
+    ebayUrl:         buildAffiliateUrl(item),
+    endTime:         item.itemEndDate || null,
+    watchCount,
+    bidCount,
+    engagementScore: watchCount * 2 + bidCount * 3,
+    condition:       item.condition || "",
+    listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+  };
+}

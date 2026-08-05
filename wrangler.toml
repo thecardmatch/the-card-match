@@ -1,2 +1,14 @@
 name = "thecardmatch"
 pages_build_output_dir = "dist"
+compatibility_date = "2024-09-23"
+
+# ── Secrets (set in Cloudflare Pages dashboard → Settings → Environment variables)
+# EBAY_CLIENT_ID, EBAY_CLIENT_SECRET — required for eBay Browse API calls
+# GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET — required for Google OAuth
+# CACHE_KV — KV namespace binding (set in Pages dashboard → Functions → KV namespace bindings)
+
+# ── Local dev with Wrangler (optional) ────────────────────────────────────────
+# To test Pages Functions locally: npx wrangler pages dev dist --port 8788
+# Secrets for local dev go in .dev.vars (never commit this file):
+#   EBAY_CLIENT_ID=...
+#   EBAY_CLIENT_SECRET=...
