@@ -1,0 +1,32 @@
+2026-08-06T01:38:19.108344Z	Cloning repository...
+2026-08-06T01:38:20.278434Z	From https://github.com/thecardmatch/the-card-match
+2026-08-06T01:38:20.278781Z	 * branch            9588634a4139c729cb6b93dca65d4023b9a60534 -> FETCH_HEAD
+2026-08-06T01:38:20.278895Z	
+2026-08-06T01:38:20.345844Z	HEAD is now at 9588634 Fix npm registry URLs in package-lock.json for Cloudflare Pages
+2026-08-06T01:38:20.346275Z	
+2026-08-06T01:38:20.40349Z	
+2026-08-06T01:38:20.403866Z	Using v2 root directory strategy
+2026-08-06T01:38:20.419807Z	Success: Finished cloning repository files
+2026-08-06T01:38:22.188038Z	Checking for configuration in a Wrangler configuration file (BETA)
+2026-08-06T01:38:22.188666Z	
+2026-08-06T01:38:22.189033Z	Found wrangler.toml file. Reading build configuration...
+2026-08-06T01:38:22.19757Z	pages_build_output_dir: dist
+2026-08-06T01:38:22.197846Z	Build environment variables: (none found)
+2026-08-06T01:38:22.418417Z	Successfully read the Wrangler configuration file.
+2026-08-06T01:38:22.85428Z	Detected the following tools from environment: npm@10.9.2, nodejs@22.16.0
+2026-08-06T01:38:22.854759Z	Installing project dependencies: npm clean-install --progress=false
+2026-08-06T01:38:30.394558Z	npm error code E404
+2026-08-06T01:38:30.396343Z	npm error 404 Not Found - GET https://registry.npmjs.org/npm/iceberg-js/-/iceberg-js-0.8.1.tgz
+2026-08-06T01:38:30.396483Z	npm error 404
+2026-08-06T01:38:30.396543Z	npm error 404  'iceberg-js@https://registry.npmjs.org/npm/iceberg-js/-/iceberg-js-0.8.1.tgz' is not in this registry.
+2026-08-06T01:38:30.396581Z	npm error 404
+2026-08-06T01:38:30.396614Z	npm error 404 Note that you can also install from a
+2026-08-06T01:38:30.396644Z	npm error 404 tarball, folder, http url, or git url.
+2026-08-06T01:38:30.398303Z	npm error A complete log of this run can be found in: /opt/buildhome/.npm/_logs/2026-08-06T01_38_23_715Z-debug-0.log
+2026-08-06T01:38:30.45883Z	Error: Exit with error code: 1
+2026-08-06T01:38:30.4591Z	    at ChildProcess.<anonymous> (/snapshot/dist/run-build.js)
+2026-08-06T01:38:30.45917Z	    at Object.onceWrapper (node:events:652:26)
+2026-08-06T01:38:30.459215Z	    at ChildProcess.emit (node:events:537:28)
+2026-08-06T01:38:30.459388Z	    at ChildProcess._handle.onexit (node:internal/child_process:291:12)
+2026-08-06T01:38:30.465435Z	Failed: build command exited with code: 1
+2026-08-06T01:38:31.095523Z	Failed: error occurred while running build command
