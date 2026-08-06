@@ -17,6 +17,15 @@ export type TradingCard = {
   condition?: string;
   listingType?: "Auction" | "Buy It Now";
   watchCount?: number;
+  // ── Multi-attribute scoring metadata ──────────────────────────────────────
+  /** All attribute tags on this card, e.g. ['baseball', 'vintage', 'rookie', 'graded', 'psa10'] */
+  tags?: string[];
+  /** Era bucket: 'vintage' | 'modern' | 'current' */
+  era?: string;
+  /** Primary card type: 'rookie' | 'auto' | 'patch' | 'rpa' | 'refractor' | 'base' | … */
+  card_type?: string;
+  /** Best-effort player name extracted from the listing title */
+  player?: string | null;
 };
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];

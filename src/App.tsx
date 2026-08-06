@@ -8,11 +8,12 @@ import { OnboardingQuiz } from "@/components/OnboardingQuiz";
 import type { TradingCard } from "@/data/pokemon";
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
-const WATCHLIST_KEY  = "cardmatch:watchlist";
-const ONBOARDING_KEY = "cardmatch:onboarding_done";
-const PREFS_KEY      = "cardmatch:preferences";
+const WATCHLIST_KEY   = "cardmatch:watchlist";
+const ONBOARDING_KEY  = "cardmatch:onboarding_done";
+const PREFS_KEY       = "cardmatch:preferences";
+const TAG_WEIGHTS_KEY = "cardmatch:tag_weights";
 
-// ── Preference shape ──────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 type Preferences = {
   categoryScores: Record<string, number>;
   eraScores:      Record<string, number>;
@@ -29,7 +30,7 @@ type SwipeRecord = {
 
 type AppMode = "onboarding" | "feed-loading" | "feed";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Module-level helpers ──────────────────────────────────────────────────────
 function loadLocalWatchlist(): TradingCard[] {
   try {
     const raw = localStorage.getItem(WATCHLIST_KEY);
@@ -47,36 +48,59 @@ function loadPrefs(): Preferences | null {
   } catch { return null; }
 }
 
+function loadTagWeights(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(TAG_WEIGHTS_KEY) || "{}"); }
+  catch { return {}; }
+}
+
 function getInitialMode(): AppMode {
   try {
     return localStorage.getItem(ONBOARDING_KEY) ? "feed-loading" : "onboarding";
   } catch { return "onboarding"; }
 }
 
-function buildFeedUrl(prefs: Preferences, seenIds: Set<string>): string {
+/** Builds the /api/feed URL, including the top-20 tag weights to keep URL size manageable. */
+function buildFeedUrl(
+  prefs:      Preferences,
+  seenIds:    Set<string>,
+  tagWeights: Record<string, number>
+): string {
   const cats   = prefs.topCategories.join(",");
   const seen   = [...seenIds].slice(-150).join(",");
   const scores = Object.entries(prefs.categoryScores)
     .map(([k, v]) => `${k}:${v}`)
     .join(",");
-  return `/api/feed?cats=${encodeURIComponent(cats)}&seen=${encodeURIComponent(seen)}&scores=${encodeURIComponent(scores)}&count=20`;
+  // Send only the top 20 tags by absolute weight to keep the URL reasonable
+  const topTW = Object.entries(tagWeights)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, 20);
+  const tw = JSON.stringify(Object.fromEntries(topTW));
+  return (
+    `/api/feed?cats=${encodeURIComponent(cats)}` +
+    `&seen=${encodeURIComponent(seen)}` +
+    `&scores=${encodeURIComponent(scores)}` +
+    `&tag_weights=${encodeURIComponent(tw)}` +
+    `&count=20`
+  );
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [appMode,      setAppMode]      = useState<AppMode>(getInitialMode);
-  const [cards,        setCards]        = useState<TradingCard[]>([]);
-  const [liked,        setLiked]        = useState<TradingCard[]>(loadLocalWatchlist);
-  const [prefs,        setPrefs]        = useState<Preferences | null>(loadPrefs);
-  const [isLoadingMore,setIsLoadingMore]= useState(false);
-  const [watchlistOpen,setWatchlistOpen]= useState(false);
-  const [deckResetKey, setDeckResetKey] = useState(0);
-  const [feedError,    setFeedError]    = useState(false);
+  const [appMode,       setAppMode]       = useState<AppMode>(getInitialMode);
+  const [cards,         setCards]         = useState<TradingCard[]>([]);
+  const [liked,         setLiked]         = useState<TradingCard[]>(loadLocalWatchlist);
+  const [prefs,         setPrefs]         = useState<Preferences | null>(loadPrefs);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [watchlistOpen, setWatchlistOpen] = useState(false);
+  const [deckResetKey,  setDeckResetKey]  = useState(0);
+  const [feedError,     setFeedError]     = useState(false);
 
-  // Refs so callbacks always see fresh values without re-registering
-  const prefsRef         = useRef<Preferences | null>(prefs);
-  const seenIds          = useRef(new Set<string>());
-  const isLoadingMoreRef = useRef(false);
+  // Refs — always hold the latest value so async callbacks don't go stale
+  const prefsRef               = useRef<Preferences | null>(prefs);
+  const seenIds                = useRef(new Set<string>());
+  const isLoadingMoreRef       = useRef(false);
+  const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
+  const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
 
@@ -84,7 +108,6 @@ export default function App() {
   async function loadFeed(append = false) {
     const p = prefsRef.current;
     if (!p?.topCategories?.length) {
-      // No prefs → send back to onboarding
       localStorage.removeItem(ONBOARDING_KEY);
       setAppMode("onboarding");
       return;
@@ -96,7 +119,7 @@ export default function App() {
     setFeedError(false);
 
     try {
-      const url = buildFeedUrl(p, seenIds.current);
+      const url  = buildFeedUrl(p, seenIds.current, tagWeightsRef.current);
       const res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -122,14 +145,78 @@ export default function App() {
     }
   }
 
-  // On mount: subscribe to Supabase auth state and kick off feed if already onboarded
+  // ── Supabase: persist quiz results ─────────────────────────────────────────
+  function saveQuizResultsToSupabase(
+    userId:      string,
+    swipes:      SwipeRecord[],
+    preferences: Preferences | null
+  ) {
+    if (!supabase || !swipes.length) return;
+    supabase
+      .from("user_quiz_results")
+      .upsert(
+        {
+          user_id:    userId,
+          swipes,
+          preferences: preferences ?? {},
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" }
+      )
+      .then(({ error }) => {
+        if (error) console.warn("[quiz] Supabase save failed:", error.message);
+        else       console.log("[quiz] results saved to Supabase for", userId);
+      });
+  }
+
+  // ── Tag-weight scoring ──────────────────────────────────────────────────────
+  /** Debounce-persist tag_weights to Supabase (fires 3 s after the last swipe). */
+  function debounceSaveTagWeights(weights: Record<string, number>) {
+    if (saveTagWeightsTimerRef.current) clearTimeout(saveTagWeightsTimerRef.current);
+    saveTagWeightsTimerRef.current = setTimeout(async () => {
+      if (!supabase) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+      supabase
+        .from("user_quiz_results")
+        .upsert(
+          {
+            user_id:    session.user.id,
+            tag_weights: weights,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        )
+        .then(({ error }) => {
+          if (error) console.warn("[tags] Supabase tag_weights save failed:", error.message);
+        });
+    }, 3000);
+  }
+
+  /**
+   * Update tag weights on every swipe.
+   * Right swipe → +1  to all card tags.
+   * Left swipe  → -0.5 to all card tags.
+   */
+  function updateTagWeights(card: TradingCard, delta: number) {
+    const tags = card.tags;
+    if (!tags?.length) return;
+    const updated = { ...tagWeightsRef.current };
+    for (const tag of tags) {
+      updated[tag] = +(((updated[tag] ?? 0) + delta).toFixed(2));
+    }
+    tagWeightsRef.current = updated;
+    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(updated));
+    debounceSaveTagWeights(updated);
+  }
+
+  // ── Mount: auth subscription + seed tag weights from Supabase ──────────────
   useEffect(() => {
-    // Supabase auth state listener — handles OAuth redirect + magic link callbacks
     let unsub: (() => void) | null = null;
+
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
-          // Persist user profile to localStorage for UI display
           const { email, user_metadata } = session.user;
           localStorage.setItem("cardmatch:user", JSON.stringify({
             email:   email || "",
@@ -137,22 +224,47 @@ export default function App() {
             picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
           }));
 
-          // Recover swipes that were saved before the OAuth redirect
           const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
           if (pendingRaw) {
             try {
               const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
               localStorage.removeItem("cardmatch:pending_swipes");
-              handleOnboardingComplete(pendingSwipes);
+
+              if (!localStorage.getItem(ONBOARDING_KEY)) {
+                handleOnboardingComplete(pendingSwipes);
+              } else {
+                const savedPrefs = (() => {
+                  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
+                })();
+                saveQuizResultsToSupabase(session.user.id, pendingSwipes, savedPrefs);
+              }
               return;
-            } catch { /* malformed data — ignore */ }
+            } catch { /* malformed — ignore */ }
           }
         }
       });
       unsub = () => subscription.unsubscribe();
+
+      // If already authenticated, load persisted tag weights from Supabase
+      // and merge with any local weights (local wins for conflicts — they're more recent)
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session?.user) return;
+        supabase!
+          .from("user_quiz_results")
+          .select("tag_weights")
+          .eq("user_id", session.user.id)
+          .maybeSingle()
+          .then(({ data }) => {
+            if (data?.tag_weights && typeof data.tag_weights === "object") {
+              // Merge: local (from this session's swipes) takes priority
+              const merged = { ...(data.tag_weights as Record<string, number>), ...tagWeightsRef.current };
+              tagWeightsRef.current = merged;
+              localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
+            }
+          });
+      });
     }
 
-    // Initial feed load if the user already completed onboarding
     if (appMode === "feed-loading") loadFeed(false);
 
     return () => { unsub?.(); };
@@ -176,6 +288,34 @@ export default function App() {
         localStorage.setItem(PREFS_KEY, JSON.stringify(data.preferences));
         prefsRef.current = data.preferences;
         setPrefs(data.preferences);
+
+        // Seed initial tag weights from quiz category/era/style scores
+        const {
+          categoryScores = {} as Record<string, number>,
+          eraScores      = {} as Record<string, number>,
+          styleScores    = {} as Record<string, number>,
+        } = data.preferences;
+
+        const seedTW: Record<string, number> = { ...tagWeightsRef.current };
+        const addScore = (key: string, score: number) => {
+          const tag = key.toLowerCase().replace(/[\s_]+/g, "-");
+          seedTW[tag] = +(((seedTW[tag] ?? 0) + score).toFixed(2));
+        };
+        Object.entries(categoryScores as Record<string, number>).forEach(([k, v]) => addScore(k, v));
+        Object.entries(eraScores      as Record<string, number>).forEach(([k, v]) => addScore(k, v));
+        Object.entries(styleScores    as Record<string, number>).forEach(([k, v]) => addScore(k, v));
+
+        tagWeightsRef.current = seedTW;
+        localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(seedTW));
+
+        // Fire-and-forget: persist to Supabase if authenticated
+        if (supabase && swipes.length > 0) {
+          supabase.auth.getSession().then(({ data: { session } }) => {
+            if (session?.user) {
+              saveQuizResultsToSupabase(session.user.id, swipes, data.preferences);
+            }
+          });
+        }
       }
 
       const incoming: TradingCard[] = data.cards ?? [];
@@ -204,7 +344,6 @@ export default function App() {
           [card.category]: (base.categoryScores[card.category] || 0) + delta,
         },
       };
-      // Re-rank topCategories based on updated scores
       updated.topCategories = Object.entries(updated.categoryScores)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 3)
@@ -223,10 +362,12 @@ export default function App() {
       return next;
     });
     updatePrefsOnSwipe(card, "LIKE");
+    updateTagWeights(card, 1);         // +1 to all tags on this card
   }
 
   function handlePass(card: TradingCard) {
     updatePrefsOnSwipe(card, "PASS");
+    updateTagWeights(card, -0.5);      // -0.5 to all tags on this card
   }
 
   function handleBuy(card: TradingCard) {
@@ -251,7 +392,7 @@ export default function App() {
 
   const handleNeedMore = useCallback(() => { loadFeed(true); }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
 
@@ -315,16 +456,9 @@ export default function App() {
       {/* ── MAIN FEED ─────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        {/* Header */}
         <header className="h-16 px-4 md:px-5 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
-
-          {/* Logo + wordmark */}
           <div className="flex items-center gap-3">
-            <img
-              src="/logo.png"
-              alt="The Card Match"
-              className="w-10 h-10 rounded-xl shadow-md"
-            />
+            <img src="/logo.png" alt="The Card Match" className="w-10 h-10 rounded-xl shadow-md" />
             <div>
               <h1 className="text-sm font-black uppercase tracking-tighter leading-none text-foreground">
                 THE CARD MATCH
@@ -335,7 +469,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Watchlist button */}
           <button
             onClick={() => setWatchlistOpen(true)}
             className="relative w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
@@ -354,7 +487,6 @@ export default function App() {
           </button>
         </header>
 
-        {/* Deck area */}
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
             {appMode === "feed" && cards.length === 0 ? (
@@ -363,9 +495,7 @@ export default function App() {
                   <>
                     <p className="text-4xl">⚠️</p>
                     <p className="text-base font-semibold">Couldn't load cards</p>
-                    <p className="text-sm text-muted-foreground">
-                      Check your connection and try again.
-                    </p>
+                    <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
                     <button
                       onClick={() => { setFeedError(false); loadFeed(false); }}
                       className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
@@ -377,9 +507,7 @@ export default function App() {
                   <>
                     <p className="text-4xl">🃏</p>
                     <p className="text-base font-semibold">You've seen everything!</p>
-                    <p className="text-sm text-muted-foreground">
-                      We're pulling fresh listings for you.
-                    </p>
+                    <p className="text-sm text-muted-foreground">We're pulling fresh listings for you.</p>
                     <button
                       onClick={() => loadFeed(false)}
                       className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"

@@ -89,8 +89,8 @@ function AuthModal({
       transition={{ type: "spring", stiffness: 300, damping: 28 }}
       className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center p-4 sm:p-0"
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => onDone()} />
+      {/* Backdrop — not dismissible; user must sign in or request a magic link */}
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
 
       <div className="relative w-full max-w-sm bg-card border border-border rounded-3xl shadow-2xl overflow-hidden z-10">
         {/* Header */}
@@ -224,22 +224,28 @@ export function OnboardingQuiz({ onComplete }: Props) {
     setCurrentIndex(nextIndex);
 
     if (nextIndex >= total && total > 0) {
+      // Persist swipes immediately — Google OAuth will redirect away from the page
+      localStorage.setItem("cardmatch:pending_swipes", JSON.stringify(nextSwipes));
+
       setPhase("analyzing");
-      analysisTimer.current = setTimeout(() => setPhase("auth"), 2500);
+      analysisTimer.current = setTimeout(async () => {
+        // If user already has an active Supabase session, skip the auth modal
+        if (supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            onComplete(nextSwipes);
+            return;
+          }
+        }
+        setPhase("auth");
+      }, 2500);
     }
   }
 
-  async function handleAuthDone() {
-    // POST swipes to backend (fire-and-forget)
-    fetch("/api/onboarding/complete", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ userId: null, swipes }),
-    }).catch(() => {});
-
-    // Mark done in localStorage so we don't show the quiz again
-    localStorage.setItem("cardmatch:onboarding_done", "1");
-
+  function handleAuthDone() {
+    // Called when user clicks "Continue browsing →" after requesting a magic link.
+    // pending_swipes stays in localStorage so onAuthStateChange can save to Supabase
+    // once the user clicks the email link.
     onComplete(swipes);
   }
 

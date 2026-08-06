@@ -353,23 +353,112 @@ export function detectCategory(title, selectedCats, itemCategoryIds = []) {
   return selectedCats[0] || "Unknown";
 }
 
+// ── Multi-attribute tag extraction ───────────────────────────────────────────
+
+/** Infer era from year digits in the title; fall back to keyword scan. */
+export function detectEra(title) {
+  const m = title.match(/\b(19\d{2}|20[0-2]\d)\b/);
+  if (m) {
+    const yr = parseInt(m[1]);
+    if (yr < 2000) return "vintage";
+    if (yr < 2021) return "modern";
+    return "current";
+  }
+  const t = title.toLowerCase();
+  if (/\b(vintage|antique|classic|retro)\b/.test(t)) return "vintage";
+  return "modern";
+}
+
+/** Primary card type — most specific attribute wins. */
+export function extractCardType(title) {
+  const t = title.toLowerCase();
+  if (/\brpa\b/.test(t))                                       return "rpa";
+  if (/\b(auto|autograph)\b/.test(t))                          return "auto";
+  if (/\b(patch|relic)\b/.test(t))                             return "patch";
+  if (/\b(rookie|rc)\b/.test(t))                               return "rookie";
+  if (/\brefractor\b/.test(t))                                 return "refractor";
+  if (/\bprizm?\b/.test(t))                                    return "prizm";
+  if (/\/1\b|"1\/1"/.test(t))                                  return "1-of-1";
+  if (/\/(10|25|50|99)\b/.test(t))                             return "numbered";
+  if (/\b(psa|bgs|sgc|cgc|hga)\b/.test(t))                   return "graded";
+  if (/\b(foil|parallel|rainbow)\b/.test(t))                  return "parallel";
+  if (/\b(short print|" sp"|ssp|case hit)\b/.test(t))         return "short-print";
+  if (/\b(alt art|alternate art|special illustration)\b/.test(t)) return "alt-art";
+  return "base";
+}
+
+/** All matching tag strings for a card — used for dot-product scoring. */
+export function buildTags(title, category, item) {
+  const t    = title.toLowerCase();
+  const tags = new Set();
+
+  // Category
+  tags.add(category.toLowerCase().replace(/\s+/g, "-"));
+
+  // Era
+  tags.add(detectEra(title));
+
+  // Card-type signals — add ALL that match (not just the primary)
+  if (/\brpa\b/.test(t))                                       tags.add("rpa");
+  if (/\b(auto|autograph)\b/.test(t))                          tags.add("auto");
+  if (/\b(patch|relic)\b/.test(t))                             tags.add("patch");
+  if (/\b(rookie|rc)\b/.test(t))                               tags.add("rookie");
+  if (/\brefractor\b/.test(t))                                 tags.add("refractor");
+  if (/\bprizm?\b/.test(t))                                    tags.add("prizm");
+  if (/\/1\b|"1\/1"/.test(t))                                  tags.add("1-of-1");
+  if (/\/(10|25|50|99)\b/.test(t))                             tags.add("numbered");
+  if (/\b(psa|bgs|sgc|cgc|hga)\b/.test(t))                   tags.add("graded");
+  if (/psa\s*10|gem\s*mint/.test(t))                          tags.add("psa10");
+  if (/psa\s*9\b/.test(t))                                    tags.add("psa9");
+  if (/bgs\s*9\.5/.test(t))                                   tags.add("bgs95");
+  if (/\b(foil|parallel|rainbow)\b/.test(t))                  tags.add("parallel");
+  if (/\b(alt art|alternate art|special illustration)\b/.test(t)) tags.add("alt-art");
+  if (/\b(gold|silver|red|blue|green)\b.*(refractor|prizm|mojo|wave)/.test(t))
+    tags.add("color-refractor");
+
+  // Price tier
+  const price = parseFloat(item.currentBidPrice?.value ?? item.price?.value ?? "0");
+  if (price >= 1000)      tags.add("high-value");
+  else if (price >= 200)  tags.add("mid-value");
+  else                    tags.add("entry-value");
+
+  // Listing type
+  if ((item.buyingOptions || []).includes("AUCTION")) tags.add("auction");
+  else                                                tags.add("buy-it-now");
+
+  return [...tags];
+}
+
+/** Best-effort player name — first 2–3 consecutive title-cased words. */
+export function extractPlayer(title) {
+  const m = title.match(/\b([A-Z][a-z'-]+(?:\s[A-Z][a-z'.'-]+){1,2})\b/);
+  return m ? m[1] : null;
+}
+
 export function mapFeedItem(item, catHints = []) {
+  const title      = item.title || "Unknown Card";
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
+  const category   = detectCategory(
+    title,
+    catHints,
+    (item.categories || []).map((c) => String(c.categoryId))
+  );
+  const era       = detectEra(title);
+  const card_type = extractCardType(title);
+  const player    = extractPlayer(title);
+  const tags      = buildTags(title, category, item);
+
   return {
     id:              item.itemId,
-    name:            item.title || "Unknown Card",
-    category:        detectCategory(
-                       item.title || "",
-                       catHints,
-                       (item.categories || []).map((c) => String(c.categoryId))
-                     ),
+    name:            title,
+    category,
     image:           forceHD(item.image?.imageUrl || item.thumbnailImages?.[0]?.imageUrl),
     images:          (item.additionalImages || []).map((i) => forceHD(i.imageUrl)).filter(Boolean),
     currentBid:      parseFloat(item.currentBidPrice?.value ?? "") ||
                      parseFloat(item.price?.value ?? "") || 0,
     currency:        item.currentBidPrice?.currency ?? item.price?.currency ?? "USD",
-    grade:           detectGrade(item.title || ""),
+    grade:           detectGrade(title),
     ebayUrl:         buildAffiliateUrl(item),
     endTime:         item.itemEndDate || null,
     watchCount,
@@ -377,5 +466,10 @@ export function mapFeedItem(item, catHints = []) {
     engagementScore: watchCount * 2 + bidCount * 3,
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+    // ── Multi-attribute metadata ──────────────────────────────────────────────
+    tags,
+    era,
+    card_type,
+    player,
   };
 }
