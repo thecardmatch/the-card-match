@@ -59,36 +59,25 @@ function getInitialMode(): AppMode {
   } catch { return "onboarding"; }
 }
 
-// Default categories shown when user has no positive preferences (e.g. swiped left on everything in testing)
-const DEFAULT_CATS = ["Football", "Baseball", "Basketball"];
-
-/** Builds the /api/feed URL, including the top-20 tag weights to keep URL size manageable. */
+/**
+ * Builds the /api/feed URL.
+ * The feed derives active categories and proportions directly from tag_weights —
+ * no need to send `cats` or `scores` separately.
+ * Only the top-40 tags by absolute weight are sent to keep the URL size reasonable.
+ */
 function buildFeedUrl(
-  prefs:      Preferences,
   seenIds:    Set<string>,
   tagWeights: Record<string, number>
 ): string {
-  // Guard: if all topCategories have negative or zero scores the user has no clear preference
-  // (common in testing when swiping left on everything). Use a balanced sports default instead.
-  const scoredTop = prefs.topCategories.filter(
-    (c) => (prefs.categoryScores[c] ?? 0) > 0
-  );
-  const activeCats = scoredTop.length > 0 ? prefs.topCategories : DEFAULT_CATS;
-
-  const cats   = activeCats.join(",");
-  const seen   = [...seenIds].slice(-150).join(",");
-  const scores = Object.entries(prefs.categoryScores)
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",");
-  // Send only the top 20 tags by absolute weight to keep the URL reasonable
+  const seen  = [...seenIds].slice(-150).join(",");
+  // Top 40 tags by absolute weight (category keys + attribute keys)
   const topTW = Object.entries(tagWeights)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-    .slice(0, 20);
+    .slice(0, 40);
   const tw = JSON.stringify(Object.fromEntries(topTW));
   return (
-    `/api/feed?cats=${encodeURIComponent(cats)}` +
-    `&seen=${encodeURIComponent(seen)}` +
-    `&scores=${encodeURIComponent(scores)}` +
+    `/api/feed` +
+    `?seen=${encodeURIComponent(seen)}` +
     `&tag_weights=${encodeURIComponent(tw)}` +
     `&count=20`
   );
@@ -116,8 +105,10 @@ export default function App() {
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
-    const p = prefsRef.current;
-    if (!p?.topCategories?.length) {
+    // Redirect to onboarding if neither preferences nor tag_weights exist
+    const hasWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
+    const hasPrefs   = !!prefsRef.current?.topCategories?.length;
+    if (!hasWeights && !hasPrefs) {
       localStorage.removeItem(ONBOARDING_KEY);
       setAppMode("onboarding");
       return;
@@ -129,7 +120,7 @@ export default function App() {
     setFeedError(false);
 
     try {
-      const url  = buildFeedUrl(p, seenIds.current, tagWeightsRef.current);
+      const url  = buildFeedUrl(seenIds.current, tagWeightsRef.current);
       const res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -255,27 +246,41 @@ export default function App() {
       });
       unsub = () => subscription.unsubscribe();
 
-      // If already authenticated, load persisted tag weights from Supabase
-      // and merge with any local weights (local wins for conflicts — they're more recent)
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (!session?.user) return;
-        supabase!
-          .from("user_quiz_results")
-          .select("tag_weights")
-          .eq("user_id", session.user.id)
-          .maybeSingle()
-          .then(({ data }) => {
-            if (data?.tag_weights && typeof data.tag_weights === "object") {
-              // Merge: local (from this session's swipes) takes priority
-              const merged = { ...(data.tag_weights as Record<string, number>), ...tagWeightsRef.current };
-              tagWeightsRef.current = merged;
-              localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
-            }
-          });
-      });
     }
 
-    if (appMode === "feed-loading") loadFeed(false);
+    // ── Returning user: merge Supabase tag_weights THEN start the feed ────────
+    // For new users, handleOnboardingComplete seeds weights synchronously before
+    // showing any cards. For returning users we must wait for the Supabase read
+    // so the first fetch is driven by the correct weights, not stale localStorage.
+    async function initFeedForReturningUser() {
+      if (!supabase) {
+        if (appMode === "feed-loading") loadFeed(false);
+        return;
+      }
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const { data } = await supabase
+            .from("user_quiz_results")
+            .select("tag_weights")
+            .eq("user_id", session.user.id)
+            .maybeSingle();
+          if (data?.tag_weights && typeof data.tag_weights === "object") {
+            // Merge: local (more recent swipes) wins on key conflicts
+            const merged = {
+              ...(data.tag_weights as Record<string, number>),
+              ...tagWeightsRef.current,
+            };
+            tagWeightsRef.current = merged;
+            localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
+          }
+        }
+      } catch { /* network error — fall through with localStorage weights */ }
+
+      if (appMode === "feed-loading") loadFeed(false);
+    }
+
+    initFeedForReturningUser();
 
     return () => { unsub?.(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

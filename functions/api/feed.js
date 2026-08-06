@@ -1,12 +1,16 @@
 /**
  * GET /api/feed
- * Personalized feed with tag-weight dot-product scoring and 80/20 explore split.
+ * Tag-weight-driven proportional feed with 80/20 explore split.
+ *
+ * The fetch pool is built entirely from tag_weights:
+ *  - Category keys (football, basketball, etc.) with positive weights determine
+ *    which eBay categories to query — negative or absent = excluded entirely.
+ *  - Weights are proportional: a user with football:3,baseball:2 gets a ~60/40 fetch mix.
+ *  - Non-category tag keys (auto, rookie, vintage …) still drive dot-product ranking.
  *
  * Query params:
- *   cats        — comma-separated top categories, e.g. "Football,Basketball"
+ *   tag_weights — JSON map of tag→weight, e.g. {"football":3,"baseball":2,"auto":1.5}
  *   seen        — comma-separated itemIds to exclude (already-swiped)
- *   scores      — per-category preference scores, e.g. "Football:3,Basketball:1"
- *   tag_weights — JSON map of tag→weight, e.g. {"rookie":5,"vintage":3.5}
  *   count       — cards to return (max 40, default 20)
  */
 import {
@@ -20,6 +24,24 @@ import {
 } from "../_shared/ebay.js";
 
 export { _cors as onRequestOptions };
+
+// ── Category key mapping ──────────────────────────────────────────────────────
+// tag_weights category keys are the lowercase-slugified config key names,
+// as produced by: key.toLowerCase().replace(/[\s_]+/g, "-")
+const CAT_TAG_TO_CONFIG = {
+  football:   "Football",
+  basketball: "Basketball",
+  baseball:   "Baseball",
+  hockey:     "Hockey",
+  soccer:     "Soccer",
+  pokemon:    "Pokemon",
+  mtg:        "MTG",
+  racing:     "Racing",
+  popculture: "PopCulture",
+};
+
+// Fallback when tag_weights has no positive category keys (edge case / fresh install)
+const DEFAULT_CATS = ["Football", "Baseball", "Basketball"];
 
 // ── Scoring & ranking ─────────────────────────────────────────────────────────
 
@@ -45,7 +67,7 @@ function rankAndExplore(items, tagWeights, returnCount) {
   }));
   scored.sort((a, b) => b._tagScore - a._tagScore);
 
-  const topN  = Math.ceil(n * 0.8);
+  const topN   = Math.ceil(n * 0.8);
   const exploN = n - topN;
 
   const top  = scored.slice(0, topN);
@@ -60,7 +82,7 @@ function rankAndExplore(items, tagWeights, returnCount) {
 
   // Weave exploration into the top list every 5 slots
   const result = [...top];
-  let slot = 4; // first insertion after card 5
+  let slot = 4;
   for (const card of exploration) {
     result.splice(Math.min(slot, result.length), 0, card);
     slot += 5;
@@ -74,120 +96,110 @@ export async function onRequestGet(context) {
   const { env, request } = context;
   const sp = new URL(request.url).searchParams;
 
-  const cats   = sp.get("cats")        || "";
-  const seen   = sp.get("seen")        || "";
-  const count  = sp.get("count")       || "20";
-  const scores = sp.get("scores")      || "";
-  const twRaw  = sp.get("tag_weights") || "{}";
+  const seen  = sp.get("seen")        || "";
+  const count = sp.get("count")       || "20";
+  const twRaw = sp.get("tag_weights") || "{}";
 
-  const categories  = cats ? cats.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const seenSet     = new Set(seen ? seen.split(",").filter(Boolean) : []);
   const returnCount = Math.min(parseInt(count) || 20, 40);
 
-  // Parse tag weights JSON
   let tagWeights = {};
   try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
 
-  // Parse per-category urgency boosters
-  const catScores = {};
-  for (const part of scores.split(",")) {
-    const [cat, val] = part.split(":");
-    if (cat && val) catScores[cat.trim()] = parseFloat(val) || 0;
+  // ── 1. Derive active categories from positive tag_weights ─────────────────
+  // Only categories the user has expressed positive interest in are fetched.
+  // A category with a negative or zero weight is excluded entirely.
+  const catWeights = {}; // { Football: 3, Baseball: 2 }
+  for (const [key, weight] of Object.entries(tagWeights)) {
+    const configKey = CAT_TAG_TO_CONFIG[key];
+    if (configKey && weight > 0 && CATEGORY_FEED_CONFIG[configKey]) {
+      catWeights[configKey] = (catWeights[configKey] || 0) + weight;
+    }
   }
 
-  if (categories.length === 0) return jsonResponse({ items: [] });
+  // Fallback: no positive category weights → balanced sports default
+  const useDefault = Object.keys(catWeights).length === 0;
+  if (useDefault) {
+    DEFAULT_CATS.forEach((cat) => {
+      if (CATEGORY_FEED_CONFIG[cat]) catWeights[cat] = 1;
+    });
+  }
+
+  // ── 2. Compute proportional fetch plan ────────────────────────────────────
+  const totalWeight  = Object.values(catWeights).reduce((s, w) => s + w, 0);
+  const POOL_FACTOR  = 4; // fetch 4× the return count for dedup headroom
+  const fetchPool    = returnCount * POOL_FACTOR;
+
+  const fetchPlan = Object.entries(catWeights)
+    .map(([cat, weight]) => ({
+      cat,
+      proportion: weight / totalWeight,
+      budget: Math.max(20, Math.ceil(fetchPool * (weight / totalWeight))),
+    }))
+    .sort((a, b) => b.proportion - a.proportion);
+
+  console.log(
+    `[feed] cats: ${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(", ")}` +
+    (useDefault ? " [default]" : "")
+  );
 
   try {
     const token    = await getEbayToken(env);
     const allItems = [];
-    const unique   = new Set();
 
-    // ── Primary fetch: top 3 user categories ────────────────────────────────
-    // Top category gets 2 search terms; 2nd and 3rd get 1 term each.
-    const primaryPairs = categories.slice(0, 3).flatMap((cat, idx) => {
-      const cfg = CATEGORY_FEED_CONFIG[cat];
-      if (!cfg) return [];
-      const { terms, categoryId, minPrice } = cfg;
-      const pf = `price:[${minPrice}..],priceCurrency:USD`;
-      return terms.slice(0, idx === 0 ? 2 : 1).map((term) => ({
-        cat, term, categoryId, pf,
-      }));
-    });
-
+    // ── 3. Proportional parallel fetch ───────────────────────────────────
+    // Categories with ≥45% share get 2 search terms; others get 1.
     await Promise.all(
-      primaryPairs.map(async ({ cat, term, categoryId, pf }) => {
-        try {
-          const [auctData, binData] = await Promise.all([
-            ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,    null, categoryId, 40, 0),
-            ebaySearch(token, term, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0),
-          ]);
-          for (const raw of [...(auctData.itemSummaries || []), ...(binData.itemSummaries || [])]) {
+      fetchPlan.map(async ({ cat, proportion, budget }) => {
+        const cfg = CATEGORY_FEED_CONFIG[cat];
+        if (!cfg) return;
+        const { terms, categoryId, minPrice } = cfg;
+        const pf = `price:[${minPrice}..],priceCurrency:USD`;
+
+        const termCount  = proportion >= 0.45 ? Math.min(2, terms.length) : 1;
+        const perTerm    = Math.ceil(budget / termCount);
+        const auctLimit  = Math.ceil(perTerm * 0.65); // auctions ranked by urgency
+        const binLimit   = Math.ceil(perTerm * 0.35);
+
+        const searches = terms.slice(0, termCount).flatMap((term) => [
+          ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, auctLimit, 0),
+          ebaySearch(token, term, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, binLimit,  0),
+        ]);
+
+        const settled = await Promise.allSettled(searches);
+        for (const r of settled) {
+          if (r.status !== "fulfilled") continue;
+          for (const raw of (r.value.itemSummaries || [])) {
             if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [cat]));
           }
-        } catch (e) {
-          console.warn(`[feed] primary fetch failed for ${cat}:`, e.message);
         }
       })
     );
 
-    // ── Deduplicate and exclude already-seen cards ───────────────────────────
-    let fresh = allItems.filter((i) => {
+    // ── 4. Deduplicate and exclude already-seen cards ─────────────────────
+    const unique = new Set();
+    const fresh  = allItems.filter((i) => {
       if (seenSet.has(i.id) || unique.has(i.id)) return false;
       unique.add(i.id);
       return true;
     });
 
-    // ── Fallback: supplement when primary pool is thin ───────────────────────
-    // Priority: highest-scored non-primary categories that the user hasn't disliked.
-    // Never pull from categories with a negative catScore (user explicitly passed on them).
-    if (fresh.length < returnCount) {
-      const primarySet   = new Set(categories.slice(0, 2));
-      const fallbackCats = Object.keys(CATEGORY_FEED_CONFIG)
-        .filter((k) => !primarySet.has(k) && (catScores[k] ?? 0) >= 0)
-        .sort((a, b) => (catScores[b] ?? 0) - (catScores[a] ?? 0))
-        .slice(0, 3);
-
-      await Promise.all(
-        fallbackCats.map(async (cat) => {
-          const cfg = CATEGORY_FEED_CONFIG[cat];
-          if (!cfg) return;
-          const { terms, categoryId, minPrice } = cfg;
-          const pf = `price:[${minPrice}..],priceCurrency:USD`;
-          try {
-            const data = await ebaySearch(
-              token, terms[0], "bestMatch",
-              `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0
-            );
-            for (const raw of (data.itemSummaries || [])) {
-              if (isSuppliesCategory(raw)) continue;
-              const mapped = mapFeedItem(raw, [cat]);
-              if (!seenSet.has(mapped.id) && !unique.has(mapped.id)) {
-                unique.add(mapped.id);
-                fresh.push(mapped);
-              }
-            }
-          } catch (e) {
-            console.warn(`[feed] fallback fetch failed for ${cat}:`, e.message);
-          }
-        })
-      );
-    }
-
-    // ── Apply urgency multiplier to engagement score ─────────────────────────
-    const now = Date.now();
-    fresh = fresh.map((item) => {
+    // ── 5. Apply urgency multiplier to engagement score ───────────────────
+    const now     = Date.now();
+    const boosted = fresh.map((item) => {
       let urgency = 1;
       if (item.endTime) {
         const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
         if (hrs > 0 && hrs < 2)        urgency = 3;
         else if (hrs >= 2 && hrs < 12) urgency = 2;
       }
-      const catBoost = Math.max(catScores[item.category] ?? 0, 0) * 2;
-      return { ...item, engagementScore: (item.engagementScore + catBoost) * urgency };
+      return { ...item, engagementScore: item.engagementScore * urgency };
     });
 
-    // ── Tag-weight ranking + 80/20 exploration split ─────────────────────────
-    const ranked = rankAndExplore(fresh, tagWeights, returnCount);
+    console.log(`[feed] pool: ${fresh.length} fresh cards → returning ${Math.min(fresh.length, returnCount)}`);
+
+    // ── 6. Tag-weight ranking + 80/20 exploration split ───────────────────
+    const ranked = rankAndExplore(boosted, tagWeights, returnCount);
     return jsonResponse({ items: ranked });
 
   } catch (err) {
