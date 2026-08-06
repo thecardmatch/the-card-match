@@ -37,40 +37,68 @@ export async function onRequestPost(context) {
       if (style) styleScores[style] = (styleScores[style] || 0) + delta;
     }
 
-    // ── 2. Top 3 categories ──────────────────────────────────────────────────
-    const topCategories = Object.entries(categoryScores)
-      .sort((a, b) => b[1] - a[1])
+    // ── 2. Ranked categories ─────────────────────────────────────────────────
+    // Sort all categories by score descending. Only include positively-scored
+    // categories when fetching cards — never show content the user passed on.
+    const rankedCats = Object.entries(categoryScores)
+      .sort((a, b) => b[1] - a[1]);
+
+    const topCategories = rankedCats
       .slice(0, 3)
+      .map(([cat]) => cat);
+
+    // Liked categories: score > 0 (user swiped right on at least one)
+    const likedCats = rankedCats
+      .filter(([, score]) => score > 0)
       .map(([cat]) => cat);
 
     const preferences = { categoryScores, eraScores, styleScores, topCategories };
 
-    // ── 3. Fetch ~40 live eBay cards for top 2 categories ───────────────────
+    // ── 3. Fetch live eBay cards for liked categories ────────────────────────
+    // Try up to 3 liked categories so we get a rich initial pool even if one
+    // category returns thin results (e.g., a recently-released set).
     const token    = await getEbayToken(env);
     const allItems = [];
 
-    for (const cat of topCategories.slice(0, 2)) {
-      const cfg = CATEGORY_FEED_CONFIG[cat];
-      if (!cfg) continue;
-      const { terms, categoryId, minPrice } = cfg;
-      const priceFilter = `price:[${minPrice}..],priceCurrency:USD`;
+    const fetchCats = likedCats.slice(0, 3).filter((c) => CATEGORY_FEED_CONFIG[c]);
 
-      for (const term of terms.slice(0, 2)) {
-        try {
-          const [auctData, binData] = await Promise.all([
-            ebaySearch(token, term, "endingSoonest", `${priceFilter},buyingOptions:{AUCTION}`,    null, categoryId, 30, 0),
-            ebaySearch(token, term, "bestMatch",     `${priceFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0),
-          ]);
-          const mapped = [
-            ...(auctData.itemSummaries || []),
-            ...(binData.itemSummaries  || []),
-          ].filter((i) => !isSuppliesCategory(i)).map((i) => mapFeedItem(i, [cat]));
-          allItems.push(...mapped);
-        } catch (e) {
-          console.warn(`[onboarding/complete] fetch failed for ${cat}:`, e.message);
-        }
-      }
+    // Emergency fallback: if no liked categories have a config (edge case),
+    // use the top overall category regardless of score.
+    if (fetchCats.length === 0) {
+      const fallback = topCategories.find((c) => CATEGORY_FEED_CONFIG[c]);
+      if (fallback) fetchCats.push(fallback);
     }
+
+    await Promise.all(
+      fetchCats.map(async (cat, idx) => {
+        const cfg = CATEGORY_FEED_CONFIG[cat];
+        const { terms, categoryId, minPrice } = cfg;
+        const priceFilter = `price:[${minPrice}..],priceCurrency:USD`;
+
+        // Fetch 2 search terms for the #1 category, 1 for the rest
+        const termCount = idx === 0 ? 2 : 1;
+
+        await Promise.all(
+          terms.slice(0, termCount).map(async (term) => {
+            try {
+              const [auctData, binData] = await Promise.all([
+                ebaySearch(token, term, "endingSoonest", `${priceFilter},buyingOptions:{AUCTION}`,    null, categoryId, 30, 0),
+                ebaySearch(token, term, "bestMatch",     `${priceFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, 20, 0),
+              ]);
+              const mapped = [
+                ...(auctData.itemSummaries || []),
+                ...(binData.itemSummaries  || []),
+              ]
+                .filter((i) => !isSuppliesCategory(i))
+                .map((i) => mapFeedItem(i, [cat]));
+              allItems.push(...mapped);
+            } catch (e) {
+              console.warn(`[onboarding/complete] fetch failed for ${cat}:`, e.message);
+            }
+          })
+        );
+      })
+    );
 
     // ── 4. Deduplicate, score, sort, slice ──────────────────────────────────
     const seen   = new Set();
@@ -95,7 +123,9 @@ export async function onRequestPost(context) {
     scored.sort((a, b) => b.rankScore - a.rankScore);
     const cards = scored.slice(0, 40);
 
+    console.log(`[onboarding/complete] fetched ${cards.length} cards for cats: ${fetchCats.join(", ")}`);
     return jsonResponse({ preferences, cards });
+
   } catch (err) {
     console.error("[onboarding/complete]", err.message);
     return jsonResponse({ preferences: null, cards: [], error: err.message }, 500);

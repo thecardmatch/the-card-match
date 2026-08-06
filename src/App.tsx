@@ -59,13 +59,23 @@ function getInitialMode(): AppMode {
   } catch { return "onboarding"; }
 }
 
+// Default categories shown when user has no positive preferences (e.g. swiped left on everything in testing)
+const DEFAULT_CATS = ["Football", "Baseball", "Basketball"];
+
 /** Builds the /api/feed URL, including the top-20 tag weights to keep URL size manageable. */
 function buildFeedUrl(
   prefs:      Preferences,
   seenIds:    Set<string>,
   tagWeights: Record<string, number>
 ): string {
-  const cats   = prefs.topCategories.join(",");
+  // Guard: if all topCategories have negative or zero scores the user has no clear preference
+  // (common in testing when swiping left on everything). Use a balanced sports default instead.
+  const scoredTop = prefs.topCategories.filter(
+    (c) => (prefs.categoryScores[c] ?? 0) > 0
+  );
+  const activeCats = scoredTop.length > 0 ? prefs.topCategories : DEFAULT_CATS;
+
+  const cats   = activeCats.join(",");
   const seen   = [...seenIds].slice(-150).join(",");
   const scores = Object.entries(prefs.categoryScores)
     .map(([k, v]) => `${k}:${v}`)

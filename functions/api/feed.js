@@ -102,13 +102,13 @@ export async function onRequestGet(context) {
     const allItems = [];
     const unique   = new Set();
 
-    // ── Primary fetch: top 2 user categories ────────────────────────────────
-    const primaryPairs = categories.slice(0, 2).flatMap((cat, idx) => {
+    // ── Primary fetch: top 3 user categories ────────────────────────────────
+    // Top category gets 2 search terms; 2nd and 3rd get 1 term each.
+    const primaryPairs = categories.slice(0, 3).flatMap((cat, idx) => {
       const cfg = CATEGORY_FEED_CONFIG[cat];
       if (!cfg) return [];
       const { terms, categoryId, minPrice } = cfg;
       const pf = `price:[${minPrice}..],priceCurrency:USD`;
-      // Top category: 2 search terms; second category: 1 term
       return terms.slice(0, idx === 0 ? 2 : 1).map((term) => ({
         cat, term, categoryId, pf,
       }));
@@ -138,13 +138,14 @@ export async function onRequestGet(context) {
     });
 
     // ── Fallback: supplement when primary pool is thin ───────────────────────
-    // Happens naturally as the user exhausts cards in their top categories.
+    // Priority: highest-scored non-primary categories that the user hasn't disliked.
+    // Never pull from categories with a negative catScore (user explicitly passed on them).
     if (fresh.length < returnCount) {
       const primarySet   = new Set(categories.slice(0, 2));
       const fallbackCats = Object.keys(CATEGORY_FEED_CONFIG)
-        .filter((k) => !primarySet.has(k))
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 2);
+        .filter((k) => !primarySet.has(k) && (catScores[k] ?? 0) >= 0)
+        .sort((a, b) => (catScores[b] ?? 0) - (catScores[a] ?? 0))
+        .slice(0, 3);
 
       await Promise.all(
         fallbackCats.map(async (cat) => {

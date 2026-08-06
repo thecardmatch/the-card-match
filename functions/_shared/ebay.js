@@ -199,9 +199,15 @@ export const CATEGORY_FEED_CONFIG = {
 };
 
 // ── Item helpers ──────────────────────────────────────────────────────────────
+// eBay category IDs that are NOT trading cards and should be excluded from the feed.
+// 550  = Sporting Goods / Other (non-card memorabilia)
+// 183452 = Trading Card Accessories & Supplies
+// NOTE: 183444 is Soccer trading cards — do NOT put it here.
+const SUPPLY_CATEGORY_IDS = new Set(["550", "183452"]);
+
 export function isSuppliesCategory(item) {
   return (item.categories || []).some(
-    (c) => String(c.categoryId) === "183444" || String(c.categoryId) === "550"
+    (c) => SUPPLY_CATEGORY_IDS.has(String(c.categoryId))
   );
 }
 
