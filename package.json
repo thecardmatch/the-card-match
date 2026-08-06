@@ -10,6 +10,7 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "framer-motion": "^11.11.17",

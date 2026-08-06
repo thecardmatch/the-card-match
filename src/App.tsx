@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from "react";
+import { supabase } from "@/lib/supabaseClient";
 import { Heart } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar }        from "@/components/Sidebar";
@@ -121,41 +122,40 @@ export default function App() {
     }
   }
 
-  // On mount: if we already have prefs, load feed
-  // Also handle Google OAuth redirect callback (?auth_success=1)
+  // On mount: subscribe to Supabase auth state and kick off feed if already onboarded
   useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
+    // Supabase auth state listener — handles OAuth redirect + magic link callbacks
+    let unsub: (() => void) | null = null;
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === "SIGNED_IN" && session?.user) {
+          // Persist user profile to localStorage for UI display
+          const { email, user_metadata } = session.user;
+          localStorage.setItem("cardmatch:user", JSON.stringify({
+            email:   email || "",
+            name:    user_metadata?.full_name ?? user_metadata?.name ?? "",
+            picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
+          }));
 
-    if (sp.get("auth_success") === "1") {
-      // OAuth returned — store user info and complete onboarding
-      const email   = sp.get("email")   || "";
-      const name    = sp.get("name")    || "";
-      const picture = sp.get("picture") || "";
-      if (email) localStorage.setItem("cardmatch:user", JSON.stringify({ email, name, picture }));
-
-      // Grab swipes that were saved before the OAuth redirect
-      const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
-      const pendingSwipes = pendingRaw ? JSON.parse(pendingRaw) : [];
-      localStorage.removeItem("cardmatch:pending_swipes");
-
-      // Clean URL without reload
-      window.history.replaceState({}, "", window.location.pathname);
-
-      handleOnboardingComplete(pendingSwipes);
-      return;
+          // Recover swipes that were saved before the OAuth redirect
+          const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
+          if (pendingRaw) {
+            try {
+              const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
+              localStorage.removeItem("cardmatch:pending_swipes");
+              handleOnboardingComplete(pendingSwipes);
+              return;
+            } catch { /* malformed data — ignore */ }
+          }
+        }
+      });
+      unsub = () => subscription.unsubscribe();
     }
 
-    if (sp.get("auth_error")) {
-      // OAuth failed or not configured — clear URL and let user continue
-      const errCode = sp.get("auth_error") || "";
-      console.warn("[auth] OAuth error:", errCode);
-      window.history.replaceState({}, "", window.location.pathname);
-      // If onboarding was already done, still proceed to feed
-      if (localStorage.getItem(ONBOARDING_KEY)) loadFeed(false);
-      return;
-    }
-
+    // Initial feed load if the user already completed onboarding
     if (appMode === "feed-loading") loadFeed(false);
+
+    return () => { unsub?.(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
