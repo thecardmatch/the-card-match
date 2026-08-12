@@ -59,3 +59,7 @@ SUPABASE_ANON_KEY = "sb_publishable_zxfBEAi2JmjFYKiXqP9s3w_5ztQ_h-7"
 SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co"
 VITE_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxleHR5YnV6b2RpeHRwYm1namFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5ODM3NTMsImV4cCI6MjA5MjU1OTc1M30.rFBDIy7RIHOOJ17nb47veqinBVb7tnheWz-dJl473h4"
 VITE_SUPABASE_URL = "https://lextybuzodixtpbmgjah.supabase.co"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
