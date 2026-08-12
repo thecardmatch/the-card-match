@@ -102,6 +102,7 @@ export async function ebaySearch(
     let tq = q.trim();
     if (!tq.toLowerCase().includes("-lot")) tq += ` ${BULK_EXCLUSION}`;
     params.set("q", tq);
+    console.log("[EBAY API QUERY]:", tq, "| category:", categoryId ?? "any", "| filter:", filterStr ?? "none");
   }
   if (filterStr)    params.set("filter", filterStr);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
@@ -123,79 +124,19 @@ export async function ebaySearch(
 }
 
 // ── Category feed search config ───────────────────────────────────────────────
+// catTerm is the base eBay search query for each category.
+// The feed layer dynamically enriches it with the user's positive attribute tags.
+// minPrice: 0.99 so live auctions starting low are included.
 export const CATEGORY_FEED_CONFIG = {
-  Football: {
-    categoryId: "217",
-    terms: [
-      `(Patrick Mahomes, Jalen Hurts, C.J. Stroud, Lamar Jackson, Brock Purdy) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(CeeDee Lamb, Justin Jefferson, Ja'Marr Chase, Saquon Barkley, Travis Kelce) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cam Ward, Shedeur Sanders, Travis Hunter, Ashton Jeanty, Jaxson Dart) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Basketball: {
-    categoryId: "214",
-    terms: [
-      `(Victor Wembanyama, LeBron James, Stephen Curry, Luka Doncic, Giannis Antetokounmpo) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Zion Williamson, Jayson Tatum, Kevin Durant, Nikola Jokic, Anthony Edwards) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cooper Flagg, Ace Bailey, Dylan Harper, Tre Johnson, VJ Edgecombe) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Baseball: {
-    categoryId: "213",
-    terms: [
-      `(Shohei Ohtani, Aaron Judge, Juan Soto, Fernando Tatis, Vladimir Guerrero) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Paul Skenes, Roman Anthony, Elly De La Cruz, Jackson Holliday, Pete Crow-Armstrong) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Hockey: {
-    categoryId: "216",
-    terms: [
-      `(Connor Bedard, Connor McDavid, Alex Ovechkin, Sidney Crosby, Nathan MacKinnon) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Macklin Celebrini, Matvei Michkov, Cale Makar, David Pastrnak, Auston Matthews) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Soccer: {
-    categoryId: "183444",
-    terms: [
-      `(Lionel Messi, Kylian Mbappe, Erling Haaland, Lamine Yamal, Jude Bellingham) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cristiano Ronaldo, Vinicius Jr, Pedri, Bukayo Saka, Florian Wirtz) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Pokemon: {
-    categoryId: "183050",
-    terms: [
-      `(Charizard, Pikachu, Umbreon, Mewtwo, Eevee) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration", "gold star") -sealed -booster -pack`,
-      `(Gengar, Lugia, Rayquaza, Blastoise, Venusaur) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration") -sealed -booster -pack`,
-    ],
-    minPrice: 30,
-  },
-  MTG: {
-    categoryId: "19107",
-    terms: [
-      `("Black Lotus", "Force of Will", "The One Ring", "Ragavan", "Bowmasters") (psa, bgs, cgc, foil, borderless) -sealed -booster -lot`,
-      `("Sheoldred", "Orcish Bowmasters", "Ulamog", "Mox", "Dual Land") (foil, showcase, psa, bgs) -sealed -booster -lot`,
-    ],
-    minPrice: 50,
-  },
-  Racing: {
-    categoryId: "217",
-    terms: [
-      `(Lewis Hamilton, Max Verstappen, Charles Leclerc, Lando Norris, Fernando Alonso) (auto, patch, "1/1", /10, /25, /99, psa 10, bgs 9.5, topps, f1) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  PopCulture: {
-    categoryId: "182035",
-    terms: [
-      `(Spider-Man, Batman, "Iron Man", "Mickey Mouse", "Star Wars") (psa 10, psa 9, bgs 9.5, auto, "1/1", /10) -sealed -lot`,
-    ],
-    minPrice: 50,
-  },
+  Football:   { categoryId: "217",    catTerm: "football trading card",                minPrice: 0.99 },
+  Basketball: { categoryId: "214",    catTerm: "basketball trading card",              minPrice: 0.99 },
+  Baseball:   { categoryId: "213",    catTerm: "baseball trading card",                minPrice: 0.99 },
+  Hockey:     { categoryId: "216",    catTerm: "hockey trading card",                  minPrice: 0.99 },
+  Soccer:     { categoryId: "183444", catTerm: "soccer trading card",                  minPrice: 0.99 },
+  Pokemon:    { categoryId: "183050", catTerm: "pokemon card",                         minPrice: 0.99 },
+  MTG:        { categoryId: "19107",  catTerm: "magic the gathering mtg card",         minPrice: 0.99 },
+  Racing:     { categoryId: "261328", catTerm: "formula 1 f1 racing trading card",     minPrice: 0.99 },
+  PopCulture: { categoryId: "182035", catTerm: "pop culture trading card",             minPrice: 0.99 },
 };
 
 // ── Item helpers ──────────────────────────────────────────────────────────────

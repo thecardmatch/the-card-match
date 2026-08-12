@@ -8,11 +8,12 @@ import { OnboardingQuiz } from "@/components/OnboardingQuiz";
 import type { TradingCard } from "@/data/pokemon";
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
-const WATCHLIST_KEY   = "cardmatch:watchlist";
-const ONBOARDING_KEY  = "cardmatch:onboarding_done";
-const PREFS_KEY       = "cardmatch:preferences";
-const TAG_WEIGHTS_KEY = "cardmatch:tag_weights";
-const SEEN_KEY        = "cardmatch:seen_ids";    // persists seen card IDs across sessions
+const WATCHLIST_KEY    = "cardmatch:watchlist";
+const ONBOARDING_KEY   = "cardmatch:onboarding_done";
+const PREFS_KEY        = "cardmatch:preferences";
+const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
+const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
+const PRICE_PREFS_KEY  = "cardmatch:price_prefs";      // rolling array of last 20 liked prices
 
 // Passed IDs are scoped to userId so a browser shared between users cannot
 // cross-contaminate pass lists.  Anonymous (pre-auth) passes are ephemeral
@@ -101,6 +102,32 @@ function getInitialMode(): AppMode {
   } catch { return "onboarding"; }
 }
 
+/** Load the rolling array of last 20 liked card prices from localStorage. */
+function loadPricePrefs(): number[] {
+  try {
+    const raw = localStorage.getItem(PRICE_PREFS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+/** Persist liked prices (keep last 20). */
+function persistPricePrefs(prices: number[]) {
+  try { localStorage.setItem(PRICE_PREFS_KEY, JSON.stringify(prices.slice(-20))); }
+  catch { /* quota */ }
+}
+
+/** Compute median of an array of numbers. Returns 0 if empty. */
+function computeMedian(prices: number[]): number {
+  if (prices.length === 0) return 0;
+  const sorted = [...prices].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /**
  * Builds the /api/feed URL.
  * Active categories and proportions are derived server-side from tag_weights.
@@ -111,9 +138,11 @@ function getInitialMode(): AppMode {
  * Client-side filtering in loadFeed() is a second line of defence for overflow.
  */
 function buildFeedUrl(
-  seenIds:    Set<string>,
-  passedIds:  Set<string>,
-  tagWeights: Record<string, number>,
+  seenIds:     Set<string>,
+  passedIds:   Set<string>,
+  tagWeights:  Record<string, number>,
+  mode:        "for-you" | "ending-soonest",
+  priceMedian: number,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -125,12 +154,15 @@ function buildFeedUrl(
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
     .slice(0, 40);
   const tw = JSON.stringify(Object.fromEntries(topTW));
-  return (
+  let url = (
     `/api/feed` +
     `?seen=${encodeURIComponent(seen)}` +
     `&tag_weights=${encodeURIComponent(tw)}` +
-    `&count=20`
+    `&count=20` +
+    `&mode=${mode}`
   );
+  if (priceMedian > 0) url += `&price_median=${priceMedian.toFixed(2)}`;
+  return url;
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -143,9 +175,12 @@ export default function App() {
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
+  const [feedMode,      setFeedMode]      = useState<"for-you" | "ending-soonest">("for-you");
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
+  const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
+  const pricePrefsRef          = useRef<number[]>(loadPricePrefs());          // rolling liked prices
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   // passedIds and pendingPassedIds are scoped to the authenticated user ID.
   // At mount they're initialised with the anonymous bucket (empty on first visit).
@@ -159,6 +194,7 @@ export default function App() {
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  useEffect(() => { feedModeRef.current = feedMode; }, [feedMode]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
@@ -177,7 +213,8 @@ export default function App() {
     setFeedError(false);
 
     try {
-      const url  = buildFeedUrl(seenIds.current, passedIds.current, tagWeightsRef.current);
+      const priceMedian = computeMedian(pricePrefsRef.current);
+      const url  = buildFeedUrl(seenIds.current, passedIds.current, tagWeightsRef.current, feedModeRef.current, priceMedian);
       const res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -671,6 +708,18 @@ export default function App() {
       localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
       return next;
     });
+
+    // Adaptive price learning: record this card's price → update rolling median
+    if (card.currentBid && card.currentBid > 0) {
+      const updated = [...pricePrefsRef.current, card.currentBid].slice(-20);
+      pricePrefsRef.current = updated;
+      persistPricePrefs(updated);
+      const median = computeMedian(updated);
+      if (median > 0) {
+        console.log(`[price] liked $${card.currentBid.toFixed(2)} → median now $${median.toFixed(2)}`);
+      }
+    }
+
     updatePrefsOnSwipe(card, "LIKE");
     updateTagWeights(card, 1);       // +1 to all tags — boosts this category/type in next fetch
   }
@@ -783,22 +832,62 @@ export default function App() {
             </div>
           </div>
 
-          <button
-            onClick={() => setWatchlistOpen(true)}
-            className="relative w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
-            aria-label="Watchlist"
-          >
-            <Heart
-              className={`w-4.5 h-4.5 transition-colors ${
-                liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"
-              }`}
-            />
-            {liked.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
-                {liked.length > 99 ? "99" : liked.length}
-              </span>
+          <div className="flex items-center gap-2">
+            {/* Feed mode toggle — only visible when in the live feed */}
+            {appMode === "feed" && (
+              <div className="flex items-center rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
+                <button
+                  onClick={() => {
+                    setFeedMode("for-you");
+                    setCards([]);
+                    seenIds.current = new Set();
+                    setDeckResetKey((k) => k + 1);
+                    loadFeed(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-full transition-colors ${
+                    feedMode === "for-you"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  For You
+                </button>
+                <button
+                  onClick={() => {
+                    setFeedMode("ending-soonest");
+                    setCards([]);
+                    seenIds.current = new Set();
+                    setDeckResetKey((k) => k + 1);
+                    loadFeed(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-full transition-colors ${
+                    feedMode === "ending-soonest"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  ⏳ Ending Soon
+                </button>
+              </div>
             )}
-          </button>
+
+            <button
+              onClick={() => setWatchlistOpen(true)}
+              className="relative w-10 h-10 rounded-full bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
+              aria-label="Watchlist"
+            >
+              <Heart
+                className={`w-4.5 h-4.5 transition-colors ${
+                  liked.length > 0 ? "text-primary fill-primary" : "text-muted-foreground"
+                }`}
+              />
+              {liked.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border-2 border-background">
+                  {liked.length > 99 ? "99" : liked.length}
+                </span>
+              )}
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">

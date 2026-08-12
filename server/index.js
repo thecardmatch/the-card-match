@@ -524,6 +524,7 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
       targetQuery += ` ${BULK_EXCLUSION}`;
     }
     params.set("q", targetQuery);
+    console.log("[EBAY API QUERY]:", targetQuery, "| category:", categoryId ?? "any", "| filter:", filterStr ?? "none");
   }
 
   if (filterStr) params.set("filter", filterStr);
@@ -889,74 +890,25 @@ app.get("/api/onboarding", (_req, res) => {
 });
 
 // ─── Category → eBay search config (used by /api/onboarding/complete + /api/feed) ──
+// catTerm is the base query; feed layer enriches with attribute tags from tag_weights.
+// minPrice: 0.99 — no high-end floor, adaptive price learning handles bracketing.
 const CATEGORY_FEED_CONFIG = {
-  Football: {
-    categoryId: "217",
-    terms: [
-      `(Patrick Mahomes, Jalen Hurts, C.J. Stroud, Lamar Jackson, Brock Purdy) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(CeeDee Lamb, Justin Jefferson, Ja'Marr Chase, Saquon Barkley, Travis Kelce) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cam Ward, Shedeur Sanders, Travis Hunter, Ashton Jeanty, Jaxson Dart) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Basketball: {
-    categoryId: "214",
-    terms: [
-      `(Victor Wembanyama, LeBron James, Stephen Curry, Luka Doncic, Giannis Antetokounmpo) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Zion Williamson, Jayson Tatum, Kevin Durant, Nikola Jokic, Anthony Edwards) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cooper Flagg, Ace Bailey, Dylan Harper, Tre Johnson, VJ Edgecombe) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Baseball: {
-    categoryId: "213",
-    terms: [
-      `(Shohei Ohtani, Aaron Judge, Juan Soto, Fernando Tatis, Vladimir Guerrero) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Paul Skenes, Roman Anthony, Elly De La Cruz, Jackson Holliday, Pete Crow-Armstrong) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Hockey: {
-    categoryId: "216",
-    terms: [
-      `(Connor Bedard, Connor McDavid, Alex Ovechkin, Sidney Crosby, Nathan MacKinnon) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Macklin Celebrini, Matvei Michkov, Cale Makar, David Pastrnak, Auston Matthews) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Soccer: {
-    categoryId: "183444",
-    terms: [
-      `(Lionel Messi, Kylian Mbappe, Erling Haaland, Lamine Yamal, Jude Bellingham) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-      `(Cristiano Ronaldo, Vinicius Jr, Pedri, Bukayo Saka, Florian Wirtz) (auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5, rookie, rc) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  Pokemon: {
-    categoryId: "183050",
-    terms: [
-      `(Charizard, Pikachu, Umbreon, Mewtwo, Eevee) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration", "gold star") -sealed -booster -pack`,
-      `(Gengar, Lugia, Rayquaza, Blastoise, Venusaur) (psa 10, psa 9, bgs 9.5, "alt art", "special illustration") -sealed -booster -pack`,
-    ],
-    minPrice: 30,
-  },
-  MTG: {
-    categoryId: "19107",
-    terms: [
-      `("Black Lotus", "Force of Will", "The One Ring", "Ragavan", "Bowmasters") (psa, bgs, cgc, foil, borderless) -sealed -booster -lot`,
-      `("Sheoldred", "Orcish Bowmasters", "Ulamog", "Mox", "Dual Land") (foil, showcase, psa, bgs) -sealed -booster -lot`,
-    ],
-    minPrice: 50,
-  },
-  Racing: {
-    categoryId: "217",
-    terms: [
-      `(Lewis Hamilton, Max Verstappen, Charles Leclerc, Lando Norris, Fernando Alonso) (auto, patch, "1/1", /10, /25, /99, psa 10, bgs 9.5, topps, f1) -base -reprint -unopened ${CARD_ONLY}`,
-    ],
-    minPrice: 50,
-  },
-  PopCulture: {
-    categoryId: "182035",
+  Football:   { categoryId: "217",    catTerm: "football trading card",             minPrice: 0.99 },
+  Basketball: { categoryId: "214",    catTerm: "basketball trading card",           minPrice: 0.99 },
+  Baseball:   { categoryId: "213",    catTerm: "baseball trading card",             minPrice: 0.99 },
+  Hockey:     { categoryId: "216",    catTerm: "hockey trading card",               minPrice: 0.99 },
+  Soccer:     { categoryId: "183444", catTerm: "soccer trading card",               minPrice: 0.99 },
+  Pokemon:    { categoryId: "183050", catTerm: "pokemon card",                      minPrice: 0.99 },
+  MTG:        { categoryId: "19107",  catTerm: "magic the gathering mtg card",      minPrice: 0.99 },
+  Racing:     { categoryId: "261328", catTerm: "formula 1 f1 racing trading card",  minPrice: 0.99 },
+  PopCulture: { categoryId: "182035", catTerm: "pop culture trading card",          minPrice: 0.99 },
+};
+
+// ── LEGACY PLAYLIST CONFIG (kept for /api/playlist only — do NOT use for feed) ──
+const PLAYLIST_ONLY_CONFIG = {
+  "trending-pokemon": {
+    categoryId:   "183050",
+    categoryHint: "Pokemon",
     terms: [
       `(Spider-Man, Batman, "Iron Man", "Mickey Mouse", "Star Wars") (psa 10, psa 9, bgs 9.5, auto, "1/1", /10) -sealed -lot`,
     ],
@@ -1046,22 +998,21 @@ app.post("/api/onboarding/complete", async (req, res) => {
 
     console.log(`[onboarding/complete] plan: ${fetchPlan.map((p) => `${p.configKey}(${Math.round(p.proportion * 100)}%)`).join(", ")}`);
 
-    // 3. Proportional parallel fetch
+    // 3. Proportional parallel fetch — uses catTerm (no hardcoded player names)
     const token    = await getEbayToken();
     const allItems = [];
 
     await Promise.all(
-      fetchPlan.map(async ({ configKey, proportion, budget }) => {
+      fetchPlan.map(async ({ configKey, budget }) => {
         const cfg = CATEGORY_FEED_CONFIG[configKey];
         if (!cfg) return;
-        const { terms, categoryId, minPrice } = cfg;
-        const pf        = `price:[${minPrice}..],priceCurrency:USD`;
-        const termCount = proportion >= 0.45 ? Math.min(2, terms.length) : 1;
-        const perTerm   = Math.ceil(budget / termCount);
-        const searches  = terms.slice(0, termCount).flatMap((term) => [
-          ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perTerm * 0.65), 0),
-          ebaySearch(token, term, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perTerm * 0.35), 0),
-        ]);
+        const { catTerm, categoryId } = cfg;
+        const pf      = "price:[0.99..],priceCurrency:USD";
+        const perHalf = Math.ceil(budget / 2);
+        const searches = [
+          ebaySearch(token, catTerm, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perHalf * 0.65), 0),
+          ebaySearch(token, catTerm, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perHalf * 0.35), 0),
+        ];
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
@@ -1135,16 +1086,53 @@ function rankAndExplore(items, tagWeights, returnCount) {
   return result;
 }
 
+// Attribute tag keys → eBay keyword modifiers (mirrors functions/api/feed.js)
+const ATTR_TAG_KEYWORDS_FEED = {
+  rookie:    "rookie rc",
+  auto:      "auto autograph",
+  patch:     "patch",
+  vintage:   "vintage",
+  grail:     "psa 10 bgs 9.5",
+  "psa-10":  "psa 10",
+  "bgs-9.5": "bgs 9.5",
+  "1/1":     "1/1",
+  refractor: "refractor",
+  prizm:     "prizm",
+};
+
+function buildSearchQueryFeed(catTerm, tagWeights) {
+  const attrs = [];
+  for (const [tag, keyword] of Object.entries(ATTR_TAG_KEYWORDS_FEED)) {
+    if ((tagWeights[tag] ?? 0) > 0.5) attrs.push(keyword);
+  }
+  return attrs.length ? `${catTerm} ${attrs.slice(0, 3).join(" ")}` : catTerm;
+}
+
+function buildPriceFilterFeed(priceMedian, isWildcard = false) {
+  if (isWildcard || !priceMedian || priceMedian <= 0) return "price:[0.99..],priceCurrency:USD";
+  const low  = Math.max(0.99, priceMedian * 0.15).toFixed(2);
+  const high = (priceMedian * 8).toFixed(2);
+  return `price:[${low}..${high}],priceCurrency:USD`;
+}
+
 app.get("/api/feed", async (req, res) => {
   try {
-    const { seen = "", count = "20", tag_weights: twRaw = "{}" } = req.query;
-    const seenSet     = new Set(seen ? seen.split(",").filter(Boolean) : []);
-    const returnCount = Math.min(parseInt(count) || 20, 40);
+    const {
+      seen = "", count = "20",
+      tag_weights: twRaw = "{}",
+      mode       = "for-you",
+      price_median: priceRaw = "",
+    } = req.query;
+
+    const seenSet        = new Set(seen ? seen.split(",").filter(Boolean) : []);
+    const returnCount    = Math.min(parseInt(count) || 20, 40);
+    const priceMedian    = parseFloat(priceRaw) || 0;
+    const isEndingSoonest = mode === "ending-soonest";
 
     let tagWeights = {};
     try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
 
-    // Derive active categories from positive tag_weights
+    // STRICT: only positive-weight categories are fetched
     const catWeights = {};
     for (const [key, weight] of Object.entries(tagWeights)) {
       const configKey = CAT_TAG_TO_CONFIG_FEED[key];
@@ -1161,23 +1149,43 @@ app.get("/api/feed", async (req, res) => {
       .map(([cat, weight]) => ({ cat, proportion: weight / totalWeight, budget: Math.max(20, Math.ceil(fetchPool * weight / totalWeight)) }))
       .sort((a, b) => b.proportion - a.proportion);
 
-    console.log(`[feed] cats: ${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(", ")}${useDefault ? " [default]" : ""}`);
+    console.log(
+      `[feed] mode:${mode} cats:${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(",")}` +
+      (useDefault ? " [default]" : "") + (priceMedian ? ` price_median:$${priceMedian}` : "")
+    );
 
     const token    = await getEbayToken();
     const allItems = [];
 
     await Promise.all(
-      fetchPlan.map(async ({ cat, proportion, budget }) => {
+      fetchPlan.map(async ({ cat, budget }) => {
         const cfg = CATEGORY_FEED_CONFIG[cat];
         if (!cfg) return;
-        const { terms, categoryId, minPrice } = cfg;
-        const pf        = `price:[${minPrice}..],priceCurrency:USD`;
-        const termCount = proportion >= 0.45 ? Math.min(2, terms.length) : 1;
-        const perTerm   = Math.ceil(budget / termCount);
-        const searches  = terms.slice(0, termCount).flatMap((term) => [
-          ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perTerm * 0.65), 0),
-          ebaySearch(token, term, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perTerm * 0.35), 0),
-        ]);
+        const { catTerm, categoryId } = cfg;
+        const searchQuery    = buildSearchQueryFeed(catTerm, tagWeights);
+        const bracketBudget  = Math.ceil(budget * 0.8);
+        const wildcardBudget = budget - bracketBudget;
+        const bracketFilter  = buildPriceFilterFeed(priceMedian, false);
+        const wildcardFilter = buildPriceFilterFeed(0, true);
+
+        let searches;
+        if (isEndingSoonest) {
+          searches = [
+            ebaySearch(token, searchQuery, "endingSoonest", `${bracketFilter},buyingOptions:{AUCTION}`,  null, categoryId, bracketBudget,  0),
+            ebaySearch(token, searchQuery, "endingSoonest", `${wildcardFilter},buyingOptions:{AUCTION}`, null, categoryId, wildcardBudget, 0),
+          ];
+        } else {
+          const auctBracket = Math.ceil(bracketBudget  * 0.65);
+          const binBracket  = bracketBudget  - auctBracket;
+          const auctWild    = Math.ceil(wildcardBudget * 0.65);
+          const binWild     = wildcardBudget - auctWild;
+          searches = [
+            ebaySearch(token, searchQuery, "endingSoonest", `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, auctBracket, 0),
+            ebaySearch(token, searchQuery, "bestMatch",     `${bracketFilter},buyingOptions:{FIXED_PRICE}`,  null, categoryId, binBracket,  0),
+            ebaySearch(token, searchQuery, "endingSoonest", `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, auctWild,    0),
+            ebaySearch(token, searchQuery, "bestMatch",     `${wildcardFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, binWild,     0),
+          ];
+        }
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
