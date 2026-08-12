@@ -12,6 +12,7 @@ const WATCHLIST_KEY   = "cardmatch:watchlist";
 const ONBOARDING_KEY  = "cardmatch:onboarding_done";
 const PREFS_KEY       = "cardmatch:preferences";
 const TAG_WEIGHTS_KEY = "cardmatch:tag_weights";
+const SEEN_KEY        = "cardmatch:seen_ids";   // persists seen card IDs across sessions
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Preferences = {
@@ -53,6 +54,22 @@ function loadTagWeights(): Record<string, number> {
   catch { return {}; }
 }
 
+function loadSeenIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch { return new Set(); }
+}
+
+/** Keep the last 300 seen IDs in localStorage so returning users don't repeat cards. */
+function persistSeenIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify([...ids].slice(-300)));
+  } catch { /* storage quota exceeded — skip */ }
+}
+
 function getInitialMode(): AppMode {
   try {
     return localStorage.getItem(ONBOARDING_KEY) ? "feed-loading" : "onboarding";
@@ -61,16 +78,11 @@ function getInitialMode(): AppMode {
 
 /**
  * Builds the /api/feed URL.
- * The feed derives active categories and proportions directly from tag_weights —
- * no need to send `cats` or `scores` separately.
- * Only the top-40 tags by absolute weight are sent to keep the URL size reasonable.
+ * Active categories and proportions are derived server-side from tag_weights.
+ * Top 40 tags by absolute weight are sent to keep the URL size manageable.
  */
-function buildFeedUrl(
-  seenIds:    Set<string>,
-  tagWeights: Record<string, number>
-): string {
+function buildFeedUrl(seenIds: Set<string>, tagWeights: Record<string, number>): string {
   const seen  = [...seenIds].slice(-150).join(",");
-  // Top 40 tags by absolute weight (category keys + attribute keys)
   const topTW = Object.entries(tagWeights)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
     .slice(0, 40);
@@ -94,9 +106,9 @@ export default function App() {
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
 
-  // Refs — always hold the latest value so async callbacks don't go stale
+  // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
-  const seenIds                = useRef(new Set<string>());
+  const seenIds                = useRef<Set<string>>(loadSeenIds());   // restored from localStorage
   const isLoadingMoreRef       = useRef(false);
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,7 +117,7 @@ export default function App() {
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
-    // Redirect to onboarding if neither preferences nor tag_weights exist
+    // Guard: redirect to onboarding if the user has no preference data at all
     const hasWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
     const hasPrefs   = !!prefsRef.current?.topCategories?.length;
     if (!hasWeights && !hasPrefs) {
@@ -125,7 +137,9 @@ export default function App() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const incoming: TradingCard[] = data.items ?? [];
+
       incoming.forEach((c) => seenIds.current.add(c.id));
+      persistSeenIds(seenIds.current);   // keep across sessions
 
       if (append) {
         setCards((prev) => [...prev, ...incoming]);
@@ -146,32 +160,35 @@ export default function App() {
     }
   }
 
-  // ── Supabase: persist quiz results ─────────────────────────────────────────
-  function saveQuizResultsToSupabase(
+  // ── Supabase: persist full quiz state (swipes + preferences + tag_weights) ──
+  function saveQuizToSupabase(
     userId:      string,
     swipes:      SwipeRecord[],
-    preferences: Preferences | null
+    preferences: Preferences | null,
+    tagWeights:  Record<string, number>
   ) {
-    if (!supabase || !swipes.length) return;
+    if (!supabase) return;
     supabase
       .from("user_quiz_results")
       .upsert(
         {
-          user_id:    userId,
-          swipes,
+          user_id:     userId,
+          swipes:      swipes.length ? swipes : undefined,
           preferences: preferences ?? {},
-          updated_at: new Date().toISOString(),
+          tag_weights: tagWeights,
+          updated_at:  new Date().toISOString(),
         },
         { onConflict: "user_id" }
       )
       .then(({ error }) => {
         if (error) console.warn("[quiz] Supabase save failed:", error.message);
-        else       console.log("[quiz] results saved to Supabase for", userId);
+        else       console.log("[quiz] saved quiz + tag_weights to Supabase for", userId);
       });
   }
 
   // ── Tag-weight scoring ──────────────────────────────────────────────────────
-  /** Debounce-persist tag_weights to Supabase (fires 3 s after the last swipe). */
+
+  /** Debounce-persist tag_weights only (called on every live-feed swipe). */
   function debounceSaveTagWeights(weights: Record<string, number>) {
     if (saveTagWeightsTimerRef.current) clearTimeout(saveTagWeightsTimerRef.current);
     saveTagWeightsTimerRef.current = setTimeout(async () => {
@@ -181,11 +198,7 @@ export default function App() {
       supabase
         .from("user_quiz_results")
         .upsert(
-          {
-            user_id:    session.user.id,
-            tag_weights: weights,
-            updated_at: new Date().toISOString(),
-          },
+          { user_id: session.user.id, tag_weights: weights, updated_at: new Date().toISOString() },
           { onConflict: "user_id" }
         )
         .then(({ error }) => {
@@ -195,9 +208,10 @@ export default function App() {
   }
 
   /**
-   * Update tag weights on every swipe.
-   * Right swipe → +1  to all card tags.
-   * Left swipe  → -0.5 to all card tags.
+   * Update tag weights on every feed swipe.
+   * Right swipe → +1 to all card tags.
+   * Left swipe  → −0.5 to all card tags.
+   * The category tag (e.g. "football") drives which eBay categories are fetched next refresh.
    */
   function updateTagWeights(card: TradingCard, delta: number) {
     const tags = card.tags;
@@ -211,7 +225,7 @@ export default function App() {
     debounceSaveTagWeights(updated);
   }
 
-  // ── Mount: auth subscription + seed tag weights from Supabase ──────────────
+  // ── Mount: initialise preferences from Supabase, then start feed ───────────
   useEffect(() => {
     let unsub: (() => void) | null = null;
 
@@ -225,19 +239,19 @@ export default function App() {
             picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
           }));
 
+          // Flush any quiz swipes completed before authentication
           const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
           if (pendingRaw) {
             try {
               const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
               localStorage.removeItem("cardmatch:pending_swipes");
-
               if (!localStorage.getItem(ONBOARDING_KEY)) {
                 handleOnboardingComplete(pendingSwipes);
               } else {
                 const savedPrefs = (() => {
                   try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
                 })();
-                saveQuizResultsToSupabase(session.user.id, pendingSwipes, savedPrefs);
+                saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs, tagWeightsRef.current);
               }
               return;
             } catch { /* malformed — ignore */ }
@@ -245,42 +259,65 @@ export default function App() {
         }
       });
       unsub = () => subscription.unsubscribe();
-
     }
 
-    // ── Returning user: merge Supabase tag_weights THEN start the feed ────────
-    // For new users, handleOnboardingComplete seeds weights synchronously before
-    // showing any cards. For returning users we must wait for the Supabase read
-    // so the first fetch is driven by the correct weights, not stale localStorage.
-    async function initFeedForReturningUser() {
+    /**
+     * For returning users: merge Supabase data BEFORE triggering the feed,
+     * so the first fetch is driven by up-to-date weights.
+     *
+     * Also handles cross-device login: if a user has Supabase quiz data but
+     * no ONBOARDING_KEY in this browser, we restore their profile and skip
+     * showing the quiz again.
+     */
+    async function initSession() {
       if (!supabase) {
         if (appMode === "feed-loading") loadFeed(false);
         return;
       }
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const { data } = await supabase
             .from("user_quiz_results")
-            .select("tag_weights")
+            .select("tag_weights, preferences")
             .eq("user_id", session.user.id)
             .maybeSingle();
-          if (data?.tag_weights && typeof data.tag_weights === "object") {
-            // Merge: local (more recent swipes) wins on key conflicts
-            const merged = {
-              ...(data.tag_weights as Record<string, number>),
-              ...tagWeightsRef.current,
-            };
-            tagWeightsRef.current = merged;
-            localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
+
+          if (data) {
+            // Restore tag_weights: Supabase is the source of truth; local recent swipes win on conflicts
+            if (data.tag_weights && typeof data.tag_weights === "object") {
+              const merged = {
+                ...(data.tag_weights as Record<string, number>),
+                ...tagWeightsRef.current,   // local overwrites Supabase for same key
+              };
+              tagWeightsRef.current = merged;
+              localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
+            }
+
+            // Restore preferences if missing locally (e.g. new browser)
+            if (data.preferences && typeof data.preferences === "object" && !prefsRef.current) {
+              const p = data.preferences as Preferences;
+              prefsRef.current = p;
+              setPrefs(p);
+              localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+            }
+
+            // Cross-device recovery: user has done onboarding elsewhere but ONBOARDING_KEY is absent
+            const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
+            if (hasPositiveWeights && !localStorage.getItem(ONBOARDING_KEY)) {
+              localStorage.setItem(ONBOARDING_KEY, "1");
+              loadFeed(false);   // skip onboarding, go straight to their personalised feed
+              return;
+            }
           }
         }
-      } catch { /* network error — fall through with localStorage weights */ }
+      } catch { /* network error — fall through with localStorage data */ }
 
       if (appMode === "feed-loading") loadFeed(false);
     }
 
-    initFeedForReturningUser();
+    initSession();
 
     return () => { unsub?.(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -300,11 +337,12 @@ export default function App() {
       const data = await res.json();
 
       if (data.preferences) {
+        // 1. Persist preferences locally
         localStorage.setItem(PREFS_KEY, JSON.stringify(data.preferences));
         prefsRef.current = data.preferences;
         setPrefs(data.preferences);
 
-        // Seed initial tag weights from quiz category/era/style scores
+        // 2. Seed tag_weights from all quiz signal dimensions
         const {
           categoryScores = {} as Record<string, number>,
           eraScores      = {} as Record<string, number>,
@@ -323,18 +361,21 @@ export default function App() {
         tagWeightsRef.current = seedTW;
         localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(seedTW));
 
-        // Fire-and-forget: persist to Supabase if authenticated
-        if (supabase && swipes.length > 0) {
+        // 3. Persist everything to Supabase immediately (not debounced)
+        //    so cross-device login can restore the full profile later.
+        if (supabase) {
           supabase.auth.getSession().then(({ data: { session } }) => {
             if (session?.user) {
-              saveQuizResultsToSupabase(session.user.id, swipes, data.preferences);
+              saveQuizToSupabase(session.user.id, swipes, data.preferences, seedTW);
             }
           });
         }
       }
 
+      // 4. Show cards returned by onboarding/complete as the initial deck
       const incoming: TradingCard[] = data.cards ?? [];
       incoming.forEach((c) => seenIds.current.add(c.id));
+      persistSeenIds(seenIds.current);
       setCards(incoming);
       setDeckResetKey((k) => k + 1);
       setAppMode("feed");
@@ -346,6 +387,8 @@ export default function App() {
   }
 
   // ── Swipe handlers ──────────────────────────────────────────────────────────
+
+  /** Track per-category scores in prefs state (for local UI, not the feed fetch). */
   function updatePrefsOnSwipe(card: TradingCard, action: "LIKE" | "PASS") {
     setPrefs((prev) => {
       const base: Preferences = prev ?? {
@@ -377,24 +420,20 @@ export default function App() {
       return next;
     });
     updatePrefsOnSwipe(card, "LIKE");
-    updateTagWeights(card, 1);         // +1 to all tags on this card
+    updateTagWeights(card, 1);       // +1 to all tags — boosts this category/type in next fetch
   }
 
   function handlePass(card: TradingCard) {
     updatePrefsOnSwipe(card, "PASS");
-    updateTagWeights(card, -0.5);      // -0.5 to all tags on this card
+    updateTagWeights(card, -0.5);    // −0.5 to all tags — deprioritises this category/type
   }
 
   function handleBuy(card: TradingCard) {
     const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
     if (!url) return;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) {
-      window.location.href = url;
-    } else {
-      const tab = window.open(url, "_blank", "noopener,noreferrer");
-      if (!tab) window.location.href = url;
-    }
+    if (isMobile) { window.location.href = url; }
+    else { const tab = window.open(url, "_blank", "noopener,noreferrer"); if (!tab) window.location.href = url; }
   }
 
   function handleRemove(cardId: string) {
