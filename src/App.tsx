@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
 import { Heart } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar }        from "@/components/Sidebar";
@@ -38,9 +38,13 @@ type SwipeRecord = {
   attributes: Record<string, unknown>;
 };
 
-type AppMode = "onboarding" | "feed-loading" | "feed";
+// "session-checking" is a transient mode shown while initSession() queries
+// Supabase to decide whether to restore a cross-device profile or show the quiz.
+// It renders the same spinner as "feed-loading" so the user never sees a flash
+// of the onboarding quiz before we know whether they've already completed it.
+type AppMode = "session-checking" | "onboarding" | "feed-loading" | "feed";
 
-// ── Module-level helpers ──────────────────────────────────────────────────────
+type RestoreResult = "recovered" | "absent" | "error";
 function loadLocalWatchlist(): TradingCard[] {
   try {
     const raw = localStorage.getItem(WATCHLIST_KEY);
@@ -98,7 +102,11 @@ function persistPassedIds(ids: Set<string>, userId: string | null) {
 
 function getInitialMode(): AppMode {
   try {
-    return localStorage.getItem(ONBOARDING_KEY) ? "feed-loading" : "onboarding";
+    if (localStorage.getItem(ONBOARDING_KEY)) return "feed-loading";
+    // If Supabase is configured, hold in session-checking so initSession()
+    // can decide whether to restore a cross-device profile or show the quiz.
+    // Without Supabase there is no remote profile to check — go straight to onboarding.
+    return isSupabaseReady ? "session-checking" : "onboarding";
   } catch { return "onboarding"; }
 }
 
@@ -192,6 +200,15 @@ export default function App() {
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks the result of the most recent remote profile check for the active
+  // authenticated user.  Used in handleOnboardingComplete to ensure we never
+  // upsert a fresh quiz over an existing Supabase profile when the check
+  // failed or was aborted.
+  //   "unchecked" — no authenticated check has run yet (anonymous / pre-auth)
+  //   "absent"    — Supabase confirmed no row for this user (safe to write)
+  //   "recovered" — existing profile found; feed already loading (quiz skipped)
+  //   "error"     — check failed or timed out; do NOT write quiz data
+  const profileCheckResultRef  = useRef<"unchecked" | RestoreResult>("unchecked");
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   useEffect(() => { feedModeRef.current = feedMode; }, [feedMode]);
@@ -449,6 +466,98 @@ export default function App() {
   useEffect(() => {
     let unsub: (() => void) | null = null;
 
+    // ── Shared helper: fetch + restore profile from Supabase ──────────────────
+    /**
+     * Pulls tag_weights and preferences from Supabase for userId, merges them
+     * into local state/refs, and — if the user completed onboarding on another
+     * device — sets ONBOARDING_KEY, hydrates remote passed IDs, and calls
+     * loadFeed() to skip the quiz.
+     *
+     * Returns true when cross-device recovery triggered a feed load (caller
+     * should not start feed again).  Returns false otherwise.
+     *
+     * Ownership is checked after every await so a concurrent logout/account
+     * switch results in a safe no-op.
+     */
+    // signal is an optional object that the caller can mark aborted=true to
+    // prevent a stale late-resolving query from mutating state after a timeout.
+    async function restoreProfileFromSupabase(
+      userId: string,
+      signal?: { aborted: boolean },
+    ): Promise<RestoreResult> {
+      if (!supabase) return "absent";
+
+      let data: Record<string, unknown> | null = null;
+      try {
+        const resp = await supabase
+          .from("user_quiz_results")
+          .select("tag_weights, preferences, swipes")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (currentUserIdRef.current !== userId) return "error";
+
+        // Any Supabase error (network, RLS, schema) → treat as unavailable, not absent.
+        // Callers must NOT write fresh quiz data when the result is "error".
+        if (resp.error) {
+          console.warn("[session] profile query failed:", resp.error.message);
+          return "error";
+        }
+        data = resp.data as Record<string, unknown> | null;
+      } catch {
+        // fetch-level network failure
+        return "error";
+      }
+
+      if (data) {
+        // Restore tag_weights: Supabase is the source of truth for cross-device;
+        // local recent swipes win on key conflicts (they are newer).
+        if (data.tag_weights && typeof data.tag_weights === "object") {
+          const merged = {
+            ...(data.tag_weights as Record<string, number>),
+            ...tagWeightsRef.current,
+          };
+          tagWeightsRef.current = merged;
+          localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
+        }
+
+        // Restore preferences if absent locally (new browser / new device).
+        if (data.preferences && typeof data.preferences === "object" && !prefsRef.current) {
+          const p = data.preferences as Preferences;
+          prefsRef.current = p;
+          setPrefs(p);
+          localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+        }
+
+        // Cross-device recovery: user finished onboarding on another device.
+        //
+        // Use swipes as the primary completion indicator — a non-empty swipes
+        // array is written by saveQuizToSupabase() at the end of onboarding and
+        // is reliable regardless of score sign.  A user who passed every card
+        // will have only negative tag_weights but still has a completed quiz.
+        //
+        // Positive tag_weights are kept as a secondary indicator to handle
+        // accounts whose quiz row predates the swipes column.
+        const hasCompletedQuiz = Array.isArray(data.swipes) && (data.swipes as unknown[]).length > 0;
+        const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
+
+        if ((hasCompletedQuiz || hasPositiveWeights) && !localStorage.getItem(ONBOARDING_KEY)) {
+          // Check signal before committing any side-effects; the caller's safety
+          // timer may have already transitioned the UI to onboarding.
+          if (signal?.aborted) return "error";
+          localStorage.setItem(ONBOARDING_KEY, "1");
+          console.log("[session] cross-device recovery: restoring profile for", userId);
+          await hydrateRemotePassedIds(userId);
+          if (signal?.aborted || currentUserIdRef.current !== userId) return "error";
+          loadFeed(false);
+          return "recovered";
+        }
+      }
+
+      // data === null → Supabase confirmed no row exists for this user.
+      return "absent";
+    }
+
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
@@ -469,34 +578,81 @@ export default function App() {
             currentUserIdRef.current  = userId;
           }
 
-          // Fetch remote passed_ids from Supabase, merge them in, then reconcile.
-          // hydrateRemotePassedIds checks ownership after its own await so a
-          // concurrent logout cannot redirect the write.
-          // After hydration, filter the active deck so any anonymous cards that
-          // are now in the pass list are removed without a full reload.
-          hydrateRemotePassedIds(userId).then(() => {
-            if (currentUserIdRef.current === userId) {
-              setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-            }
-          });
-
-          // Flush any quiz swipes completed before authentication
+          // Flush any quiz swipes completed before authentication.
           const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
           if (pendingRaw) {
             try {
               const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
-              localStorage.removeItem("cardmatch:pending_swipes");
+
               if (!localStorage.getItem(ONBOARDING_KEY)) {
-                handleOnboardingComplete(pendingSwipes);
-              } else {
-                const savedPrefs = (() => {
-                  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
-                })();
-                saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs, tagWeightsRef.current);
+                // The user completed the onboarding quiz on this device and then
+                // signed in.  Before persisting their fresh quiz results, check
+                // whether this account already has a completed profile on Supabase
+                // (they may have done onboarding on another device previously).
+                // If a remote profile exists, restore it and discard the duplicate
+                // fresh-device quiz — we must never overwrite an established account.
+                restoreProfileFromSupabase(userId).then((result) => {
+                  if (currentUserIdRef.current !== userId) return;
+                  if (result === "recovered") {
+                    // Existing remote profile restored; feed is already loading.
+                    // Discard the fresh device quiz and filter the deck.
+                    localStorage.removeItem("cardmatch:pending_swipes");
+                    setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+                  } else if (result === "absent") {
+                    // Supabase confirmed no remote profile — genuinely new account.
+                    // Process the fresh quiz results normally.
+                    localStorage.removeItem("cardmatch:pending_swipes");
+                    handleOnboardingComplete(pendingSwipes);
+                    hydrateRemotePassedIds(userId).then(() => {
+                      if (currentUserIdRef.current === userId) {
+                        setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+                      }
+                    });
+                  } else {
+                    // result === "error": query failed — do NOT write the fresh quiz.
+                    // Leave pending_swipes in localStorage so the next sign-in can retry.
+                    console.warn("[session] profile check failed — retaining pending_swipes for next sign-in");
+                  }
+                });
+                return;
               }
+
+              // ONBOARDING_KEY is already set — user was mid-session when auth fired.
+              // Just sync quiz swipes that weren't persisted to Supabase yet.
+              localStorage.removeItem("cardmatch:pending_swipes");
+              const savedPrefs = (() => {
+                try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
+              })();
+              saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs, tagWeightsRef.current);
+              // Hydrate passed IDs in background.
+              hydrateRemotePassedIds(userId).then(() => {
+                if (currentUserIdRef.current === userId) {
+                  setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+                }
+              });
               return;
             } catch { /* malformed — ignore */ }
           }
+
+          // Cross-device recovery: the user logged in on a new device where
+          // ONBOARDING_KEY is absent.  Restore their profile from Supabase and
+          // skip the quiz if they've done it before.
+          // Also handles any IDs they've never synced on this device.
+          restoreProfileFromSupabase(userId).then((result) => {
+            if (currentUserIdRef.current !== userId) return;
+            if (result === "recovered") {
+              // loadFeed() already called inside restoreProfileFromSupabase —
+              // just filter the current deck for any newly-known passed IDs.
+              setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+              return;
+            }
+            // "absent" or "error": no cross-device recovery — hydrate passed IDs and filter deck.
+            hydrateRemotePassedIds(userId).then(() => {
+              if (currentUserIdRef.current === userId) {
+                setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+              }
+            });
+          });
         }
 
         if (event === "SIGNED_OUT") {
@@ -525,15 +681,44 @@ export default function App() {
      * Also handles cross-device login: if a user has Supabase quiz data but
      * no ONBOARDING_KEY in this browser, we restore their profile and skip
      * showing the quiz again.
+     *
+     * While this runs, appMode is "session-checking" (spinner shown) so the
+     * user never sees a flash of the onboarding quiz before we know their status.
+     *
+     * A 7-second safety timeout guarantees the session-checking state always
+     * resolves — even when Supabase is unreachable or the query stalls.
+     * An `aborted` flag prevents a late-resolving query from overriding the
+     * fallback after the timer has already transitioned us to onboarding.
      */
     async function initSession() {
+      // Safety net: never leave the user stuck on the session-checking spinner.
+      // If this function doesn't complete within 7 s, fall back to onboarding.
+      // `signal` is shared with restoreProfileFromSupabase so it can bail out
+      // before calling loadFeed() when the timeout has already fired.
+      const signal = { aborted: false };
+      let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+      if (appMode === "session-checking") {
+        safetyTimer = setTimeout(() => {
+          signal.aborted = true;
+          profileCheckResultRef.current = "error";
+          console.warn("[session] profile check timed out — falling back to onboarding");
+          setAppMode((m) => m === "session-checking" ? "onboarding" : m);
+        }, 7000);
+      }
+
       if (!supabase) {
+        // No Supabase — resolve immediately.
+        // "feed-loading" → start feed; "session-checking" → fall back to onboarding.
+        if (safetyTimer) clearTimeout(safetyTimer);
         if (appMode === "feed-loading") loadFeed(false);
+        else setAppMode("onboarding");
         return;
       }
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
+        if (signal.aborted) return;   // safety timer fired while getSession was in flight
+
         if (session?.user) {
           const userId = session.user.id;
 
@@ -545,57 +730,102 @@ export default function App() {
             currentUserIdRef.current  = userId;
           }
 
-          const { data } = await supabase
-            .from("user_quiz_results")
-            .select("tag_weights, preferences")
-            .eq("user_id", userId)
-            .maybeSingle();
+          // ── Check for pending quiz swipes from before authentication ────
+          // Supabase emits INITIAL_SESSION (not SIGNED_IN) when the app
+          // remounts after an OAuth redirect, so the SIGNED_IN handler does
+          // not run for that path. Processing pending_swipes here ensures the
+          // quiz data is never lost regardless of which event fires.
+          // The SIGNED_IN handler has identical logic for the direct sign-in path.
+          const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
+          if (pendingRaw) {
+            try {
+              const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
 
-          // ── Ownership check after await ──────────────────────────────────
-          // A logout/login could have fired while the query was in flight.
-          // Discard the response if the active user has changed.
-          if (currentUserIdRef.current !== userId) return;
+              if (!localStorage.getItem(ONBOARDING_KEY)) {
+                // Guard: confirm no existing remote profile before writing fresh quiz.
+                const pendingResult = await restoreProfileFromSupabase(userId, signal);
+                if (signal.aborted) return;
+                if (currentUserIdRef.current !== userId) { if (safetyTimer) clearTimeout(safetyTimer); return; }
+                profileCheckResultRef.current = pendingResult;
 
-          if (data) {
-            // Restore tag_weights: Supabase is the source of truth; local recent swipes win on conflicts
-            if (data.tag_weights && typeof data.tag_weights === "object") {
-              const merged = {
-                ...(data.tag_weights as Record<string, number>),
-                ...tagWeightsRef.current,   // local overwrites Supabase for same key
-              };
-              tagWeightsRef.current = merged;
-              localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
-            }
+                if (pendingResult === "recovered") {
+                  // Existing profile restored — discard the duplicate fresh-device quiz.
+                  localStorage.removeItem("cardmatch:pending_swipes");
+                  if (safetyTimer) clearTimeout(safetyTimer);
+                  return;
+                }
+                if (pendingResult === "absent") {
+                  // Confirmed new account — process the fresh quiz.
+                  localStorage.removeItem("cardmatch:pending_swipes");
+                  await hydrateRemotePassedIds(userId);
+                  if (signal.aborted) { if (safetyTimer) clearTimeout(safetyTimer); return; }
+                  if (safetyTimer) clearTimeout(safetyTimer);
+                  handleOnboardingComplete(pendingSwipes);
+                  return;
+                }
+                // "error": retain pending_swipes for retry on next sign-in.
+                // Fall through to hydrateRemotePassedIds and then to feed.
+              } else {
+                // Onboarding already done — just sync quiz swipes to Supabase.
+                localStorage.removeItem("cardmatch:pending_swipes");
+                const savedPrefs = (() => {
+                  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
+                })();
+                saveQuizToSupabase(userId, pendingSwipes, savedPrefs, tagWeightsRef.current);
+              }
+            } catch { /* malformed pending_swipes — ignore */ }
 
-            // Restore preferences if missing locally (e.g. new browser)
-            if (data.preferences && typeof data.preferences === "object" && !prefsRef.current) {
-              const p = data.preferences as Preferences;
-              prefsRef.current = p;
-              setPrefs(p);
-              localStorage.setItem(PREFS_KEY, JSON.stringify(p));
-            }
+            // Applies to: "error" path (pending_swipes retained) + ONBOARDING_KEY path.
+            await hydrateRemotePassedIds(userId);
+            if (signal.aborted) return;
+          } else {
+            // ── No pending swipes — normal cross-device recovery ──────────
+            // Restore profile (tag_weights + preferences) and handle cross-device
+            // recovery. Pass the shared signal so the helper can bail before calling
+            // loadFeed() if the safety timer fires mid-query.
+            const restoreResult = await restoreProfileFromSupabase(userId, signal);
+            if (signal.aborted) return;
+            if (currentUserIdRef.current !== userId) { if (safetyTimer) clearTimeout(safetyTimer); return; }
 
-            // Cross-device recovery: user has done onboarding elsewhere but ONBOARDING_KEY is absent
-            const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
-            if (hasPositiveWeights && !localStorage.getItem(ONBOARDING_KEY)) {
-              localStorage.setItem(ONBOARDING_KEY, "1");
-              // Hydrate remote passed IDs (merges + reconciles) before loading feed
-              await hydrateRemotePassedIds(userId);
-              if (currentUserIdRef.current !== userId) return;  // check after await
-              loadFeed(false);   // skip onboarding, go straight to their personalised feed
-              return;
-            }
+            // Record for handleOnboardingComplete so it knows whether writing fresh
+            // quiz data to Supabase is safe for this authenticated session.
+            profileCheckResultRef.current = restoreResult;
+
+            if (restoreResult === "recovered") { if (safetyTimer) clearTimeout(safetyTimer); return; }
+
+            // Hydrate remote passed_ids and reconcile local ones to Supabase.
+            await hydrateRemotePassedIds(userId);
+            if (signal.aborted) return;
           }
-
-          // Hydrate remote passed_ids and reconcile local ones to Supabase.
-          // Uses the shared hydrateRemotePassedIds routine — same ownership
-          // checks and merge logic as the SIGNED_IN path.
-          // Works even when no Supabase row exists — the RPC creates it.
-          await hydrateRemotePassedIds(userId);
+        } else {
+          // No active session — if we're in session-checking mode, fall back to onboarding.
+          if (appMode === "session-checking") {
+            if (safetyTimer) clearTimeout(safetyTimer);
+            setAppMode("onboarding");
+            return;
+          }
         }
-      } catch { /* network error — fall through with localStorage data */ }
+      } catch {
+        if (signal.aborted) return;
+        // Network error — fall through with localStorage data.
+        // Surface onboarding so the user isn't stuck on a spinner.
+        profileCheckResultRef.current = "error";
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (appMode === "session-checking") {
+          setAppMode("onboarding");
+          return;
+        }
+      }
+
+      if (safetyTimer) clearTimeout(safetyTimer);
+      if (signal.aborted) return;
 
       if (appMode === "feed-loading") loadFeed(false);
+      // "session-checking" with a logged-in user: restoreProfileFromSupabase handled
+      // the mode transition (either to onboarding or straight to feed).
+      // If we reach here in session-checking AND the user IS logged in but has
+      // no completed quiz (brand-new account), show onboarding.
+      else if (appMode === "session-checking") setAppMode("onboarding");
     }
 
     initSession();
@@ -652,10 +882,23 @@ export default function App() {
 
         // 3. Persist everything to Supabase immediately (not debounced)
         //    so cross-device login can restore the full profile later.
+        //
+        //    Safety guard: only write if the profile check for this session
+        //    confirmed the user has no existing remote profile ("absent") or
+        //    if this is a genuinely new sign-up with no prior auth ("unchecked").
+        //    If the check failed/timed out ("error"), queue for retry via
+        //    pending_swipes so a re-login can pick it up without risking an
+        //    overwrite of data we couldn't verify doesn't exist.
         if (supabase) {
           supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user) {
+            if (!session?.user) return;
+            const checkResult = profileCheckResultRef.current;
+            if (checkResult === "absent" || checkResult === "unchecked") {
               saveQuizToSupabase(session.user.id, swipes, data.preferences, seedTW);
+            } else {
+              // "error" or "recovered": do not overwrite — store locally for retry.
+              console.warn("[onboarding] profile check was not confirmed absent — queuing quiz for retry on next sign-in");
+              localStorage.setItem("cardmatch:pending_swipes", JSON.stringify(swipes));
             }
           });
         }
@@ -775,9 +1018,9 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ── FEED LOADING OVERLAY ─────────────────────────────────────────────── */}
+      {/* ── FEED LOADING OVERLAY (also covers session-checking to prevent quiz flash) */}
       <AnimatePresence>
-        {appMode === "feed-loading" && (
+        {(appMode === "feed-loading" || appMode === "session-checking") && (
           <motion.div
             key="feed-loading"
             initial={{ opacity: 0 }}
