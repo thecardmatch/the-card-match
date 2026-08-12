@@ -12,7 +12,15 @@ const WATCHLIST_KEY   = "cardmatch:watchlist";
 const ONBOARDING_KEY  = "cardmatch:onboarding_done";
 const PREFS_KEY       = "cardmatch:preferences";
 const TAG_WEIGHTS_KEY = "cardmatch:tag_weights";
-const SEEN_KEY        = "cardmatch:seen_ids";   // persists seen card IDs across sessions
+const SEEN_KEY        = "cardmatch:seen_ids";    // persists seen card IDs across sessions
+
+// Passed IDs are scoped to userId so a browser shared between users cannot
+// cross-contaminate pass lists.  Anonymous (pre-auth) passes are ephemeral
+// (in-memory only) and are NOT migrated to an authenticated account.
+const PASSED_KEY_PREFIX = "cardmatch:passed_ids";
+function passedStorageKey(userId: string | null): string {
+  return userId ? `${PASSED_KEY_PREFIX}:${userId}` : `${PASSED_KEY_PREFIX}:anon`;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Preferences = {
@@ -70,6 +78,23 @@ function persistSeenIds(ids: Set<string>) {
   } catch { /* storage quota exceeded — skip */ }
 }
 
+/** Load permanently passed card IDs (left-swipes) for a specific user from localStorage. */
+function loadPassedIds(userId: string | null): Set<string> {
+  try {
+    const raw = localStorage.getItem(passedStorageKey(userId));
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr) : new Set();
+  } catch { return new Set(); }
+}
+
+/** Persist passed IDs to localStorage under the given user's key (capped at 2000). */
+function persistPassedIds(ids: Set<string>, userId: string | null) {
+  try {
+    localStorage.setItem(passedStorageKey(userId), JSON.stringify([...ids].slice(-2000)));
+  } catch { /* storage quota exceeded — skip */ }
+}
+
 function getInitialMode(): AppMode {
   try {
     return localStorage.getItem(ONBOARDING_KEY) ? "feed-loading" : "onboarding";
@@ -80,9 +105,22 @@ function getInitialMode(): AppMode {
  * Builds the /api/feed URL.
  * Active categories and proportions are derived server-side from tag_weights.
  * Top 40 tags by absolute weight are sent to keep the URL size manageable.
+ *
+ * Passed IDs are given highest dedup priority in the `seen` param — they fill
+ * their slots first (up to 200), then remaining slots go to recent seen IDs.
+ * Client-side filtering in loadFeed() is a second line of defence for overflow.
  */
-function buildFeedUrl(seenIds: Set<string>, tagWeights: Record<string, number>): string {
-  const seen  = [...seenIds].slice(-150).join(",");
+function buildFeedUrl(
+  seenIds:    Set<string>,
+  passedIds:  Set<string>,
+  tagWeights: Record<string, number>,
+): string {
+  // Passed IDs have must-exclude priority: keep all of them (up to 200),
+  // then fill remaining slots with recent seen-only IDs.
+  const passedArr = [...passedIds].slice(-200);
+  const remaining = Math.max(0, 200 - passedArr.length);
+  const seenArr   = [...seenIds].filter((id) => !passedIds.has(id)).slice(-remaining);
+  const seen  = [...passedArr, ...seenArr].join(",");
   const topTW = Object.entries(tagWeights)
     .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
     .slice(0, 40);
@@ -108,10 +146,17 @@ export default function App() {
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
-  const seenIds                = useRef<Set<string>>(loadSeenIds());   // restored from localStorage
+  const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
+  // passedIds and pendingPassedIds are scoped to the authenticated user ID.
+  // At mount they're initialised with the anonymous bucket (empty on first visit).
+  // They are reset to the correct user-scoped data in initSession / SIGNED_IN.
+  const currentUserIdRef       = useRef<string | null>(null);                  // tracks active account
+  const passedIds              = useRef<Set<string>>(loadPassedIds(null));     // full permanent pass list
+  const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
 
@@ -132,11 +177,15 @@ export default function App() {
     setFeedError(false);
 
     try {
-      const url  = buildFeedUrl(seenIds.current, tagWeightsRef.current);
+      const url  = buildFeedUrl(seenIds.current, passedIds.current, tagWeightsRef.current);
       const res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      const incoming: TradingCard[] = data.items ?? [];
+      // Client-side filter: remove anything in the permanent pass list that slipped
+      // through the URL cap (passedIds can exceed the 200-ID seen param limit).
+      const incoming: TradingCard[] = (data.items ?? []).filter(
+        (c: TradingCard) => !passedIds.current.has(c.id)
+      );
 
       incoming.forEach((c) => seenIds.current.add(c.id));
       persistSeenIds(seenIds.current);   // keep across sessions
@@ -184,6 +233,140 @@ export default function App() {
         if (error) console.warn("[quiz] Supabase save failed:", error.message);
         else       console.log("[quiz] saved quiz + tag_weights to Supabase for", userId);
       });
+  }
+
+  // ── Passed-IDs: remote hydration + atomic RPC sync to Supabase ────────────
+
+  /**
+   * Fetch the account's remote passed_ids from Supabase and merge them into
+   * the local passedIds and seenIds refs.  An ownership check after the await
+   * means a logout/account-switch during the fetch causes a safe no-op.
+   *
+   * Called from both initSession (mount) and SIGNED_IN (post-mount sign-in)
+   * so remote exclusions are always in place before the next feed fetch.
+   * Fires reconcilePassedIds() after merging so local-only IDs are also pushed.
+   */
+  async function hydrateRemotePassedIds(userId: string): Promise<void> {
+    if (!supabase) { reconcilePassedIds(); return; }
+    try {
+      const { data } = await supabase
+        .from("user_quiz_results")
+        .select("passed_ids")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      // Ownership check: session may have changed while the query was in flight
+      if (currentUserIdRef.current !== userId) return;
+
+      if (data && Array.isArray(data.passed_ids) && data.passed_ids.length > 0) {
+        const remoteIds = data.passed_ids as string[];
+        remoteIds.forEach((id) => {
+          passedIds.current.add(id);
+          seenIds.current.add(id);   // also exclude from feed URL
+        });
+        persistPassedIds(passedIds.current, userId);
+        persistSeenIds(seenIds.current);
+        console.log(`[pass] merged ${remoteIds.length} remote passed IDs for`, userId);
+      }
+    } catch { /* network error — proceed with local data */ }
+
+    // Ownership re-check before reconciling
+    if (currentUserIdRef.current === userId) reconcilePassedIds();
+  }
+
+  // ── Passed-IDs: atomic RPC sync to Supabase ───────────────────────────────
+
+  /**
+   * Core RPC call: sends the given array of IDs to Supabase for a specific owner.
+   * ownerId is captured by the caller BEFORE any awaits; after getting the session
+   * we verify the active user still matches — if the session changed (logout/account
+   * switch) while the request was in flight, we discard the batch safely instead of
+   * writing to the wrong account.
+   * Returns the sent snapshot on success, or null on failure/mismatch.
+   */
+  async function syncPassedIdsToSupabase(
+    ids:     string[],
+    ownerId: string,
+  ): Promise<string[] | null> {
+    if (!supabase || ids.length === 0) return [];
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      // Abort if the session has changed since the batch was created
+      if (!session?.user || session.user.id !== ownerId) {
+        console.log("[pass] session changed during sync — batch discarded safely");
+        return null;
+      }
+      const { error } = await supabase.rpc("add_passed_card_ids", {
+        p_user_id: ownerId,
+        p_new_ids: ids,
+      });
+      if (error) {
+        console.warn("[pass] RPC add_passed_card_ids failed:", error.message);
+        return null;
+      }
+      return ids;
+    } catch { return null; }
+  }
+
+  /**
+   * Full reconciliation: push ALL local passed IDs to Supabase.
+   * Called on session init and SIGNED_IN so any IDs that failed to sync
+   * (network error, page close, pre-auth pass) are reliably persisted.
+   * The RPC is an idempotent union — safe to re-send the complete set.
+   * ownerId is captured synchronously so in-flight calls cannot be rerouted.
+   */
+  async function reconcilePassedIds() {
+    const ownerId  = currentUserIdRef.current;  // capture now, before any await
+    if (!ownerId || passedIds.current.size === 0) return;
+    const snapshot = [...passedIds.current];     // snapshot before await
+    const sent     = await syncPassedIdsToSupabase(snapshot, ownerId);
+    if (sent !== null) {
+      // Delete only the IDs that were in the sent snapshot — not the whole set.
+      // Any IDs added to pendingPassedIds while the RPC was in flight remain
+      // pending and will be sent by the next debounce or reconciliation cycle.
+      sent.forEach((id) => pendingPassedIds.current.delete(id));
+      console.log("[pass] reconciled", sent.length, "passed IDs to Supabase");
+    }
+  }
+
+  /**
+   * Debounced per-swipe sync — fires 3 s after the last left-swipe.
+   * Sends only the unsynced delta (pendingPassedIds) for efficiency.
+   * NOT the primary durability mechanism — that is reconcilePassedIds().
+   * ownerId is captured when the timer fires, bound to that moment's session.
+   */
+  function debounceSavePassedIds() {
+    if (savePassedIdsTimerRef.current) clearTimeout(savePassedIdsTimerRef.current);
+    savePassedIdsTimerRef.current = setTimeout(async () => {
+      if (pendingPassedIds.current.size === 0) return;
+      const ownerId = currentUserIdRef.current;    // capture before awaits
+      if (!ownerId) return;                         // no session — wait for reconcile on next sign-in
+      const snapshot = [...pendingPassedIds.current];
+      const sent = await syncPassedIdsToSupabase(snapshot, ownerId);
+      if (sent !== null) {
+        sent.forEach((id) => pendingPassedIds.current.delete(id));
+      }
+    }, 3000);
+  }
+
+  /**
+   * Best-effort flush on pagehide — cancel the debounce and sync whatever
+   * is still pending. Not the primary durability path; reconcilePassedIds()
+   * on the next authenticated session handles any misses.
+   */
+  async function flushPassedIds() {
+    if (savePassedIdsTimerRef.current) {
+      clearTimeout(savePassedIdsTimerRef.current);
+      savePassedIdsTimerRef.current = null;
+    }
+    if (pendingPassedIds.current.size === 0) return;
+    const ownerId = currentUserIdRef.current;    // capture before awaits
+    if (!ownerId) return;
+    const snapshot = [...pendingPassedIds.current];
+    const sent = await syncPassedIdsToSupabase(snapshot, ownerId);
+    if (sent !== null) {
+      sent.forEach((id) => pendingPassedIds.current.delete(id));
+    }
   }
 
   // ── Tag-weight scoring ──────────────────────────────────────────────────────
@@ -239,6 +422,27 @@ export default function App() {
             picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
           }));
 
+          // Scope switch: reset pass state to this user's account data.
+          // This prevents any anonymous or previous-user passes from being
+          // uploaded to the newly signed-in user's Supabase record.
+          const userId = session.user.id;
+          if (currentUserIdRef.current !== userId) {
+            passedIds.current        = loadPassedIds(userId);
+            pendingPassedIds.current = new Set();
+            currentUserIdRef.current  = userId;
+          }
+
+          // Fetch remote passed_ids from Supabase, merge them in, then reconcile.
+          // hydrateRemotePassedIds checks ownership after its own await so a
+          // concurrent logout cannot redirect the write.
+          // After hydration, filter the active deck so any anonymous cards that
+          // are now in the pass list are removed without a full reload.
+          hydrateRemotePassedIds(userId).then(() => {
+            if (currentUserIdRef.current === userId) {
+              setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
+            }
+          });
+
           // Flush any quiz swipes completed before authentication
           const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
           if (pendingRaw) {
@@ -256,6 +460,22 @@ export default function App() {
               return;
             } catch { /* malformed — ignore */ }
           }
+        }
+
+        if (event === "SIGNED_OUT") {
+          // Cancel any pending debounce timer so in-flight IDs can't be rerouted
+          // to the next user. Any un-synced passes are lost intentionally — the RPC
+          // server-side guard (session mismatch check) is a second line of defence.
+          if (savePassedIdsTimerRef.current) {
+            clearTimeout(savePassedIdsTimerRef.current);
+            savePassedIdsTimerRef.current = null;
+          }
+          // Reset to anonymous scope so any post-logout swipes are not persisted
+          // under the former user's account key.
+          passedIds.current        = loadPassedIds(null);
+          pendingPassedIds.current = new Set();
+          currentUserIdRef.current  = null;
+          localStorage.removeItem("cardmatch:user");
         }
       });
       unsub = () => subscription.unsubscribe();
@@ -278,11 +498,26 @@ export default function App() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
+          const userId = session.user.id;
+
+          // Scope switch: reset pass state to this specific user's data.
+          // Guards against any anonymous or previous-user IDs bleeding in.
+          if (currentUserIdRef.current !== userId) {
+            passedIds.current        = loadPassedIds(userId);
+            pendingPassedIds.current = new Set();
+            currentUserIdRef.current  = userId;
+          }
+
           const { data } = await supabase
             .from("user_quiz_results")
             .select("tag_weights, preferences")
-            .eq("user_id", session.user.id)
+            .eq("user_id", userId)
             .maybeSingle();
+
+          // ── Ownership check after await ──────────────────────────────────
+          // A logout/login could have fired while the query was in flight.
+          // Discard the response if the active user has changed.
+          if (currentUserIdRef.current !== userId) return;
 
           if (data) {
             // Restore tag_weights: Supabase is the source of truth; local recent swipes win on conflicts
@@ -307,10 +542,19 @@ export default function App() {
             const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
             if (hasPositiveWeights && !localStorage.getItem(ONBOARDING_KEY)) {
               localStorage.setItem(ONBOARDING_KEY, "1");
+              // Hydrate remote passed IDs (merges + reconciles) before loading feed
+              await hydrateRemotePassedIds(userId);
+              if (currentUserIdRef.current !== userId) return;  // check after await
               loadFeed(false);   // skip onboarding, go straight to their personalised feed
               return;
             }
           }
+
+          // Hydrate remote passed_ids and reconcile local ones to Supabase.
+          // Uses the shared hydrateRemotePassedIds routine — same ownership
+          // checks and merge logic as the SIGNED_IN path.
+          // Works even when no Supabase row exists — the RPC creates it.
+          await hydrateRemotePassedIds(userId);
         }
       } catch { /* network error — fall through with localStorage data */ }
 
@@ -319,7 +563,15 @@ export default function App() {
 
     initSession();
 
-    return () => { unsub?.(); };
+    // Flush any unsent passed IDs when the user navigates away or closes the tab.
+    // pagehide fires reliably on mobile (unlike beforeunload) and on desktop.
+    const handlePageHide = () => { flushPassedIds(); };
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      unsub?.();
+      window.removeEventListener("pagehide", handlePageHide);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -424,6 +676,14 @@ export default function App() {
   }
 
   function handlePass(card: TradingCard) {
+    // Add to full local pass list AND to the pending-sync set
+    passedIds.current.add(card.id);
+    pendingPassedIds.current.add(card.id);
+    seenIds.current.add(card.id);
+    persistPassedIds(passedIds.current, currentUserIdRef.current);
+    persistSeenIds(seenIds.current);
+    debounceSavePassedIds();  // debounce-fires the RPC with only the pending delta
+
     updatePrefsOnSwipe(card, "PASS");
     updateTagWeights(card, -0.5);    // −0.5 to all tags — deprioritises this category/type
   }
