@@ -24,6 +24,19 @@ function passedStorageKey(userId: string | null): string {
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+/**
+ * A single passed-card entry stored in both localStorage and Supabase.
+ * Using { id, passedAt } instead of a bare string lets us prune entries
+ * by age (60-day rolling window) rather than by count, which means IDs
+ * only fall off the exclusion list after their eBay listings have almost
+ * certainly expired.
+ */
+type PassedEntry = { id: string; passedAt: string }; // passedAt is ISO-8601
+
+/** 60-day rolling window — entries older than this are pruned. */
+const PASSED_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000;
+
 type Preferences = {
   categoryScores: Record<string, number>;
   eraScores:      Record<string, number>;
@@ -83,20 +96,66 @@ function persistSeenIds(ids: Set<string>) {
   } catch { /* storage quota exceeded — skip */ }
 }
 
-/** Load permanently passed card IDs (left-swipes) for a specific user from localStorage. */
-function loadPassedIds(userId: string | null): Set<string> {
+/**
+ * Load permanently passed card IDs (left-swipes) for a specific user from
+ * localStorage.  Handles both the legacy plain-string format and the current
+ * { id, passedAt } format.  Entries older than PASSED_MAX_AGE_MS are pruned
+ * on load so stale IDs never accumulate in the exclusion list.
+ */
+function loadPassedIds(userId: string | null): { ids: Set<string>; timestamps: Map<string, string> } {
   try {
     const raw = localStorage.getItem(passedStorageKey(userId));
-    if (!raw) return new Set();
+    if (!raw) return { ids: new Set(), timestamps: new Map() };
     const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? new Set(arr) : new Set();
-  } catch { return new Set(); }
+    if (!Array.isArray(arr)) return { ids: new Set(), timestamps: new Map() };
+
+    const cutoff = Date.now() - PASSED_MAX_AGE_MS;
+    const ids        = new Set<string>();
+    const timestamps = new Map<string, string>();
+    const now        = new Date().toISOString();
+
+    for (const entry of arr) {
+      if (typeof entry === "string") {
+        // Legacy format: plain string ID — treat passedAt as now so it stays
+        // in the window (these are recent by definition; they were just stored).
+        ids.add(entry);
+        timestamps.set(entry, now);
+      } else if (
+        entry && typeof entry === "object" &&
+        typeof entry.id === "string" &&
+        typeof entry.passedAt === "string"
+      ) {
+        // Current format: { id, passedAt }
+        if (new Date(entry.passedAt).getTime() >= cutoff) {
+          ids.add(entry.id);
+          timestamps.set(entry.id, entry.passedAt);
+        }
+        // Entries outside the 60-day window are silently dropped.
+      }
+    }
+
+    return { ids, timestamps };
+  } catch { return { ids: new Set(), timestamps: new Map() }; }
 }
 
-/** Persist passed IDs to localStorage under the given user's key (capped at 2000). */
-function persistPassedIds(ids: Set<string>, userId: string | null) {
+/**
+ * Persist passed IDs to localStorage under the given user's key.
+ * Writes { id, passedAt } entries so the age-based rolling window is
+ * preserved across sessions.  Entries without a recorded timestamp default
+ * to the current time.
+ */
+function persistPassedIds(
+  ids:        Set<string>,
+  timestamps: Map<string, string>,
+  userId:     string | null,
+) {
   try {
-    localStorage.setItem(passedStorageKey(userId), JSON.stringify([...ids].slice(-2000)));
+    const now     = new Date().toISOString();
+    const entries: PassedEntry[] = [...ids].map((id) => ({
+      id,
+      passedAt: timestamps.get(id) ?? now,
+    }));
+    localStorage.setItem(passedStorageKey(userId), JSON.stringify(entries));
   } catch { /* storage quota exceeded — skip */ }
 }
 
@@ -190,11 +249,17 @@ export default function App() {
   const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
   const pricePrefsRef          = useRef<number[]>(loadPricePrefs());          // rolling liked prices
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
-  // passedIds and pendingPassedIds are scoped to the authenticated user ID.
-  // At mount they're initialised with the anonymous bucket (empty on first visit).
-  // They are reset to the correct user-scoped data in initSession / SIGNED_IN.
+  // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
+  // authenticated user ID.  At mount they're initialised with the anonymous
+  // bucket (empty on first visit).  They are reset to the correct user-scoped
+  // data in initSession / SIGNED_IN.
   const currentUserIdRef       = useRef<string | null>(null);                  // tracks active account
-  const passedIds              = useRef<Set<string>>(loadPassedIds(null));     // full permanent pass list
+  const {
+    ids:        _initPassedIds,
+    timestamps: _initPassedTs,
+  }                            = loadPassedIds(null);
+  const passedIds              = useRef<Set<string>>(_initPassedIds);          // full permanent pass list
+  const passedIdsTimestamps    = useRef<Map<string, string>>(_initPassedTs);   // id → ISO passedAt
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
@@ -313,14 +378,46 @@ export default function App() {
       if (currentUserIdRef.current !== userId) return;
 
       if (data && Array.isArray(data.passed_ids) && data.passed_ids.length > 0) {
-        const remoteIds = data.passed_ids as string[];
-        remoteIds.forEach((id) => {
+        const cutoff = Date.now() - PASSED_MAX_AGE_MS;
+        const now    = new Date().toISOString();
+        let merged   = 0;
+
+        for (const entry of data.passed_ids as unknown[]) {
+          let id: string;
+          let passedAt: string;
+
+          if (typeof entry === "string") {
+            // Legacy plain-string format — treat as fresh.
+            id       = entry;
+            passedAt = now;
+          } else if (
+            entry && typeof entry === "object" &&
+            typeof (entry as PassedEntry).id === "string" &&
+            typeof (entry as PassedEntry).passedAt === "string"
+          ) {
+            id       = (entry as PassedEntry).id;
+            passedAt = (entry as PassedEntry).passedAt;
+            // Skip entries outside the 60-day window.
+            if (new Date(passedAt).getTime() < cutoff) continue;
+          } else {
+            continue;
+          }
+
+          // Merge: keep the later timestamp when both sides have the same id.
+          const existing = passedIdsTimestamps.current.get(id);
+          if (!existing || new Date(passedAt) > new Date(existing)) {
+            passedIdsTimestamps.current.set(id, passedAt);
+          }
           passedIds.current.add(id);
           seenIds.current.add(id);   // also exclude from feed URL
-        });
-        persistPassedIds(passedIds.current, userId);
-        persistSeenIds(seenIds.current);
-        console.log(`[pass] merged ${remoteIds.length} remote passed IDs for`, userId);
+          merged++;
+        }
+
+        if (merged > 0) {
+          persistPassedIds(passedIds.current, passedIdsTimestamps.current, userId);
+          persistSeenIds(seenIds.current);
+          console.log(`[pass] merged ${merged} remote passed IDs for`, userId);
+        }
       }
     } catch { /* network error — proceed with local data */ }
 
@@ -331,7 +428,7 @@ export default function App() {
   // ── Passed-IDs: atomic RPC sync to Supabase ───────────────────────────────
 
   /**
-   * Core RPC call: sends the given array of IDs to Supabase for a specific owner.
+   * Core RPC call: sends the given PassedEntry array to Supabase for a specific owner.
    * ownerId is captured by the caller BEFORE any awaits; after getting the session
    * we verify the active user still matches — if the session changed (logout/account
    * switch) while the request was in flight, we discard the batch safely instead of
@@ -339,14 +436,15 @@ export default function App() {
    * Returns the sent snapshot on success, or null on failure/mismatch.
    */
   async function syncPassedIdsToSupabase(
-    ids:     string[],
+    entries: PassedEntry[],
     ownerId: string,
-  ): Promise<string[] | null> {
-    if (!supabase || ids.length === 0) return [];
-    // Cap the payload to the 500 most-recent IDs so the Supabase column never
-    // grows unbounded.  The server-side RPC enforces the same 500-ID cap after
-    // merging with any pre-existing IDs, so both sides stay in sync.
-    const capped = ids.slice(-500);
+  ): Promise<PassedEntry[] | null> {
+    if (!supabase || entries.length === 0) return [];
+    // Client-side pre-filter: drop entries that are already outside the window
+    // before even sending.  The server-side RPC enforces the same rule.
+    const cutoff = Date.now() - PASSED_MAX_AGE_MS;
+    const fresh  = entries.filter((e) => new Date(e.passedAt).getTime() >= cutoff);
+    if (fresh.length === 0) return [];
     try {
       const { data: { session } } = await supabase.auth.getSession();
       // Abort if the session has changed since the batch was created
@@ -356,16 +454,25 @@ export default function App() {
       }
       const { error } = await supabase.rpc("add_passed_card_ids", {
         p_user_id: ownerId,
-        p_new_ids: capped,
+        p_new_ids: fresh,
       });
       if (error) {
         console.warn("[pass] RPC add_passed_card_ids failed:", error.message);
         return null;
       }
-      // Return the capped slice (what was actually sent), not the original ids
+      // Return the fresh slice (what was actually sent), not the original entries
       // array, so callers can accurately remove only the synced IDs from pending.
-      return capped;
+      return fresh;
     } catch { return null; }
+  }
+
+  /** Build a PassedEntry[] from a set of IDs, looking up timestamps in the ref. */
+  function buildPassedEntries(ids: Iterable<string>): PassedEntry[] {
+    const now = new Date().toISOString();
+    return [...ids].map((id) => ({
+      id,
+      passedAt: passedIdsTimestamps.current.get(id) ?? now,
+    }));
   }
 
   /**
@@ -378,13 +485,13 @@ export default function App() {
   async function reconcilePassedIds() {
     const ownerId  = currentUserIdRef.current;  // capture now, before any await
     if (!ownerId || passedIds.current.size === 0) return;
-    const snapshot = [...passedIds.current];     // snapshot before await
+    const snapshot = buildPassedEntries(passedIds.current); // snapshot before await
     const sent     = await syncPassedIdsToSupabase(snapshot, ownerId);
     if (sent !== null) {
       // Delete only the IDs that were in the sent snapshot — not the whole set.
       // Any IDs added to pendingPassedIds while the RPC was in flight remain
       // pending and will be sent by the next debounce or reconciliation cycle.
-      sent.forEach((id) => pendingPassedIds.current.delete(id));
+      sent.forEach((e) => pendingPassedIds.current.delete(e.id));
       console.log("[pass] reconciled", sent.length, "passed IDs to Supabase");
     }
   }
@@ -401,10 +508,10 @@ export default function App() {
       if (pendingPassedIds.current.size === 0) return;
       const ownerId = currentUserIdRef.current;    // capture before awaits
       if (!ownerId) return;                         // no session — wait for reconcile on next sign-in
-      const snapshot = [...pendingPassedIds.current];
+      const snapshot = buildPassedEntries(pendingPassedIds.current);
       const sent = await syncPassedIdsToSupabase(snapshot, ownerId);
       if (sent !== null) {
-        sent.forEach((id) => pendingPassedIds.current.delete(id));
+        sent.forEach((e) => pendingPassedIds.current.delete(e.id));
       }
     }, 3000);
   }
@@ -422,10 +529,10 @@ export default function App() {
     if (pendingPassedIds.current.size === 0) return;
     const ownerId = currentUserIdRef.current;    // capture before awaits
     if (!ownerId) return;
-    const snapshot = [...pendingPassedIds.current];
+    const snapshot = buildPassedEntries(pendingPassedIds.current);
     const sent = await syncPassedIdsToSupabase(snapshot, ownerId);
     if (sent !== null) {
-      sent.forEach((id) => pendingPassedIds.current.delete(id));
+      sent.forEach((e) => pendingPassedIds.current.delete(e.id));
     }
   }
 
@@ -579,9 +686,11 @@ export default function App() {
           // uploaded to the newly signed-in user's Supabase record.
           const userId = session.user.id;
           if (currentUserIdRef.current !== userId) {
-            passedIds.current        = loadPassedIds(userId);
-            pendingPassedIds.current = new Set();
-            currentUserIdRef.current  = userId;
+            const { ids: loadedIds, timestamps: loadedTs } = loadPassedIds(userId);
+            passedIds.current             = loadedIds;
+            passedIdsTimestamps.current   = loadedTs;
+            pendingPassedIds.current      = new Set();
+            currentUserIdRef.current      = userId;
           }
 
           // Flush any quiz swipes completed before authentication.
@@ -671,9 +780,11 @@ export default function App() {
           }
           // Reset to anonymous scope so any post-logout swipes are not persisted
           // under the former user's account key.
-          passedIds.current        = loadPassedIds(null);
-          pendingPassedIds.current = new Set();
-          currentUserIdRef.current  = null;
+          const { ids: anonIds, timestamps: anonTs } = loadPassedIds(null);
+          passedIds.current           = anonIds;
+          passedIdsTimestamps.current = anonTs;
+          pendingPassedIds.current    = new Set();
+          currentUserIdRef.current    = null;
           localStorage.removeItem("cardmatch:user");
         }
       });
@@ -731,9 +842,11 @@ export default function App() {
           // Scope switch: reset pass state to this specific user's data.
           // Guards against any anonymous or previous-user IDs bleeding in.
           if (currentUserIdRef.current !== userId) {
-            passedIds.current        = loadPassedIds(userId);
-            pendingPassedIds.current = new Set();
-            currentUserIdRef.current  = userId;
+            const { ids: loadedIds2, timestamps: loadedTs2 } = loadPassedIds(userId);
+            passedIds.current           = loadedIds2;
+            passedIdsTimestamps.current = loadedTs2;
+            pendingPassedIds.current    = new Set();
+            currentUserIdRef.current    = userId;
           }
 
           // ── Check for pending quiz swipes from before authentication ────
@@ -974,11 +1087,16 @@ export default function App() {
   }
 
   function handlePass(card: TradingCard) {
+    // Record the pass timestamp before adding to the set so persistPassedIds
+    // can write { id, passedAt } entries with accurate creation times.
+    const passedAt = new Date().toISOString();
+    passedIdsTimestamps.current.set(card.id, passedAt);
+
     // Add to full local pass list AND to the pending-sync set
     passedIds.current.add(card.id);
     pendingPassedIds.current.add(card.id);
     seenIds.current.add(card.id);
-    persistPassedIds(passedIds.current, currentUserIdRef.current);
+    persistPassedIds(passedIds.current, passedIdsTimestamps.current, currentUserIdRef.current);
     persistSeenIds(seenIds.current);
     debounceSavePassedIds();  // debounce-fires the RPC with only the pending delta
 
