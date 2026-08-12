@@ -343,6 +343,10 @@ export default function App() {
     ownerId: string,
   ): Promise<string[] | null> {
     if (!supabase || ids.length === 0) return [];
+    // Cap the payload to the 500 most-recent IDs so the Supabase column never
+    // grows unbounded.  The server-side RPC enforces the same 500-ID cap after
+    // merging with any pre-existing IDs, so both sides stay in sync.
+    const capped = ids.slice(-500);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       // Abort if the session has changed since the batch was created
@@ -352,13 +356,15 @@ export default function App() {
       }
       const { error } = await supabase.rpc("add_passed_card_ids", {
         p_user_id: ownerId,
-        p_new_ids: ids,
+        p_new_ids: capped,
       });
       if (error) {
         console.warn("[pass] RPC add_passed_card_ids failed:", error.message);
         return null;
       }
-      return ids;
+      // Return the capped slice (what was actually sent), not the original ids
+      // array, so callers can accurately remove only the synced IDs from pending.
+      return capped;
     } catch { return null; }
   }
 
