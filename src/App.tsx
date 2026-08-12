@@ -280,11 +280,13 @@ export default function App() {
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
-    // Guard: redirect to onboarding if the user has no preference data at all
+    // Guard: redirect to onboarding only when the user genuinely hasn't completed
+    // it yet.  Once ONBOARDING_KEY is set we must never send them back — even if
+    // tagWeights are temporarily absent (e.g. all-negative quiz, network error).
     const hasWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
     const hasPrefs   = !!prefsRef.current?.topCategories?.length;
-    if (!hasWeights && !hasPrefs) {
-      localStorage.removeItem(ONBOARDING_KEY);
+    const doneOnboarding = !!localStorage.getItem(ONBOARDING_KEY);
+    if (!hasWeights && !hasPrefs && !doneOnboarding) {
       setAppMode("onboarding");
       return;
     }
@@ -1023,10 +1025,14 @@ export default function App() {
         }
       }
 
-      // 4. Show cards returned by onboarding/complete as the initial deck
-      const incoming: TradingCard[] = data.cards ?? [];
-      incoming.forEach((c) => seenIds.current.add(c.id));
+      // 4. Show cards returned by onboarding/complete as the initial deck.
+      // Do NOT pre-populate seenIds with these — the live feed draws from the
+      // same eBay pool and would return 0 fresh cards if we marked them all seen.
+      // Cards the user actually swipes will be added to seenIds individually via
+      // handlePass / the next loadFeed call.
+      seenIds.current = new Set();
       persistSeenIds(seenIds.current);
+      const incoming: TradingCard[] = data.cards ?? [];
       setCards(incoming);
       setDeckResetKey((k) => k + 1);
       setAppMode("feed");
@@ -1205,6 +1211,7 @@ export default function App() {
               <div className="flex items-center rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
                 <button
                   onClick={() => {
+                    feedModeRef.current = "for-you";   // update ref immediately so loadFeed sees the new mode
                     setFeedMode("for-you");
                     setCards([]);
                     seenIds.current = new Set();
@@ -1221,6 +1228,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
+                    feedModeRef.current = "ending-soonest";   // update ref immediately so loadFeed sees the new mode
                     setFeedMode("ending-soonest");
                     setCards([]);
                     seenIds.current = new Set();
