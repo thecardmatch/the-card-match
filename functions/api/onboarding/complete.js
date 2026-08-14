@@ -1,13 +1,10 @@
 /**
  * POST /api/onboarding/complete
- * Receives the 20 onboarding swipes, computes preference scores,
- * fetches an initial card pool proportional to the user's liked categories,
- * and returns both the preferences and the cards.
- *
- * Only categories the user expressed positive interest in are queried.
- * Categories are fetched in proportion to their score (e.g., Soccer:3,Football:2
- * → ~60% Soccer cards, ~40% Football cards in the initial pool).
+ * Receives the onboarding swipes, computes preference scores,
+ * saves preferences to Supabase, fetches initial eBay card pool,
+ * and returns both the preferences and cards.
  */
+import { createClient } from "@supabase/supabase-js";
 import {
   jsonResponse,
   onRequestOptions as _cors,
@@ -34,11 +31,18 @@ const CAT_TAG_TO_CONFIG = {
 };
 
 export async function onRequestPost(context) {
-  const { env, request } = context;
+  // Fall back to process.env if context.env is undefined (Replit / Node runtime)
+  const env = context?.env || process.env;
+  const request = context?.request || context;
 
   let body = {};
-  try { body = await request.json(); } catch { /* empty body is fine */ }
-  const { onboardingSwipes = [] } = body;
+  try { 
+    body = await request.json(); 
+  } catch { 
+    /* empty body fallback */ 
+  }
+
+  const { onboardingSwipes = [], userId = null } = body;
 
   try {
     // ── 1. Compute preference scores from quiz swipes ─────────────────────────
@@ -47,23 +51,55 @@ export async function onRequestPost(context) {
     const styleScores    = {};
 
     for (const s of onboardingSwipes) {
+      if (!s || !s.category) continue;
       const delta = s.action === "LIKE" ? 1 : -1;
       categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
+
       const era   = s.attributes?.era;
       const style = s.attributes?.style;
       if (era)   eraScores[era]     = (eraScores[era]     || 0) + delta;
       if (style) styleScores[style] = (styleScores[style] || 0) + delta;
     }
 
-    // topCategories: top 3 by score (used by frontend for pref tracking)
-    const rankedCats = Object.entries(categoryScores)
-      .sort((a, b) => b[1] - a[1]);
-
+    // topCategories: top 3 by score
+    const rankedCats = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
     const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
     const preferences   = { categoryScores, eraScores, styleScores, topCategories };
 
-    // ── 2. Build proportional fetch plan from positively-scored categories ────
-    // Any category the user passed on (score ≤ 0) is excluded entirely.
+    // ── 2. Save Preferences & Swipes to Supabase ──────────────────────────────
+    const supabaseUrl = env.SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+
+      // Save to user_preferences
+      if (userId) {
+        const { error: prefErr } = await supabase.from("user_preferences").upsert({
+          user_id: userId,
+          tag_weights: categoryScores,
+          preferences: preferences,
+          swipes: onboardingSwipes,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "user_id" });
+
+        if (prefErr) console.error("[onboarding/complete] Supabase pref write error:", prefErr.message);
+
+        // Save to user_quiz_results
+        const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
+          user_id: userId,
+          preferences: preferences,
+          swipes: onboardingSwipes,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "user_id" });
+
+        if (quizErr) console.error("[onboarding/complete] Supabase quiz write error:", quizErr.message);
+      }
+    } else {
+      console.warn("[onboarding/complete] Supabase environment variables missing; skipping DB write.");
+    }
+
+    // ── 3. Build proportional fetch plan from positively-scored categories ────
     const positiveCats = rankedCats
       .filter(([, score]) => score > 0)
       .filter(([cat]) => {
@@ -71,7 +107,6 @@ export async function onRequestPost(context) {
         return CAT_TAG_TO_CONFIG[key] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG[key]];
       });
 
-    // Fallback: if the user passed on everything, use the top overall categories
     const fetchSource = positiveCats.length > 0
       ? positiveCats
       : rankedCats.slice(0, 2).filter(([cat]) => {
@@ -85,7 +120,7 @@ export async function onRequestPost(context) {
     }
 
     const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
-    const TARGET     = 60; // total cards to aim for (over-fetch for scoring headroom)
+    const TARGET     = 60;
 
     const fetchPlan = fetchSource.map(([cat, score]) => {
       const configKey  = CAT_TAG_TO_CONFIG[cat.toLowerCase().replace(/[\s_]+/g, "-")] || cat;
@@ -94,11 +129,7 @@ export async function onRequestPost(context) {
       return { configKey, cat, score, proportion, budget };
     });
 
-    console.log(
-      `[onboarding/complete] fetch plan: ${fetchPlan.map((p) => `${p.configKey}(${Math.round(p.proportion * 100)}%)`).join(", ")}`
-    );
-
-    // ── 3. Proportional parallel eBay fetch ───────────────────────────────────
+    // ── 4. Proportional parallel eBay fetch ───────────────────────────────────
     const token    = await getEbayToken(env);
     const allItems = [];
 
@@ -109,13 +140,12 @@ export async function onRequestPost(context) {
         const { terms, categoryId, minPrice } = cfg;
         const pf = `price:[${minPrice}..],priceCurrency:USD`;
 
-        // ≥45% proportion → 2 search terms; otherwise 1
         const termCount = proportion >= 0.45 ? Math.min(2, terms.length) : 1;
         const perTerm   = Math.ceil(budget / termCount);
 
         const searches = terms.slice(0, termCount).flatMap((term) => [
           ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perTerm * 0.65), 0),
-          ebaySearch(token, term, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perTerm * 0.35), 0),
+          ebaySearch(token, term, "bestMatch",      `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perTerm * 0.35), 0),
         ]);
 
         const settled = await Promise.allSettled(searches);
@@ -128,9 +158,9 @@ export async function onRequestPost(context) {
       })
     );
 
-    // ── 4. Deduplicate, score by category affinity, sort, slice ──────────────
-    const seen   = new Set();
-    const now    = Date.now();
+    // ── 5. Deduplicate, score by category affinity, sort, slice ──────────────
+    const seen = new Set();
+    const now  = Date.now();
 
     const unique = allItems.filter((item) => {
       if (seen.has(item.id)) return false;
@@ -139,13 +169,12 @@ export async function onRequestPost(context) {
     });
 
     const scored = unique.map((item) => {
-      let urgency   = 1;
+      let urgency = 1;
       if (item.endTime) {
         const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
-        if (hrs > 0 && hrs < 2)   urgency = 3;
+        if (hrs > 0 && hrs < 2)      urgency = 3;
         else if (hrs < 12)         urgency = 2;
       }
-      // Weight by the user's score for this card's category
       const catScore = categoryScores[item.category] ?? 0;
       return {
         ...item,
@@ -156,11 +185,10 @@ export async function onRequestPost(context) {
     scored.sort((a, b) => b.rankScore - a.rankScore);
     const cards = scored.slice(0, 40);
 
-    console.log(`[onboarding/complete] returning ${cards.length} cards`);
     return jsonResponse({ preferences, cards });
 
   } catch (err) {
-    console.error("[onboarding/complete]", err.message);
+    console.error("[onboarding/complete] CRASH ERROR:", err);
     return jsonResponse({ preferences: null, cards: [], error: err.message }, 500);
   }
 }

@@ -3,6 +3,7 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
+import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -959,94 +960,129 @@ const CAT_TAG_TO_CONFIG_OB = {
   mtg:        "MTG",       racing:     "Racing",      popculture: "PopCulture",
 };
 
-app.post("/api/onboarding/complete", async (req, res) => {
-  try {
-    const { onboardingSwipes = [] } = req.body ?? {};
+    app.post("/api/onboarding/complete", async (req, res) => {
+      try {
+        const { onboardingSwipes = [], userId = null } = req.body ?? {};
 
-    // 1. Compute preference scores
-    const categoryScores = {};
-    const eraScores      = {};
-    const styleScores    = {};
-    for (const s of onboardingSwipes) {
-      const delta = s.action === "LIKE" ? 1 : -1;
-      categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
-      if (s.attributes?.era)   eraScores[s.attributes.era]     = (eraScores[s.attributes.era]     || 0) + delta;
-      if (s.attributes?.style) styleScores[s.attributes.style] = (styleScores[s.attributes.style] || 0) + delta;
-    }
-
-    const rankedCats    = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
-    const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
-    const preferences   = { categoryScores, eraScores, styleScores, topCategories };
-
-    // 2. Only fetch from positively-scored categories (proportionally)
-    const positiveCats = rankedCats.filter(([, score]) => score > 0)
-      .filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
-
-    const fetchSource = positiveCats.length > 0
-      ? positiveCats
-      : rankedCats.slice(0, 2).filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
-
-    if (fetchSource.length === 0) return res.json({ preferences, cards: [] });
-
-    const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
-    const TARGET     = 60;
-    const fetchPlan  = fetchSource.map(([cat, score]) => {
-      const configKey  = CAT_TAG_TO_CONFIG_OB[cat.toLowerCase().replace(/[\s_]+/g, "-")] || cat;
-      const proportion = score / totalScore;
-      return { configKey, proportion, budget: Math.max(15, Math.ceil(TARGET * proportion)) };
-    });
-
-    console.log(`[onboarding/complete] plan: ${fetchPlan.map((p) => `${p.configKey}(${Math.round(p.proportion * 100)}%)`).join(", ")}`);
-
-    // 3. Proportional parallel fetch — uses catTerm (no hardcoded player names)
-    const token    = await getEbayToken();
-    const allItems = [];
-
-    await Promise.all(
-      fetchPlan.map(async ({ configKey, budget }) => {
-        const cfg = CATEGORY_FEED_CONFIG[configKey];
-        if (!cfg) return;
-        const { catTerm, categoryId } = cfg;
-        const pf      = "price:[0.99..],priceCurrency:USD";
-        const perHalf = Math.ceil(budget / 2);
-        const searches = [
-          ebaySearch(token, catTerm, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perHalf * 0.65), 0),
-          ebaySearch(token, catTerm, "bestMatch",     `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perHalf * 0.35), 0),
-        ];
-        const settled = await Promise.allSettled(searches);
-        for (const r of settled) {
-          if (r.status !== "fulfilled") continue;
-          for (const raw of (r.value.itemSummaries || [])) {
-            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [configKey]));
-          }
+        // 1. Compute preference scores
+        const categoryScores = {};
+        const eraScores      = {};
+        const styleScores    = {};
+        for (const s of onboardingSwipes) {
+          if (!s) continue;
+          const delta = s.action === "LIKE" ? 1 : -1;
+          if (s.category) categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
+          if (s.attributes?.era)   eraScores[s.attributes.era]     = (eraScores[s.attributes.era]     || 0) + delta;
+          if (s.attributes?.style) styleScores[s.attributes.style] = (styleScores[s.attributes.style] || 0) + delta;
         }
-      })
-    );
 
-    // 4. Deduplicate, score, sort
-    const seen = new Set();
-    const now  = Date.now();
-    const unique = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
-    const scored = unique.map((item) => {
-      let urgency = 1;
-      if (item.endTime) {
-        const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
-        if (hrs > 0 && hrs < 2) urgency = 3; else if (hrs < 12) urgency = 2;
+        const rankedCats    = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
+        const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
+        const preferences   = { categoryScores, eraScores, styleScores, topCategories };
+
+        // ── SAVE TO SUPABASE ──────────────────────────────────────────────────────
+        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+        if (supabaseUrl && supabaseKey) {
+          const supabase = createClient(supabaseUrl, supabaseKey);
+
+          if (userId) {
+            // Save to user_preferences
+            const { error: prefErr } = await supabase.from("user_preferences").upsert({
+              user_id: userId,
+              tag_weights: categoryScores,
+              preferences: preferences,
+              swipes: onboardingSwipes,
+              updated_at: new Date().toISOString()
+            }, { onConflict: "user_id" });
+
+            if (prefErr) console.error("[onboarding/complete] Supabase pref write error:", prefErr.message);
+
+            // Save to user_quiz_results
+            const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
+              user_id: userId,
+              preferences: preferences,
+              swipes: onboardingSwipes,
+              updated_at: new Date().toISOString()
+            }, { onConflict: "user_id" });
+
+            if (quizErr) console.error("[onboarding/complete] Supabase quiz write error:", quizErr.message);
+          } else {
+            console.warn("[onboarding/complete] No userId passed; preferences computed without saving to DB.");
+          }
+        } else {
+          console.warn("[onboarding/complete] Missing Supabase env variables; skipping DB write.");
+        }
+
+        // 2. Only fetch from positively-scored categories (proportionally)
+        const positiveCats = rankedCats.filter(([, score]) => score > 0)
+          .filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
+
+        const fetchSource = positiveCats.length > 0
+          ? positiveCats
+          : rankedCats.slice(0, 2).filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
+
+        if (fetchSource.length === 0) return res.json({ preferences, cards: [] });
+
+        const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
+        const TARGET     = 60;
+        const fetchPlan  = fetchSource.map(([cat, score]) => {
+          const configKey  = CAT_TAG_TO_CONFIG_OB[cat.toLowerCase().replace(/[\s_]+/g, "-")] || cat;
+          const proportion = score / totalScore;
+          return { configKey, proportion, budget: Math.max(15, Math.ceil(TARGET * proportion)) };
+        });
+
+        console.log(`[onboarding/complete] plan: ${fetchPlan.map((p) => `${p.configKey}(${Math.round(p.proportion * 100)}%)`).join(", ")}`);
+
+        // 3. Proportional parallel fetch — uses catTerm (no hardcoded player names)
+        const token    = await getEbayToken();
+        const allItems = [];
+
+        await Promise.all(
+          fetchPlan.map(async ({ configKey, budget }) => {
+            const cfg = CATEGORY_FEED_CONFIG[configKey];
+            if (!cfg) return;
+            const { catTerm, categoryId } = cfg;
+            const pf      = "price:[0.99..],priceCurrency:USD";
+            const perHalf = Math.ceil(budget / 2);
+            const searches = [
+              ebaySearch(token, catTerm, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perHalf * 0.65), 0),
+              ebaySearch(token, catTerm, "bestMatch",      `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perHalf * 0.35), 0),
+            ];
+            const settled = await Promise.allSettled(searches);
+            for (const r of settled) {
+              if (r.status !== "fulfilled") continue;
+              for (const raw of (r.value.itemSummaries || [])) {
+                if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [configKey]));
+              }
+            }
+          })
+        );
+
+        // 4. Deduplicate, score, sort
+        const seen = new Set();
+        const now  = Date.now();
+        const unique = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
+        const scored = unique.map((item) => {
+          let urgency = 1;
+          if (item.endTime) {
+            const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
+            if (hrs > 0 && hrs < 2) urgency = 3; else if (hrs < 12) urgency = 2;
+          }
+          const catScore = categoryScores[item.category] ?? 0;
+          return { ...item, rankScore: (item.engagementScore + Math.max(catScore, 0) * 5) * urgency };
+        });
+        scored.sort((a, b) => b.rankScore - a.rankScore);
+        const cards = scored.slice(0, 40);
+
+        console.log(`[onboarding/complete] returning ${cards.length} cards`);
+        return res.json({ preferences, cards });
+      } catch (err) {
+        console.error("[onboarding/complete]", err.message);
+        return res.status(500).json({ preferences: null, cards: [], error: err.message });
       }
-      const catScore = categoryScores[item.category] ?? 0;
-      return { ...item, rankScore: (item.engagementScore + Math.max(catScore, 0) * 5) * urgency };
     });
-    scored.sort((a, b) => b.rankScore - a.rankScore);
-    const cards = scored.slice(0, 40);
-
-    console.log(`[onboarding/complete] returning ${cards.length} cards`);
-    return res.json({ preferences, cards });
-  } catch (err) {
-    console.error("[onboarding/complete]", err.message);
-    return res.status(500).json({ preferences: null, cards: [], error: err.message });
-  }
-});
-
 // ─── GET /api/feed — tag-weight-driven proportional feed ─────────────────────
 // Mirrors functions/api/feed.js exactly (tag_weights-only, no cats/scores params).
 const CAT_TAG_TO_CONFIG_FEED = {
