@@ -4,7 +4,11 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
+import WebSocket from "ws";
 
+if (!globalThis.WebSocket) {
+  globalThis.WebSocket = WebSocket;
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
