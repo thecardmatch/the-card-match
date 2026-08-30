@@ -16,6 +16,7 @@ thecardmatch.com is hosted on **Cloudflare Pages** (pure static hosting). There 
 - `server/index.js` is kept for **local development only** (via `npm run dev` → Vite proxy → port 3001)
 - Production = CF Pages Functions; Local dev = Express on port 3001
 - Credentialed cross-origin requests require an explicit allowed origin; never combine `Access-Control-Allow-Credentials: true` with a wildcard origin.
+- The production frontend must call `/api` same-origin; any `VITE_API_URL` override is development-only and must not point a published build at `*.replit.dev`.
 
 ## Key CF vs Node.js differences
 - `Buffer.from(x).toString('base64')` → `btoa(x)`
