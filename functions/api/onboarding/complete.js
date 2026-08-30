@@ -43,6 +43,12 @@ export async function onRequestPost(context) {
   }
 
   const { onboardingSwipes = [], userId = null } = body;
+  console.log("[onboarding/complete] request:", {
+    method: "POST",
+    path: "/api/onboarding/complete",
+    userId: userId || null,
+    swipeCount: Array.isArray(onboardingSwipes) ? onboardingSwipes.length : 0,
+  });
 
   try {
     // ── 1. Compute preference scores from quiz swipes ─────────────────────────
@@ -68,32 +74,31 @@ export async function onRequestPost(context) {
 
     // ── 2. Save Preferences & Swipes to Supabase ──────────────────────────────
     const supabaseUrl = env.SUPABASE_URL || process.env.SUPABASE_URL;
-    const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY ||
+      env.SUPABASE_ANON_KEY ||
+      env.VITE_SUPABASE_ANON_KEY ||
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.SUPABASE_ANON_KEY ||
+      process.env.VITE_SUPABASE_ANON_KEY;
 
     if (supabaseUrl && supabaseKey) {
       const supabase = createClient(supabaseUrl, supabaseKey);
 
       // Save to user_preferences
       if (userId) {
-        const { error: prefErr } = await supabase.from("user_preferences").upsert({
-          user_id: userId,
-          tag_weights: categoryScores,
-          preferences: preferences,
-          swipes: onboardingSwipes,
-          updated_at: new Date().toISOString()
-        }, { onConflict: "user_id" });
-
-        if (prefErr) console.error("[onboarding/complete] Supabase pref write error:", prefErr.message);
-
-        // Save to user_quiz_results
-        const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
-          user_id: userId,
-          preferences: preferences,
-          swipes: onboardingSwipes,
-          updated_at: new Date().toISOString()
-        }, { onConflict: "user_id" });
-
-        if (quizErr) console.error("[onboarding/complete] Supabase quiz write error:", quizErr.message);
+        try {
+          // user_quiz_results is the canonical profile table in this project.
+          const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
+            user_id: userId,
+            preferences,
+            swipes: onboardingSwipes,
+            tag_weights: categoryScores,
+            updated_at: new Date().toISOString(),
+          }, { onConflict: "user_id" });
+          if (quizErr) console.error("[onboarding/complete] Supabase user_quiz_results write error:", quizErr);
+        } catch (dbErr) {
+          console.error("[onboarding/complete] Supabase write exception:", dbErr);
+        }
       }
     } else {
       console.warn("[onboarding/complete] Supabase environment variables missing; skipping DB write.");

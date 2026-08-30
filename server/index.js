@@ -1,5 +1,4 @@
 import express from "express";
-import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
@@ -15,25 +14,31 @@ const __dirname  = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001");
 
-// Place CORS configuration directly below app initialization
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+// Keep CORS explicit and before body parsing/routes.  In particular, do not
+// use app.options("*") because newer path-to-regexp versions reject that path.
+const CORS_ORIGIN = "https://thecardmatch.com";
+app.use((req, res, next) => {
+  if (req.headers.origin === CORS_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Vary", "Origin");
+  }
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 app.use(express.json());
 
-// Single CORS setup that automatically echoes requesting origin
-app.use(cors({
-  origin: true,
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
-
-app.use(express.json());
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+console.log("[supabase] config:", {
+  urlLoaded: Boolean(SUPABASE_URL),
+  serviceRoleLoaded: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+  anonKeyLoaded: Boolean(process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY),
+});
 
 // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
 const EPN_CAMP_ID = "5339150952";
@@ -981,9 +986,15 @@ const CAT_TAG_TO_CONFIG_OB = {
   mtg:        "MTG",       racing:     "Racing",      popculture: "PopCulture",
 };
 
-    app.post("/api/onboarding/complete", async (req, res) => {
+app.post("/api/onboarding/complete", async (req, res) => {
       try {
         const { onboardingSwipes = [], userId = null } = req.body ?? {};
+        console.log("[onboarding/complete] request:", {
+          method: req.method,
+          path: req.path,
+          userId: userId || null,
+          swipeCount: Array.isArray(onboardingSwipes) ? onboardingSwipes.length : 0,
+        });
 
         // 1. Compute preference scores
         const categoryScores = {};
@@ -1002,35 +1013,30 @@ const CAT_TAG_TO_CONFIG_OB = {
         const preferences   = { categoryScores, eraScores, styleScores, topCategories };
 
         // ── SAVE TO SUPABASE ──────────────────────────────────────────────────────
-        const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+        const supabaseUrl = SUPABASE_URL;
+        const supabaseKey = SUPABASE_KEY;
 
         if (supabaseUrl && supabaseKey) {
-          const supabase = createClient(supabaseUrl, supabaseKey);
-
-          if (userId) {
-            // Save to user_preferences
-            const { error: prefErr } = await supabase.from("user_preferences").upsert({
-              user_id: userId,
-              tag_weights: categoryScores,
-              preferences: preferences,
-              swipes: onboardingSwipes,
-              updated_at: new Date().toISOString()
-            }, { onConflict: "user_id" });
-
-            if (prefErr) console.error("[onboarding/complete] Supabase pref write error:", prefErr.message);
-
-            // Save to user_quiz_results
-            const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
-              user_id: userId,
-              preferences: preferences,
-              swipes: onboardingSwipes,
-              updated_at: new Date().toISOString()
-            }, { onConflict: "user_id" });
-
-            if (quizErr) console.error("[onboarding/complete] Supabase quiz write error:", quizErr.message);
-          } else {
-            console.warn("[onboarding/complete] No userId passed; preferences computed without saving to DB.");
+          try {
+            if (!userId) {
+              console.warn("[onboarding/complete] No userId passed; preferences computed without saving to DB.");
+            } else {
+              const supabase = createClient(supabaseUrl, supabaseKey);
+              const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
+                user_id: userId,
+                preferences,
+                swipes: onboardingSwipes,
+                tag_weights: categoryScores,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: "user_id" });
+              if (quizErr) {
+                console.error("[onboarding/complete] Supabase user_quiz_results write error:", quizErr);
+              } else {
+                console.log("[onboarding/complete] Supabase user_quiz_results write succeeded:", userId);
+              }
+            }
+          } catch (dbErr) {
+            console.error("[onboarding/complete] Supabase write exception:", dbErr);
           }
         } else {
           console.warn("[onboarding/complete] Missing Supabase env variables; skipping DB write.");
@@ -1124,11 +1130,15 @@ function dotScore(tags, tagWeights) {
   return tags.reduce((sum, tag) => sum + (tagWeights[tag] ?? 0), 0);
 }
 
-function rankAndExplore(items, tagWeights, returnCount) {
+function rankAndExplore(items, tagWeights, returnCount, prioritizeHighEnd = false) {
   const n = Math.min(items.length, returnCount);
   if (n === 0) return [];
-  const scored = items.map((item) => ({ ...item, _tagScore: dotScore(item.tags, tagWeights) }));
-  scored.sort((a, b) => b._tagScore - a._tagScore);
+  const scored = items.map((item) => ({
+    ...item,
+    _tagScore: dotScore(item.tags, tagWeights),
+    _highEndScore: prioritizeHighEnd ? highEndScore(item) : 0,
+  }));
+  scored.sort((a, b) => b._highEndScore - a._highEndScore || b._tagScore - a._tagScore);
   const topN = Math.ceil(n * 0.8);
   const top  = scored.slice(0, topN);
   const pool = scored.slice(topN);
@@ -1165,11 +1175,30 @@ function buildSearchQueryFeed(catTerm, tagWeights) {
   return attrs.length ? `${catTerm} ${attrs.slice(0, 3).join(" ")}` : catTerm;
 }
 
-function buildPriceFilterFeed(priceMedian, isWildcard = false) {
-  if (isWildcard || !priceMedian || priceMedian <= 0) return "price:[0.99..],priceCurrency:USD";
-  const low  = Math.max(0.99, priceMedian * 0.15).toFixed(2);
-  const high = (priceMedian * 8).toFixed(2);
+function buildPriceFilterFeed(priceMedian, isWildcard = false, minimum = 0.99) {
+  if (isWildcard || !priceMedian || priceMedian <= 0) return `price:[${minimum.toFixed(2)}..],priceCurrency:USD`;
+  const low  = Math.max(minimum, priceMedian * 0.15).toFixed(2);
+  const high = Math.max(minimum * 4, priceMedian * 8).toFixed(2);
   return `price:[${low}..${high}],priceCurrency:USD`;
+}
+
+const HIGH_END_KEYWORDS = [
+  ["national treasures", 4], ["flawless", 4], ["dynasty", 4], ["immaculate", 4],
+  ["1/1", 3], ["serial numbered", 3], ["rpa", 3], ["patch", 2],
+  ["autograph", 2], ["auto", 2], ["psa", 2], ["bgs", 2],
+];
+
+function highEndScore(item) {
+  const title = String(item.name || "").toLowerCase();
+  return HIGH_END_KEYWORDS.reduce((score, [keyword, points]) => (
+    score + (title.includes(keyword) ? points : 0)
+  ), 0);
+}
+
+function sortHighEnd(items) {
+  return items
+    .map((item) => ({ ...item, _highEndScore: highEndScore(item) }))
+    .sort((a, b) => b._highEndScore - a._highEndScore);
 }
 
 app.get("/api/feed", async (req, res) => {
@@ -1179,12 +1208,14 @@ app.get("/api/feed", async (req, res) => {
       tag_weights: twRaw = "{}",
       mode       = "for-you",
       price_median: priceRaw = "",
+      highEnd    = "false",
     } = req.query;
 
     const seenSet        = new Set(seen ? seen.split(",").filter(Boolean) : []);
     const returnCount    = Math.min(parseInt(count) || 20, 40);
     const priceMedian    = parseFloat(priceRaw) || 0;
     const isEndingSoonest = mode === "ending-soonest";
+    const isHighEnd      = highEnd === "true" || highEnd === "1";
 
     let tagWeights = {};
     try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
@@ -1208,7 +1239,9 @@ app.get("/api/feed", async (req, res) => {
 
     console.log(
       `[feed] mode:${mode} cats:${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(",")}` +
-      (useDefault ? " [default]" : "") + (priceMedian ? ` price_median:$${priceMedian}` : "")
+      (useDefault ? " [default]" : "") +
+      (priceMedian ? ` price_median:$${priceMedian}` : "") +
+      (isHighEnd ? " [high-end min:$250]" : "")
     );
 
     const token    = await getEbayToken();
@@ -1222,8 +1255,9 @@ app.get("/api/feed", async (req, res) => {
         const searchQuery    = buildSearchQueryFeed(catTerm, tagWeights);
         const bracketBudget  = Math.ceil(budget * 0.8);
         const wildcardBudget = budget - bracketBudget;
-        const bracketFilter  = buildPriceFilterFeed(priceMedian, false);
-        const wildcardFilter = buildPriceFilterFeed(0, true);
+        const minimum         = isHighEnd ? 250 : 0.99;
+        const bracketFilter  = buildPriceFilterFeed(priceMedian, false, minimum);
+        const wildcardFilter = buildPriceFilterFeed(0, true, minimum);
 
         let searches;
         if (isEndingSoonest) {
@@ -1254,7 +1288,12 @@ app.get("/api/feed", async (req, res) => {
     );
 
     const unique = new Set();
-    const fresh  = allItems.filter((i) => { if (seenSet.has(i.id) || unique.has(i.id)) return false; unique.add(i.id); return true; });
+    const fresh  = allItems.filter((i) => {
+      if (isHighEnd && i.currentBid < 250) return false;
+      if (seenSet.has(i.id) || unique.has(i.id)) return false;
+      unique.add(i.id);
+      return true;
+    });
 
     const now     = Date.now();
     const boosted = fresh.map((item) => {
@@ -1265,9 +1304,8 @@ app.get("/api/feed", async (req, res) => {
       }
       return { ...item, engagementScore: item.engagementScore * urgency };
     });
-
     console.log(`[feed] pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
-    return res.json({ items: rankAndExplore(boosted, tagWeights, returnCount) });
+    return res.json({ items: rankAndExplore(boosted, tagWeights, returnCount, isHighEnd) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });

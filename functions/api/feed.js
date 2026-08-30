@@ -13,6 +13,7 @@
  *   count         — cards to return (max 40, default 20)
  *   mode          — "for-you" (default) | "ending-soonest"
  *   price_median  — user's learned median liked price (e.g. "45.00"); omit for open range
+ *   highEnd       — "true" to require a minimum listing price of $250
  */
 import {
   jsonResponse,
@@ -77,13 +78,26 @@ function buildSearchQuery(catTerm, tagWeights) {
  * When priceMedian is known:  bracket = [median×0.15 .. median×8]  (80% of pool)
  * Wildcard (20% of pool):     [0.99..] — no upper cap, catches grails & budget steals.
  */
-function buildPriceFilter(priceMedian, isWildcard = false) {
+function buildPriceFilter(priceMedian, isWildcard = false, minimum = 0.99) {
   if (isWildcard || !priceMedian || priceMedian <= 0) {
-    return "price:[0.99..],priceCurrency:USD";
+    return `price:[${minimum.toFixed(2)}..],priceCurrency:USD`;
   }
-  const low  = Math.max(0.99, priceMedian * 0.15).toFixed(2);
-  const high = (priceMedian * 8).toFixed(2);
+  const low  = Math.max(minimum, priceMedian * 0.15).toFixed(2);
+  const high = Math.max(minimum * 4, priceMedian * 8).toFixed(2);
   return `price:[${low}..${high}],priceCurrency:USD`;
+}
+
+const HIGH_END_KEYWORDS = [
+  ["national treasures", 4], ["flawless", 4], ["dynasty", 4], ["immaculate", 4],
+  ["1/1", 3], ["serial numbered", 3], ["rpa", 3], ["patch", 2],
+  ["autograph", 2], ["auto", 2], ["psa", 2], ["bgs", 2],
+];
+
+function highEndScore(item) {
+  const title = String(item.name || "").toLowerCase();
+  return HIGH_END_KEYWORDS.reduce((score, [keyword, points]) => (
+    score + (title.includes(keyword) ? points : 0)
+  ), 0);
 }
 
 /** Dot-product of a card's tags against the user's tag_weights map. */
@@ -96,15 +110,16 @@ function dotScore(tags, tagWeights) {
  * Rank items by tag dot-product, then split 80% exploitation / 20% exploration.
  * Exploration cards are woven in every ~5 slots for a natural feel.
  */
-function rankAndExplore(items, tagWeights, returnCount) {
+function rankAndExplore(items, tagWeights, returnCount, prioritizeHighEnd = false) {
   const n = Math.min(items.length, returnCount);
   if (n === 0) return [];
 
   const scored = items.map((item) => ({
     ...item,
     _tagScore: dotScore(item.tags, tagWeights),
+    _highEndScore: prioritizeHighEnd ? highEndScore(item) : 0,
   }));
-  scored.sort((a, b) => b._tagScore - a._tagScore);
+  scored.sort((a, b) => b._highEndScore - a._highEndScore || b._tagScore - a._tagScore);
 
   const topN   = Math.ceil(n * 0.8);
   const exploN = n - topN;
@@ -138,11 +153,13 @@ export async function onRequestGet(context) {
   const twRaw      = sp.get("tag_weights")  || "{}";
   const mode       = sp.get("mode")         || "for-you";
   const priceRaw   = sp.get("price_median") || "";
+  const highEndRaw = sp.get("highEnd")       || "false";
 
   const seenSet        = new Set(seen ? seen.split(",").filter(Boolean) : []);
   const returnCount    = Math.min(parseInt(count) || 20, 40);
   const priceMedian    = parseFloat(priceRaw) || 0;
   const isEndingSoonest = mode === "ending-soonest";
+  const isHighEnd      = highEndRaw === "true" || highEndRaw === "1";
 
   let tagWeights = {};
   try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
@@ -181,7 +198,8 @@ export async function onRequestGet(context) {
   console.log(
     `[feed] mode:${mode} cats:${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(",")}` +
     (useDefault ? " [default]" : "") +
-    (priceMedian ? ` price_median:$${priceMedian}` : "")
+    (priceMedian ? ` price_median:$${priceMedian}` : "") +
+    (isHighEnd ? " [high-end min:$250]" : "")
   );
 
   try {
@@ -201,8 +219,9 @@ export async function onRequestGet(context) {
         // Price split: 80% bracket, 20% wildcard (grails + budget steals)
         const bracketBudget  = Math.ceil(budget * 0.8);
         const wildcardBudget = budget - bracketBudget;
-        const bracketFilter  = buildPriceFilter(priceMedian, false);
-        const wildcardFilter = buildPriceFilter(0, true);
+        const minimum         = isHighEnd ? 250 : 0.99;
+        const bracketFilter  = buildPriceFilter(priceMedian, false, minimum);
+        const wildcardFilter = buildPriceFilter(0, true, minimum);
 
         let searches;
 
@@ -240,6 +259,7 @@ export async function onRequestGet(context) {
     // ── 4. Deduplicate and exclude already-seen / passed cards ────────────
     const unique = new Set();
     const fresh  = allItems.filter((i) => {
+      if (isHighEnd && i.currentBid < 250) return false;
       if (seenSet.has(i.id) || unique.has(i.id)) return false;
       unique.add(i.id);
       return true;
@@ -256,11 +276,10 @@ export async function onRequestGet(context) {
       }
       return { ...item, engagementScore: item.engagementScore * urgency };
     });
-
     console.log(`[feed] pool: ${fresh.length} fresh cards → returning ${Math.min(fresh.length, returnCount)}`);
 
     // ── 6. Tag-weight ranking + 80/20 exploration split ───────────────────
-    const ranked = rankAndExplore(boosted, tagWeights, returnCount);
+    const ranked = rankAndExplore(boosted, tagWeights, returnCount, isHighEnd);
     return jsonResponse({ items: ranked });
 
   } catch (err) {

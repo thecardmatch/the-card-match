@@ -15,6 +15,7 @@ const PREFS_KEY        = "cardmatch:preferences";
 const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
 const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
 const PRICE_PREFS_KEY  = "cardmatch:price_prefs";      // rolling array of last 20 liked prices
+const HIGH_END_KEY     = "cardmatch:high_end";
 
 // Passed IDs are scoped to userId so a browser shared between users cannot
 // cross-contaminate pass lists.  Anonymous (pre-auth) passes are ephemeral
@@ -186,6 +187,11 @@ function persistPricePrefs(prices: number[]) {
   catch { /* quota */ }
 }
 
+function loadHighEnd(): boolean {
+  try { return localStorage.getItem(HIGH_END_KEY) === "1"; }
+  catch { return false; }
+}
+
 /** Compute median of an array of numbers. Returns 0 if empty. */
 function computeMedian(prices: number[]): number {
   if (prices.length === 0) return 0;
@@ -211,6 +217,7 @@ function buildFeedUrl(
   tagWeights:  Record<string, number>,
   mode:        "for-you" | "ending-soonest",
   priceMedian: number,
+  highEnd:     boolean,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -230,6 +237,7 @@ function buildFeedUrl(
     `&mode=${mode}`
   );
   if (priceMedian > 0) url += `&price_median=${priceMedian.toFixed(2)}`;
+  if (highEnd) url += "&highEnd=true";
   return url;
 }
 
@@ -244,10 +252,12 @@ export default function App() {
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
   const [feedMode,      setFeedMode]      = useState<"for-you" | "ending-soonest">("for-you");
+  const [highEnd,       setHighEnd]       = useState(loadHighEnd);
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
   const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
+  const highEndRef             = useRef<boolean>(highEnd);
   const pricePrefsRef          = useRef<number[]>(loadPricePrefs());          // rolling liked prices
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
@@ -278,6 +288,7 @@ export default function App() {
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   useEffect(() => { feedModeRef.current = feedMode; }, [feedMode]);
+  useEffect(() => { highEndRef.current = highEnd; }, [highEnd]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
@@ -299,10 +310,37 @@ export default function App() {
 
     try {
       const priceMedian = computeMedian(pricePrefsRef.current);
-      const url  = buildFeedUrl(seenIds.current, passedIds.current, tagWeightsRef.current, feedModeRef.current, priceMedian);
-      const res  = await fetch(url);
+      const url  = buildFeedUrl(
+        seenIds.current,
+        passedIds.current,
+        tagWeightsRef.current,
+        feedModeRef.current,
+        priceMedian,
+        highEndRef.current,
+      );
+      let res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      let data = await res.json();
+
+      // Recovery for browsers that were populated by the old onboarding bug:
+      // those sessions may have every current listing in seenIds even though
+      // the user never swiped them. Keep genuine passes, clear only the
+      // accidental historical seen list, and retry this request once.
+      if (!append && (data.items ?? []).length === 0 && seenIds.current.size > passedIds.current.size) {
+        console.warn("[feed] empty result with historical seen IDs — retrying without non-passed seen IDs");
+        seenIds.current = new Set(passedIds.current);
+        persistSeenIds(seenIds.current);
+        res = await fetch(buildFeedUrl(
+          seenIds.current,
+          passedIds.current,
+          tagWeightsRef.current,
+          feedModeRef.current,
+          priceMedian,
+          highEndRef.current,
+        ));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        data = await res.json();
+      }
       // Client-side filter: remove anything in the permanent pass list that slipped
       // through the URL cap (passedIds can exceed the 200-ID seen param limit).
       const incoming: TradingCard[] = (data.items ?? []).filter(
@@ -970,10 +1008,17 @@ export default function App() {
     setAppMode("feed-loading");
 
     try {
+      // The local API uses this ID for its service-role upsert. Guests send
+      // null and continue using local-only preferences.
+      let userId = currentUserIdRef.current;
+      if (!userId && supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        userId = session?.user?.id ?? null;
+      }
       const res = await fetch(`${API_BASE}/api/onboarding/complete`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ onboardingSwipes: swipes }),
+        body:    JSON.stringify({ onboardingSwipes: swipes, userId }),
       });
       const data = await res.json();
 
@@ -1209,7 +1254,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             {/* Feed mode toggle — only visible when in the live feed */}
             {appMode === "feed" && (
-              <div className="flex items-center rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
+              <div className="flex items-center gap-1 rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
                 <button
                   onClick={() => {
                     feedModeRef.current = "for-you";   // update ref immediately so loadFeed sees the new mode
@@ -1243,6 +1288,26 @@ export default function App() {
                   }`}
                 >
                   ⏳ Ending Soon
+                </button>
+                <button
+                  aria-pressed={highEnd}
+                  onClick={() => {
+                    const next = !highEndRef.current;
+                    highEndRef.current = next;
+                    setHighEnd(next);
+                    localStorage.setItem(HIGH_END_KEY, next ? "1" : "0");
+                    setCards([]);
+                    seenIds.current = new Set();
+                    setDeckResetKey((k) => k + 1);
+                    loadFeed(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-full transition-colors ${
+                    highEnd
+                      ? "bg-amber-500 text-slate-950 shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  High End
                 </button>
               </div>
             )}
