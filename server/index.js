@@ -15,6 +15,16 @@ const __dirname  = path.dirname(__filename);
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001");
 
+// Place CORS configuration directly below app initialization
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
+
+app.use(express.json());
+
 // Single CORS setup that automatically echoes requesting origin
 app.use(cors({
   origin: true,
@@ -23,7 +33,6 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.options("*", cors());
 app.use(express.json());
 
 // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
