@@ -12,10 +12,18 @@ if (!globalThis.WebSocket) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const app  = express();
+const app = express();
 const PORT = parseInt(process.env.PORT || "3001");
 
-app.use(cors({ origin: true }));
+// Single CORS setup that automatically echoes requesting origin
+app.use(cors({
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
+app.options("*", cors());
 app.use(express.json());
 
 // ─── HARDCODED PARTNER CREDENTIALS ───────────────────────────────────────────
