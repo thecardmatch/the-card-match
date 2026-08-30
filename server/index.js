@@ -12,22 +12,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
-const PORT = parseInt(process.env.PORT || "3001");
-
-// Keep CORS explicit and before body parsing/routes.  In particular, do not
-// use app.options("*") because newer path-to-regexp versions reject that path.
 const CORS_ORIGIN = "https://thecardmatch.com";
+
+// Global CORS interceptor must run before body parsing and every route so
+// preflight and error responses retain the required headers.
 app.use((req, res, next) => {
-  if (req.headers.origin === CORS_ORIGIN) {
-    res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  const origin = req.headers.origin;
+  if (origin === CORS_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  if (req.method === "OPTIONS") return res.sendStatus(204);
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
+
+const PORT = parseInt(process.env.PORT || "3001");
 
 app.use(express.json());
 
