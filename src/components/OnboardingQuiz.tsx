@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SwipeCard } from "@/components/SwipeCard";
 import { supabase } from "@/lib/supabaseClient";
-const API_BASE = import.meta.env.VITE_API_URL || "";
+// Production is served alongside the API/Pages Functions, so always use
+// same-origin requests there. A dev-only override is allowed for local setups.
+const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OnboardingCard = {

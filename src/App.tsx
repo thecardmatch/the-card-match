@@ -6,7 +6,9 @@ import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
 import { OnboardingQuiz } from "@/components/OnboardingQuiz";
 import type { TradingCard } from "@/data/pokemon";
-const API_BASE = import.meta.env.VITE_API_URL || "";
+// Production is served alongside the API/Pages Functions, so always use
+// same-origin requests there. A dev-only override is allowed for local setups.
+const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 const WATCHLIST_KEY    = "cardmatch:watchlist";
