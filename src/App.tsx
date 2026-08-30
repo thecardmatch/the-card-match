@@ -6,6 +6,7 @@ import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
 import { OnboardingQuiz } from "@/components/OnboardingQuiz";
 import type { TradingCard } from "@/data/pokemon";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // ── Storage keys ──────────────────────────────────────────────────────────────
 const WATCHLIST_KEY    = "cardmatch:watchlist";
@@ -969,7 +970,7 @@ export default function App() {
     setAppMode("feed-loading");
 
     try {
-      const res  = await fetch("/api/onboarding/complete", {
+      const res = await fetch(`${API_BASE}/api/onboarding/complete`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ onboardingSwipes: swipes }),

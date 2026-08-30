@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SwipeCard } from "@/components/SwipeCard";
 import { supabase } from "@/lib/supabaseClient";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type OnboardingCard = {
@@ -185,7 +186,7 @@ export function OnboardingQuiz({ onComplete }: Props) {
 
   // Fetch onboarding cards
   useEffect(() => {
-    fetch("/api/onboarding")
+    fetch(`${API_BASE}/api/onboarding`)
       .then((r) => r.json())
       .then((d) => {
         setCards(d.items ?? []);
