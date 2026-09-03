@@ -1,0 +1,103 @@
+This strategy gives you the ultimate consumer experience: zero-friction guest entry, TikTok-style algorithm learning, and Tinder-style swipe mechanics.
+
+Here is the master prompt to paste into the Replit AI Chat. It covers every requirement, category, query filter, and UI component without leaving out a single detail.
+
+📋 Replit AI Master Prompt: Complete App Overhaul (Tinder UI + TikTok Rec Engine)
+Please execute a complete overhaul of the card deck loading, recommendation engine, UI header controls, and onboarding modal according to the following specifications:
+
+1. Onboarding Preferences Modal (First Load & Guest Friendly)
+Initial Load Trigger: On launch, display a modern, visually stunning modal unless preferences have already been saved or skipped.
+
+15 Exact Categories: Present an interactive grid with these options:
+
+Baseball
+
+Football
+
+Basketball
+
+Hockey
+
+Pokemon
+
+Magic: The Gathering
+
+Soccer
+
+F1
+
+WWE
+
+MMA
+
+Golf
+
+Boxing
+
+Yu-Gi-Oh!
+
+One Piece
+
+Disney Lorcana
+
+Modal Buttons:
+
+"Save Preferences": Saves selected categories and immediately filters the card deck to only those selected categories.
+
+"Skip for now": Closes modal and immediately loads an overall "Most Popular / Trending Cards" deck across all categories.
+
+Guest Storage: Store preference state locally (localStorage or React state) so guest users can start swiping instantly without logging in.
+
+2. TikTok-Style Recommendation Engine & Backend Swipe Logging
+Swipe Weighting:
+
+Every swipe action (right = like/save, left = pass) must send a request (POST /api/swipe) to update category weights.
+
+Right swipes increase weight scores for the card's sport/TCG category, era, and grade level.
+
+Subsequent deck fetches (GET /api/deck) must adjust card scoring based on these weighted preference scores so the deck becomes continuously customized over time.
+
+Supabase Integration:
+
+Logged-in users: Persist weight scores directly to Supabase (user_preferences and user_swipes tables).
+
+Guest users: Maintain swipe weights locally in session memory. When a guest clicks the Login button and authenticates, automatically merge their guest swipe history and preferences into their Supabase account.
+
+3. eBay Card Quality Filter & "Ending Soonest" Sorting
+Popular / Trending Algorithm:
+
+Fetch popular/trending eBay listings prioritized by high bid count, watch count, or popularity score.
+
+Remove the old "High End" button from the UI (trending cards are naturally higher quality).
+
+Junk Filtering (Crucial):
+
+Apply query filters to strip out low-value items and accessories.
+
+Add negative keyword filters to eBay searches: -lot -repack -digital -binder -sleeves -box -break -case -pack -lot.
+
+Set a realistic base price floor (e.g., min price $15–$25) to eliminate bulk penny cards and ensure eye-catching cards worth bidding on (autos, slabs, graded PSA/BGS, rookies, rare parallels).
+
+"Ending Soonest" Sort:
+
+Wire up eBay's EndingSoonest API sort parameter. When active, re-fetch or re-sort the deck so cards nearing auction end appear first.
+
+4. UI Header Controls & Navigation Layout
+Ensure the top header/controls around the card deck contain the following:
+
+Watchlist Icon: Retain existing functional watchlist drawer/button.
+
+Settings (Gear) Icon: Opens the Preferences Modal at any time to let users update their category selections.
+
+Sort Icon ("Ending Soonest"): Toggles between Default/Trending view and "Ending Soonest" order. Must dynamically refresh deck.
+
+Login / Account Button: Prominently placed (e.g., top-right). If clicked, opens auth modal with message: "Log in to save your customized deck across devices!"
+
+5. Stability & Execution Steps
+Update server/index.js routes (/api/deck, /api/swipe, /api/preferences).
+
+Ensure CORS headers remain active for [https://thecardmatch.com](https://thecardmatch.com) and local Replit environments.
+
+Keep the main swipe card component intact (Tinder-style card stack with flip details).
+
+Test database writes to Supabase for logged-in users and verify fallback guest state works seamlessly.
