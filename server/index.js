@@ -990,11 +990,15 @@ const CAT_TAG_TO_CONFIG_OB = {
 
 app.post("/api/onboarding/complete", async (req, res) => {
       try {
-        const { onboardingSwipes = [], userId = null } = req.body ?? {};
+        const { onboardingSwipes = [], userId: requestedUserId = null } = req.body ?? {};
+        const authorization = req.get("authorization") || "";
+        const accessToken = authorization.startsWith("Bearer ")
+          ? authorization.slice("Bearer ".length).trim()
+          : null;
         console.log("[onboarding/complete] request:", {
           method: req.method,
           path: req.path,
-          userId: userId || null,
+          userId: requestedUserId || null,
           swipeCount: Array.isArray(onboardingSwipes) ? onboardingSwipes.length : 0,
         });
 
@@ -1013,35 +1017,72 @@ app.post("/api/onboarding/complete", async (req, res) => {
         const rankedCats    = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
         const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
         const preferences   = { categoryScores, eraScores, styleScores, topCategories };
+        const completedAt   = new Date().toISOString();
+        const persistedSwipes = onboardingSwipes.map((swipe, index) => ({
+          ...swipe,
+          eventId: swipe.eventId || `onboarding:${swipe.cardId}:${swipe.action}:${index}`,
+          source: "onboarding",
+          occurredAt: swipe.occurredAt || completedAt,
+        }));
 
         // ── SAVE TO SUPABASE ──────────────────────────────────────────────────────
         const supabaseUrl = SUPABASE_URL;
         const supabaseKey = SUPABASE_KEY;
+        let persistence = { saved: false, reason: "not_authenticated" };
 
-        if (supabaseUrl && supabaseKey) {
+        if (supabaseUrl && supabaseKey && accessToken) {
           try {
-            if (!userId) {
-              console.warn("[onboarding/complete] No userId passed; preferences computed without saving to DB.");
+            const usingServiceRole = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+            const supabase = createClient(supabaseUrl, supabaseKey, usingServiceRole ? undefined : {
+              global: { headers: { Authorization: `Bearer ${accessToken}` } },
+            });
+            const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
+            if (authError || !authData.user) {
+              persistence = { saved: false, reason: "invalid_session" };
+              console.warn("[onboarding/complete] Supabase session verification failed:", authError?.message);
+            } else if (requestedUserId && requestedUserId !== authData.user.id) {
+              return res.status(403).json({ preferences: null, cards: [], error: "Authenticated user does not match request." });
             } else {
-              const supabase = createClient(supabaseUrl, supabaseKey);
+              const authenticatedUserId = authData.user.id;
+              const { data: existing, error: existingError } = await supabase
+                .from("user_quiz_results")
+                .select("swipes")
+                .eq("user_id", authenticatedUserId)
+                .maybeSingle();
+              if (existingError) throw existingError;
+
+              const mergedById = new Map();
+              [...(Array.isArray(existing?.swipes) ? existing.swipes : []), ...persistedSwipes]
+                .forEach((swipe, index) => {
+                  const key = swipe.eventId ||
+                    `legacy:${swipe.source || "onboarding"}:${swipe.cardId}:${swipe.action}:${swipe.occurredAt || index}`;
+                  mergedById.set(key, { ...swipe, eventId: key });
+                });
+              const mergedSwipes = [...mergedById.values()];
               const { error: quizErr } = await supabase.from("user_quiz_results").upsert({
-                user_id: userId,
+                user_id: authenticatedUserId,
                 preferences,
-                swipes: onboardingSwipes,
+                swipes: mergedSwipes,
                 tag_weights: categoryScores,
                 updated_at: new Date().toISOString(),
               }, { onConflict: "user_id" });
               if (quizErr) {
                 console.error("[onboarding/complete] Supabase user_quiz_results write error:", quizErr);
+                persistence = { saved: false, reason: quizErr.message };
               } else {
-                console.log("[onboarding/complete] Supabase user_quiz_results write succeeded:", userId);
+                persistence = { saved: true, reason: null };
+                console.log("[onboarding/complete] Supabase user_quiz_results write succeeded:", authenticatedUserId);
               }
             }
           } catch (dbErr) {
             console.error("[onboarding/complete] Supabase write exception:", dbErr);
+            persistence = { saved: false, reason: dbErr.message };
           }
+        } else if (!accessToken) {
+          console.warn("[onboarding/complete] No bearer token; preferences computed without a server-side DB write.");
         } else {
           console.warn("[onboarding/complete] Missing Supabase env variables; skipping DB write.");
+          persistence = { saved: false, reason: "missing_supabase_config" };
         }
 
         // 2. Only fetch from positively-scored categories (proportionally)
@@ -1052,7 +1093,7 @@ app.post("/api/onboarding/complete", async (req, res) => {
           ? positiveCats
           : rankedCats.slice(0, 2).filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
 
-        if (fetchSource.length === 0) return res.json({ preferences, cards: [] });
+        if (fetchSource.length === 0) return res.json({ preferences, cards: [], persistence });
 
         const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
         const TARGET     = 60;
@@ -1106,7 +1147,7 @@ app.post("/api/onboarding/complete", async (req, res) => {
         const cards = scored.slice(0, 40);
 
         console.log(`[onboarding/complete] returning ${cards.length} cards`);
-        return res.json({ preferences, cards });
+        return res.json({ preferences, cards, persistence });
       } catch (err) {
         console.error("[onboarding/complete]", err.message);
         return res.status(500).json({ preferences: null, cards: [], error: err.message });

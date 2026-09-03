@@ -1,4 +1,4 @@
-- [Cache architecture](cache-arch.md) — all caching is Cloudflare KV only; Supabase used for auth only (not DB).
+- [Cache and profile persistence](cache-arch.md) — Cloudflare KV caches eBay data; Supabase durably stores authenticated quiz and swipe profiles.
 - [Auth architecture](auth-arch.md) — Supabase auth (Google OAuth + magic link only); no Apple, no Express /api/auth routes.
 - [eBay Browse API OR queries](ebay-or-query.md) — `q` param does NOT support OR keyword; fix is parallel per-term calls merged server-side.
 - [CF Pages Functions architecture](cf-pages-functions.md) — production API lives in functions/; server/index.js is local-dev only; btoa not Buffer, context.env not process.env.

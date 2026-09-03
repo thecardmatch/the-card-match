@@ -18,6 +18,7 @@ const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
 const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
 const PRICE_PREFS_KEY  = "cardmatch:price_prefs";      // rolling array of last 20 liked prices
 const HIGH_END_KEY     = "cardmatch:high_end";
+const SWIPE_HISTORY_KEY_PREFIX = "cardmatch:swipe_history";
 
 // Passed IDs are scoped to userId so a browser shared between users cannot
 // cross-contaminate pass lists.  Anonymous (pre-auth) passes are ephemeral
@@ -50,9 +51,17 @@ type Preferences = {
 
 type SwipeRecord = {
   cardId:     string;
-  action:     "LIKE" | "PASS";
+  action:     "LIKE" | "PASS" | "BUY";
   category:   string;
   attributes: Record<string, unknown>;
+  eventId?:   string;
+  source?:    "onboarding" | "feed";
+  occurredAt?: string;
+  title?:     string;
+  price?:     number;
+  tags?:      string[];
+  feedMode?:  "for-you" | "ending-soonest";
+  highEnd?:   boolean;
 };
 
 // "session-checking" is a transient mode shown while initSession() queries
@@ -82,6 +91,40 @@ function loadPrefs(): Preferences | null {
 function loadTagWeights(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(TAG_WEIGHTS_KEY) || "{}"); }
   catch { return {}; }
+}
+
+function swipeHistoryKey(userId: string): string {
+  return `${SWIPE_HISTORY_KEY_PREFIX}:${userId}`;
+}
+
+function loadSwipeHistory(userId: string): SwipeRecord[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(swipeHistoryKey(userId)) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistSwipeHistory(userId: string, swipes: SwipeRecord[]) {
+  try {
+    localStorage.setItem(swipeHistoryKey(userId), JSON.stringify(swipes));
+  } catch {
+    // Supabase remains the durable copy if browser storage is unavailable.
+  }
+}
+
+function mergeSwipeHistory(...histories: SwipeRecord[][]): SwipeRecord[] {
+  const merged = new Map<string, SwipeRecord>();
+  histories.flat().forEach((swipe, index) => {
+    if (!swipe?.cardId || !swipe?.action) return;
+    const key = swipe.eventId ||
+      `legacy:${swipe.source || "onboarding"}:${swipe.cardId}:${swipe.action}:${swipe.occurredAt || index}`;
+    merged.set(key, { ...swipe, eventId: key });
+  });
+  return [...merged.values()].sort((a, b) =>
+    (a.occurredAt || "").localeCompare(b.occurredAt || "")
+  );
 }
 
 function loadSeenIds(): Set<string> {
@@ -278,6 +321,8 @@ export default function App() {
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
+  const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
   // Tracks the result of the most recent remote profile check for the active
   // authenticated user.  Used in handleOnboardingComplete to ensure we never
   // upsert a fresh quiz over an existing Supabase profile when the check
@@ -371,30 +416,122 @@ export default function App() {
     }
   }
 
-  // ── Supabase: persist full quiz state (swipes + preferences + tag_weights) ──
-  function saveQuizToSupabase(
+  // ── Supabase: durable, serialized profile + swipe persistence ─────────────
+  function flushProfileToSupabase(
+    userId: string,
+    preferencesOverride?: Preferences | null,
+    tagWeightsOverride?: Record<string, number>,
+  ): Promise<boolean> {
+    if (!supabase) return Promise.resolve(false);
+
+    const write = async (): Promise<boolean> => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user || session.user.id !== userId || currentUserIdRef.current !== userId) {
+          return false;
+        }
+
+        const existing = await supabase
+          .from("user_quiz_results")
+          .select("swipes, preferences, tag_weights")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (existing.error) {
+          console.warn("[profile] Supabase read-before-write failed:", existing.error.message);
+          return false;
+        }
+
+        const remoteSwipes = Array.isArray(existing.data?.swipes)
+          ? existing.data.swipes as SwipeRecord[]
+          : [];
+        const mergedSwipes = mergeSwipeHistory(remoteSwipes, swipeHistoryRef.current);
+        swipeHistoryRef.current = mergedSwipes;
+        persistSwipeHistory(userId, mergedSwipes);
+
+        const { error } = await supabase
+          .from("user_quiz_results")
+          .upsert(
+            {
+              user_id: userId,
+              swipes: mergedSwipes,
+              preferences: preferencesOverride ?? prefsRef.current ?? existing.data?.preferences ?? {},
+              tag_weights: tagWeightsOverride ?? tagWeightsRef.current ?? existing.data?.tag_weights ?? {},
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" },
+          );
+
+        if (error) {
+          console.warn("[profile] Supabase write failed; retained locally for retry:", error.message);
+          return false;
+        }
+
+        console.log(`[profile] saved ${mergedSwipes.length} swipe events to Supabase`);
+        return true;
+      } catch (error) {
+        console.warn("[profile] Supabase write exception; retained locally for retry:", error);
+        return false;
+      }
+    };
+
+    const queued = profileWriteChainRef.current
+      .catch(() => false)
+      .then(write);
+    profileWriteChainRef.current = queued;
+    return queued;
+  }
+
+  function stageSwipeEvent(userId: string, swipe: SwipeRecord) {
+    swipeHistoryRef.current = mergeSwipeHistory(swipeHistoryRef.current, [swipe]);
+    persistSwipeHistory(userId, swipeHistoryRef.current);
+  }
+
+  function recordFeedSwipe(card: TradingCard, action: "LIKE" | "PASS" | "BUY") {
+    const userId = currentUserIdRef.current;
+    if (!userId) {
+      console.warn("[profile] swipe could not sync because no authenticated user is active");
+      return;
+    }
+
+    const event: SwipeRecord = {
+      eventId: crypto.randomUUID(),
+      cardId: card.id,
+      action,
+      source: "feed",
+      occurredAt: new Date().toISOString(),
+      category: card.category || "",
+      attributes: {
+        grade: card.grade,
+        condition: card.condition,
+        listingType: card.listingType,
+      },
+      title: card.name,
+      price: card.currentBid,
+      tags: card.tags || [],
+      feedMode: feedModeRef.current,
+      highEnd: highEndRef.current,
+    };
+    stageSwipeEvent(userId, event);
+    void flushProfileToSupabase(userId);
+  }
+
+  async function saveQuizToSupabase(
     userId:      string,
     swipes:      SwipeRecord[],
     preferences: Preferences | null,
     tagWeights:  Record<string, number>
-  ) {
-    if (!supabase) return;
-    supabase
-      .from("user_quiz_results")
-      .upsert(
-        {
-          user_id:     userId,
-          swipes:      swipes.length ? swipes : undefined,
-          preferences: preferences ?? {},
-          tag_weights: tagWeights,
-          updated_at:  new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      )
-      .then(({ error }) => {
-        if (error) console.warn("[quiz] Supabase save failed:", error.message);
-        else       console.log("[quiz] saved quiz + tag_weights to Supabase for", userId);
-      });
+  ): Promise<boolean> {
+    const completedAt = new Date().toISOString();
+    const onboardingEvents = swipes.map((swipe, index): SwipeRecord => ({
+      ...swipe,
+      eventId: swipe.eventId || `onboarding:${swipe.cardId}:${swipe.action}:${index}`,
+      source: "onboarding",
+      occurredAt: swipe.occurredAt || completedAt,
+    }));
+    swipeHistoryRef.current = mergeSwipeHistory(swipeHistoryRef.current, onboardingEvents);
+    persistSwipeHistory(userId, swipeHistoryRef.current);
+    return flushProfileToSupabase(userId, preferences, tagWeights);
   }
 
   // ── Passed-IDs: remote hydration + atomic RPC sync to Supabase ────────────
@@ -585,18 +722,9 @@ export default function App() {
   function debounceSaveTagWeights(weights: Record<string, number>) {
     if (saveTagWeightsTimerRef.current) clearTimeout(saveTagWeightsTimerRef.current);
     saveTagWeightsTimerRef.current = setTimeout(async () => {
-      if (!supabase) return;
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-      supabase
-        .from("user_quiz_results")
-        .upsert(
-          { user_id: session.user.id, tag_weights: weights, updated_at: new Date().toISOString() },
-          { onConflict: "user_id" }
-        )
-        .then(({ error }) => {
-          if (error) console.warn("[tags] Supabase tag_weights save failed:", error.message);
-        });
+      const userId = currentUserIdRef.current;
+      if (!userId) return;
+      await flushProfileToSupabase(userId, prefsRef.current, weights);
     }, 3000);
   }
 
@@ -666,6 +794,13 @@ export default function App() {
       }
 
       if (data) {
+        const remoteSwipes = Array.isArray(data.swipes) ? data.swipes as SwipeRecord[] : [];
+        swipeHistoryRef.current = mergeSwipeHistory(remoteSwipes, swipeHistoryRef.current);
+        persistSwipeHistory(userId, swipeHistoryRef.current);
+        if (swipeHistoryRef.current.length > 0) {
+          void flushProfileToSupabase(userId);
+        }
+
         // Restore tag_weights: Supabase is the source of truth for cross-device;
         // local recent swipes win on key conflicts (they are newer).
         if (data.tag_weights && typeof data.tag_weights === "object") {
@@ -711,6 +846,9 @@ export default function App() {
       }
 
       // data === null → Supabase confirmed no row exists for this user.
+      if (swipeHistoryRef.current.length > 0) {
+        void flushProfileToSupabase(userId);
+      }
       return "absent";
     }
 
@@ -734,6 +872,7 @@ export default function App() {
             passedIdsTimestamps.current   = loadedTs;
             pendingPassedIds.current      = new Set();
             currentUserIdRef.current      = userId;
+            swipeHistoryRef.current       = loadSwipeHistory(userId);
           }
 
           // Flush any quiz swipes completed before authentication.
@@ -828,6 +967,7 @@ export default function App() {
           passedIdsTimestamps.current = anonTs;
           pendingPassedIds.current    = new Set();
           currentUserIdRef.current    = null;
+          swipeHistoryRef.current     = [];
           localStorage.removeItem("cardmatch:user");
         }
       });
@@ -890,6 +1030,7 @@ export default function App() {
             passedIdsTimestamps.current = loadedTs2;
             pendingPassedIds.current    = new Set();
             currentUserIdRef.current    = userId;
+            swipeHistoryRef.current     = loadSwipeHistory(userId);
           }
 
           // ── Check for pending quiz swipes from before authentication ────
@@ -1013,16 +1154,30 @@ export default function App() {
       // The local API uses this ID for its service-role upsert. Guests send
       // null and continue using local-only preferences.
       let userId = currentUserIdRef.current;
+      let accessToken: string | null = null;
       if (!userId && supabase) {
         const { data: { session } } = await supabase.auth.getSession();
         userId = session?.user?.id ?? null;
+        accessToken = session?.access_token ?? null;
+      } else if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessToken = session?.access_token ?? null;
+      }
+      if (userId) {
+        // Stage the quiz before any network call. Failed writes remain in the
+        // user-scoped local queue and retry during the next profile flush.
+        void saveQuizToSupabase(userId, swipes, prefsRef.current, tagWeightsRef.current);
       }
       const res = await fetch(`${API_BASE}/api/onboarding/complete`, {
         method:  "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
         body:    JSON.stringify({ onboardingSwipes: swipes, userId }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Onboarding save failed with HTTP ${res.status}`);
 
       if (data.preferences) {
         // 1. Persist preferences locally
@@ -1058,18 +1213,13 @@ export default function App() {
         //    If the check failed/timed out ("error"), queue for retry via
         //    pending_swipes so a re-login can pick it up without risking an
         //    overwrite of data we couldn't verify doesn't exist.
-        if (supabase) {
-          supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session?.user) return;
-            const checkResult = profileCheckResultRef.current;
-            if (checkResult === "absent" || checkResult === "unchecked") {
-              saveQuizToSupabase(session.user.id, swipes, data.preferences, seedTW);
-            } else {
-              // "error" or "recovered": do not overwrite — store locally for retry.
-              console.warn("[onboarding] profile check was not confirmed absent — queuing quiz for retry on next sign-in");
-              localStorage.setItem("cardmatch:pending_swipes", JSON.stringify(swipes));
-            }
-          });
+        if (userId) {
+          const saved = await saveQuizToSupabase(userId, swipes, data.preferences, seedTW);
+          if (!saved) {
+            console.warn("[onboarding] quiz retained locally and will retry on the next authenticated write");
+          } else {
+            localStorage.removeItem("cardmatch:pending_swipes");
+          }
         }
       }
 
@@ -1138,6 +1288,7 @@ export default function App() {
 
     updatePrefsOnSwipe(card, "LIKE");
     updateTagWeights(card, 1);       // +1 to all tags — boosts this category/type in next fetch
+    recordFeedSwipe(card, "LIKE");
   }
 
   function handlePass(card: TradingCard) {
@@ -1156,9 +1307,11 @@ export default function App() {
 
     updatePrefsOnSwipe(card, "PASS");
     updateTagWeights(card, -0.5);    // −0.5 to all tags — deprioritises this category/type
+    recordFeedSwipe(card, "PASS");
   }
 
   function handleBuy(card: TradingCard) {
+    recordFeedSwipe(card, "BUY");
     const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
     if (!url) return;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
