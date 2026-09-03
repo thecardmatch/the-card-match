@@ -52,16 +52,6 @@ const FEATURE_PLAYLISTS = [
     badge: "TCG",
     badgeColor: "bg-yellow-400/20 text-yellow-300",
   },
-  {
-    id: "high-end-showcase",
-    emoji: "💎",
-    label: "High-End Showcase",
-    sub: "PSA 10 · BGS 9.5 · 1/1 · Logomans · $250+",
-    accent: "from-violet-500/20 via-fuchsia-500/15 to-rose-500/10 border-violet-400/30",
-    textAccent: "text-violet-300",
-    badge: "$250+",
-    badgeColor: "bg-violet-400/20 text-violet-300",
-  },
 ] as const;
 
 type Props = {

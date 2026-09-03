@@ -1,4 +1,8 @@
-export type Category = "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer" | "Formula 1" | "WWE";
+export type Category =
+  | "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer"
+  | "Formula 1" | "F1" | "WWE" | "MMA" | "Golf" | "Boxing"
+  | "Magic: The Gathering" | "Yu-Gi-Oh!" | "One Piece" | "Disney Lorcana"
+  | string;
 export type ConditionFilter = "Raw" | "Grade 7" | "Grade 8" | "Grade 9" | "Grade 10";
 export type ListingType = "All" | "Auction" | "Buy It Now";
 export type SortOption = "bestMatch" | "endingSoonest";

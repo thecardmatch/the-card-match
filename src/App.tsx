@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
-import { Heart } from "lucide-react";
+import { Heart, Settings, Timer, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
-import { OnboardingQuiz } from "@/components/OnboardingQuiz";
+import { PreferencesModal } from "@/components/PreferencesModal";
+import { AccountModal } from "@/components/AccountModal";
 import type { TradingCard } from "@/data/pokemon";
+import { COLLECTION_CATEGORIES, categoryTag } from "@/data/collectionCategories";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
 const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
@@ -17,8 +19,9 @@ const PREFS_KEY        = "cardmatch:preferences";
 const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
 const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
 const PRICE_PREFS_KEY  = "cardmatch:price_prefs";      // rolling array of last 20 liked prices
-const HIGH_END_KEY     = "cardmatch:high_end";
 const SWIPE_HISTORY_KEY_PREFIX = "cardmatch:swipe_history";
+const GUEST_SWIPE_HISTORY_KEY = "cardmatch:guest_swipe_history";
+const GUEST_PROFILE_PENDING_KEY = "cardmatch:guest_profile_pending";
 
 // Passed IDs are scoped to userId so a browser shared between users cannot
 // cross-contaminate pass lists.  Anonymous (pre-auth) passes are ephemeral
@@ -47,6 +50,9 @@ type Preferences = {
   eraScores:      Record<string, number>;
   styleScores:    Record<string, number>;
   topCategories:  string[];
+  selectedCategories?: string[];
+  preferenceMode?: "selected" | "trending";
+  onboardingComplete?: boolean;
 };
 
 type SwipeRecord = {
@@ -61,7 +67,6 @@ type SwipeRecord = {
   price?:     number;
   tags?:      string[];
   feedMode?:  "for-you" | "ending-soonest";
-  highEnd?:   boolean;
 };
 
 // "session-checking" is a transient mode shown while initSession() queries
@@ -125,6 +130,23 @@ function mergeSwipeHistory(...histories: SwipeRecord[][]): SwipeRecord[] {
   return [...merged.values()].sort((a, b) =>
     (a.occurredAt || "").localeCompare(b.occurredAt || "")
   );
+}
+
+function loadGuestSwipeHistory(): SwipeRecord[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GUEST_SWIPE_HISTORY_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistGuestSwipeHistory(swipes: SwipeRecord[]) {
+  try {
+    localStorage.setItem(GUEST_SWIPE_HISTORY_KEY, JSON.stringify(swipes));
+  } catch {
+    // Guest history remains best-effort until the collector signs in.
+  }
 }
 
 function loadSeenIds(): Set<string> {
@@ -208,7 +230,7 @@ function persistPassedIds(
 
 function getInitialMode(): AppMode {
   try {
-    if (localStorage.getItem(ONBOARDING_KEY)) return "feed-loading";
+    if (localStorage.getItem(ONBOARDING_KEY) || localStorage.getItem(PREFS_KEY)) return "feed-loading";
     // If Supabase is configured, hold in session-checking so initSession()
     // can decide whether to restore a cross-device profile or show the quiz.
     // Without Supabase there is no remote profile to check — go straight to onboarding.
@@ -230,11 +252,6 @@ function loadPricePrefs(): number[] {
 function persistPricePrefs(prices: number[]) {
   try { localStorage.setItem(PRICE_PREFS_KEY, JSON.stringify(prices.slice(-20))); }
   catch { /* quota */ }
-}
-
-function loadHighEnd(): boolean {
-  try { return localStorage.getItem(HIGH_END_KEY) === "1"; }
-  catch { return false; }
 }
 
 /** Compute median of an array of numbers. Returns 0 if empty. */
@@ -262,7 +279,7 @@ function buildFeedUrl(
   tagWeights:  Record<string, number>,
   mode:        "for-you" | "ending-soonest",
   priceMedian: number,
-  highEnd:     boolean,
+  preferences: Preferences | null,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -275,14 +292,19 @@ function buildFeedUrl(
     .slice(0, 40);
   const tw = JSON.stringify(Object.fromEntries(topTW));
   let url = (
-    `/api/feed` +
+    `/api/deck` +
     `?seen=${encodeURIComponent(seen)}` +
     `&tag_weights=${encodeURIComponent(tw)}` +
     `&count=20` +
     `&mode=${mode}`
   );
   if (priceMedian > 0) url += `&price_median=${priceMedian.toFixed(2)}`;
-  if (highEnd) url += "&highEnd=true";
+  const selectedCategories = preferences?.selectedCategories ?? [];
+  if (selectedCategories.length > 0) {
+    url += `&categories=${encodeURIComponent(selectedCategories.join(","))}`;
+  } else if (preferences?.preferenceMode === "trending" || preferences?.onboardingComplete) {
+    url += "&trending=true";
+  }
   return url;
 }
 
@@ -297,12 +319,16 @@ export default function App() {
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
   const [feedMode,      setFeedMode]      = useState<"for-you" | "ending-soonest">("for-you");
-  const [highEnd,       setHighEnd]       = useState(loadHighEnd);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountUser, setAccountUser] = useState<{ email?: string; name?: string; picture?: string } | null>(() => {
+    try { return JSON.parse(localStorage.getItem("cardmatch:user") || "null"); }
+    catch { return null; }
+  });
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
   const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
-  const highEndRef             = useRef<boolean>(highEnd);
   const pricePrefsRef          = useRef<number[]>(loadPricePrefs());          // rolling liked prices
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
@@ -323,6 +349,7 @@ export default function App() {
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
+  const swipeApiChainRef       = useRef<Promise<void>>(Promise.resolve());
   // Tracks the result of the most recent remote profile check for the active
   // authenticated user.  Used in handleOnboardingComplete to ensure we never
   // upsert a fresh quiz over an existing Supabase profile when the check
@@ -335,7 +362,6 @@ export default function App() {
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
   useEffect(() => { feedModeRef.current = feedMode; }, [feedMode]);
-  useEffect(() => { highEndRef.current = highEnd; }, [highEnd]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
@@ -363,7 +389,7 @@ export default function App() {
         tagWeightsRef.current,
         feedModeRef.current,
         priceMedian,
-        highEndRef.current,
+        prefsRef.current,
       );
       let res  = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -383,7 +409,7 @@ export default function App() {
           tagWeightsRef.current,
           feedModeRef.current,
           priceMedian,
-          highEndRef.current,
+          prefsRef.current,
         ));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         data = await res.json();
@@ -431,43 +457,20 @@ export default function App() {
           return false;
         }
 
-        const existing = await supabase
-          .from("user_quiz_results")
-          .select("swipes, preferences, tag_weights")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (existing.error) {
-          console.warn("[profile] Supabase read-before-write failed:", existing.error.message);
-          return false;
-        }
-
-        const remoteSwipes = Array.isArray(existing.data?.swipes)
-          ? existing.data.swipes as SwipeRecord[]
-          : [];
-        const mergedSwipes = mergeSwipeHistory(remoteSwipes, swipeHistoryRef.current);
-        swipeHistoryRef.current = mergedSwipes;
-        persistSwipeHistory(userId, mergedSwipes);
-
-        const { error } = await supabase
-          .from("user_quiz_results")
-          .upsert(
-            {
-              user_id: userId,
-              swipes: mergedSwipes,
-              preferences: preferencesOverride ?? prefsRef.current ?? existing.data?.preferences ?? {},
-              tag_weights: tagWeightsOverride ?? tagWeightsRef.current ?? existing.data?.tag_weights ?? {},
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "user_id" },
-          );
+        const pendingSwipes = swipeHistoryRef.current;
+        const { error } = await supabase.rpc("merge_user_profile", {
+          p_user_id: userId,
+          p_swipes: pendingSwipes,
+          p_preferences: preferencesOverride ?? prefsRef.current ?? {},
+          p_tag_weights: tagWeightsOverride ?? tagWeightsRef.current ?? {},
+        });
 
         if (error) {
           console.warn("[profile] Supabase write failed; retained locally for retry:", error.message);
           return false;
         }
 
-        console.log(`[profile] saved ${mergedSwipes.length} swipe events to Supabase`);
+        console.log(`[profile] merged ${pendingSwipes.length} swipe events into Supabase`);
         return true;
       } catch (error) {
         console.warn("[profile] Supabase write exception; retained locally for retry:", error);
@@ -487,13 +490,42 @@ export default function App() {
     persistSwipeHistory(userId, swipeHistoryRef.current);
   }
 
+  function postSwipeEvent(event: SwipeRecord, userId: string | null) {
+    const delivery = async () => {
+      let accessToken: string | null = null;
+      if (supabase && userId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.id === userId) accessToken = session.access_token;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/swipe`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({
+            event,
+            userId,
+            tagWeights: tagWeightsRef.current,
+            preferences: prefsRef.current,
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      } catch (error) {
+        console.warn("[swipe] API logging failed; local history retained:", error);
+        if (userId) await flushProfileToSupabase(userId);
+      }
+    };
+
+    swipeApiChainRef.current = swipeApiChainRef.current
+      .catch(() => undefined)
+      .then(delivery);
+  }
+
   function recordFeedSwipe(card: TradingCard, action: "LIKE" | "PASS" | "BUY") {
     const userId = currentUserIdRef.current;
-    if (!userId) {
-      console.warn("[profile] swipe could not sync because no authenticated user is active");
-      return;
-    }
-
     const event: SwipeRecord = {
       eventId: crypto.randomUUID(),
       cardId: card.id,
@@ -510,10 +542,75 @@ export default function App() {
       price: card.currentBid,
       tags: card.tags || [],
       feedMode: feedModeRef.current,
-      highEnd: highEndRef.current,
     };
-    stageSwipeEvent(userId, event);
-    void flushProfileToSupabase(userId);
+    if (userId) {
+      stageSwipeEvent(userId, event);
+    } else {
+      persistGuestSwipeHistory(mergeSwipeHistory(loadGuestSwipeHistory(), [event]));
+    }
+    postSwipeEvent(event, userId);
+  }
+
+  async function migrateGuestProfile(userId: string) {
+    const guestSwipes = loadGuestSwipeHistory();
+    const hasGuestPreferences = localStorage.getItem(GUEST_PROFILE_PENDING_KEY) === "1";
+    if (!guestSwipes.length && !hasGuestPreferences) return;
+
+    let remotePreferences: Preferences | null = null;
+    let remoteTagWeights: Record<string, number> = {};
+    let remoteSwipes: SwipeRecord[] = [];
+    if (supabase) {
+      const { data, error } = await supabase
+        .from("user_quiz_results")
+        .select("preferences,tag_weights,swipes")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (error || currentUserIdRef.current !== userId) return;
+      remotePreferences = data?.preferences as Preferences | null;
+      remoteTagWeights = (data?.tag_weights as Record<string, number>) || {};
+      remoteSwipes = Array.isArray(data?.swipes) ? data.swipes as SwipeRecord[] : [];
+    }
+
+    const localPreferences = hasGuestPreferences ? prefsRef.current : null;
+    const selectedCategories = Array.from(new Set([
+      ...(remotePreferences?.selectedCategories ?? []),
+      ...(localPreferences?.selectedCategories ?? []),
+    ]));
+    const mergedPreferences: Preferences | null = remotePreferences || localPreferences
+      ? {
+          ...(remotePreferences ?? {
+            categoryScores: {}, eraScores: {}, styleScores: {}, topCategories: [],
+          }),
+          ...(localPreferences ?? {}),
+          selectedCategories,
+          topCategories: selectedCategories.slice(0, 3),
+        }
+      : null;
+    const mergedTagWeights = {
+      ...remoteTagWeights,
+      ...(hasGuestPreferences ? tagWeightsRef.current : {}),
+    };
+
+    swipeHistoryRef.current = mergeSwipeHistory(
+      remoteSwipes,
+      loadSwipeHistory(userId),
+      swipeHistoryRef.current,
+      guestSwipes,
+    );
+    persistSwipeHistory(userId, swipeHistoryRef.current);
+    if (mergedPreferences) {
+      prefsRef.current = mergedPreferences;
+      setPrefs(mergedPreferences);
+      localStorage.setItem(PREFS_KEY, JSON.stringify(mergedPreferences));
+    }
+    tagWeightsRef.current = mergedTagWeights;
+    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(mergedTagWeights));
+
+    const saved = await flushProfileToSupabase(userId, mergedPreferences, mergedTagWeights);
+    if (saved) {
+      localStorage.removeItem(GUEST_SWIPE_HISTORY_KEY);
+      localStorage.removeItem(GUEST_PROFILE_PENDING_KEY);
+    }
   }
 
   async function saveQuizToSupabase(
@@ -743,7 +840,6 @@ export default function App() {
     }
     tagWeightsRef.current = updated;
     localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(updated));
-    debounceSaveTagWeights(updated);
   }
 
   // ── Mount: initialise preferences from Supabase, then start feed ───────────
@@ -829,10 +925,18 @@ export default function App() {
         //
         // Positive tag_weights are kept as a secondary indicator to handle
         // accounts whose quiz row predates the swipes column.
+        const restoredPreferences = data.preferences && typeof data.preferences === "object"
+          ? data.preferences as Preferences
+          : null;
         const hasCompletedQuiz = Array.isArray(data.swipes) && (data.swipes as unknown[]).length > 0;
         const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
+        const hasSavedCategories = Boolean(
+          restoredPreferences?.onboardingComplete ||
+          restoredPreferences?.selectedCategories?.length ||
+          restoredPreferences?.preferenceMode === "trending"
+        );
 
-        if ((hasCompletedQuiz || hasPositiveWeights) && !localStorage.getItem(ONBOARDING_KEY)) {
+        if ((hasCompletedQuiz || hasPositiveWeights || hasSavedCategories) && !localStorage.getItem(ONBOARDING_KEY)) {
           // Check signal before committing any side-effects; the caller's safety
           // timer may have already transitioned the UI to onboarding.
           if (signal?.aborted) return "error";
@@ -856,11 +960,13 @@ export default function App() {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
           const { email, user_metadata } = session.user;
-          localStorage.setItem("cardmatch:user", JSON.stringify({
+          const signedInUser = {
             email:   email || "",
             name:    user_metadata?.full_name ?? user_metadata?.name ?? "",
             picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
-          }));
+          };
+          localStorage.setItem("cardmatch:user", JSON.stringify(signedInUser));
+          setAccountUser(signedInUser);
 
           // Scope switch: reset pass state to this user's account data.
           // This prevents any anonymous or previous-user passes from being
@@ -874,6 +980,7 @@ export default function App() {
             currentUserIdRef.current      = userId;
             swipeHistoryRef.current       = loadSwipeHistory(userId);
           }
+          void migrateGuestProfile(userId);
 
           // Flush any quiz swipes completed before authentication.
           const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
@@ -969,6 +1076,7 @@ export default function App() {
           currentUserIdRef.current    = null;
           swipeHistoryRef.current     = [];
           localStorage.removeItem("cardmatch:user");
+          setAccountUser(null);
         }
       });
       unsub = () => subscription.unsubscribe();
@@ -1032,6 +1140,7 @@ export default function App() {
             currentUserIdRef.current    = userId;
             swipeHistoryRef.current     = loadSwipeHistory(userId);
           }
+          void migrateGuestProfile(userId);
 
           // ── Check for pending quiz swipes from before authentication ────
           // Supabase emits INITIAL_SESSION (not SIGNED_IN) when the app
@@ -1148,6 +1257,9 @@ export default function App() {
   // ── Onboarding completion ───────────────────────────────────────────────────
   async function handleOnboardingComplete(swipes: SwipeRecord[]) {
     localStorage.setItem(ONBOARDING_KEY, "1");
+    if (!currentUserIdRef.current) {
+      localStorage.setItem(GUEST_PROFILE_PENDING_KEY, "1");
+    }
     setAppMode("feed-loading");
 
     try {
@@ -1241,6 +1353,80 @@ export default function App() {
     }
   }
 
+  async function savePreferencesToApi(
+    nextPreferences: Preferences,
+    nextTagWeights: Record<string, number>,
+  ) {
+    const userId = currentUserIdRef.current;
+    let accessToken: string | null = null;
+    if (supabase && userId) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id === userId) accessToken = session.access_token;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/preferences`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({
+          userId,
+          preferences: nextPreferences,
+          tagWeights: nextTagWeights,
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      console.warn("[preferences] API save failed; local preferences retained:", error);
+    }
+  }
+
+  function applyCategoryPreferences(selectedCategories: string[], skipped: boolean) {
+    const existing = prefsRef.current ?? {
+      categoryScores: {},
+      eraScores: {},
+      styleScores: {},
+      topCategories: [],
+    };
+    const categoryScores = { ...existing.categoryScores };
+    const nextTagWeights = { ...tagWeightsRef.current };
+
+    for (const category of selectedCategories) {
+      categoryScores[category] = Math.max(categoryScores[category] ?? 0, 2);
+      const tag = categoryTag(category);
+      nextTagWeights[tag] = Math.max(nextTagWeights[tag] ?? 0, 2);
+    }
+
+    const nextPreferences: Preferences = {
+      ...existing,
+      categoryScores,
+      selectedCategories,
+      topCategories: selectedCategories.slice(0, 3),
+      preferenceMode: skipped ? "trending" : "selected",
+      onboardingComplete: true,
+    };
+
+    prefsRef.current = nextPreferences;
+    tagWeightsRef.current = nextTagWeights;
+    setPrefs(nextPreferences);
+    localStorage.setItem(PREFS_KEY, JSON.stringify(nextPreferences));
+    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(nextTagWeights));
+    localStorage.setItem(ONBOARDING_KEY, "1");
+    setPreferencesOpen(false);
+    setCards([]);
+    seenIds.current = new Set(passedIds.current);
+    persistSeenIds(seenIds.current);
+    setDeckResetKey((key) => key + 1);
+    setAppMode("feed-loading");
+
+    const userId = currentUserIdRef.current;
+    if (userId) void flushProfileToSupabase(userId, nextPreferences, nextTagWeights);
+    void savePreferencesToApi(nextPreferences, nextTagWeights);
+    void loadFeed(false);
+  }
+
   // ── Swipe handlers ──────────────────────────────────────────────────────────
 
   /** Track per-category scores in prefs state (for local UI, not the feed fetch). */
@@ -1311,6 +1497,8 @@ export default function App() {
   }
 
   function handleBuy(card: TradingCard) {
+    updatePrefsOnSwipe(card, "LIKE");
+    updateTagWeights(card, 1.5);
     recordFeedSwipe(card, "BUY");
     const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
     if (!url) return;
@@ -1333,21 +1521,20 @@ export default function App() {
   return (
     <div className="h-[100dvh] w-full bg-background flex flex-row overflow-hidden fixed inset-0">
 
-      {/* ── ONBOARDING QUIZ ──────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {appMode === "onboarding" && (
-          <motion.div
-            key="onboarding"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className="fixed inset-0 z-[300]"
-          >
-            <OnboardingQuiz onComplete={handleOnboardingComplete} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <PreferencesModal
+        open={appMode === "onboarding" || preferencesOpen}
+        categories={COLLECTION_CATEGORIES}
+        selectedCategories={prefs?.selectedCategories ?? []}
+        onSave={(categories) => applyCategoryPreferences(categories, false)}
+        onSkip={() => applyCategoryPreferences([], true)}
+        onClose={appMode === "onboarding" ? undefined : () => setPreferencesOpen(false)}
+      />
+
+      <AccountModal
+        open={accountOpen}
+        user={accountUser}
+        onClose={() => setAccountOpen(false)}
+      />
 
       {/* ── FEED LOADING OVERLAY (also covers session-checking to prevent quiz flash) */}
       <AnimatePresence>
@@ -1407,7 +1594,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Feed mode toggle — only visible when in the live feed */}
+            {/* Feed mode and preference controls */}
             {appMode === "feed" && (
               <div className="flex items-center gap-1 rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
                 <button
@@ -1428,44 +1615,50 @@ export default function App() {
                   For You
                 </button>
                 <button
+                  aria-label={feedMode === "ending-soonest" ? "Show personalized trending cards" : "Sort by ending soonest"}
+                  title={feedMode === "ending-soonest" ? "Show personalized trending cards" : "Ending Soonest"}
                   onClick={() => {
-                    feedModeRef.current = "ending-soonest";   // update ref immediately so loadFeed sees the new mode
-                    setFeedMode("ending-soonest");
+                    const nextMode = feedModeRef.current === "ending-soonest" ? "for-you" : "ending-soonest";
+                    feedModeRef.current = nextMode;
+                    setFeedMode(nextMode);
                     setCards([]);
                     seenIds.current = new Set();
                     setDeckResetKey((k) => k + 1);
                     loadFeed(false);
                   }}
-                  className={`px-2.5 py-1 rounded-full transition-colors ${
+                  className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
                     feedMode === "ending-soonest"
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  ⏳ Ending Soon
+                  <Timer className="h-3.5 w-3.5" />
                 </button>
                 <button
-                  aria-pressed={highEnd}
-                  onClick={() => {
-                    const next = !highEndRef.current;
-                    highEndRef.current = next;
-                    setHighEnd(next);
-                    localStorage.setItem(HIGH_END_KEY, next ? "1" : "0");
-                    setCards([]);
-                    seenIds.current = new Set();
-                    setDeckResetKey((k) => k + 1);
-                    loadFeed(false);
-                  }}
-                  className={`px-2.5 py-1 rounded-full transition-colors ${
-                    highEnd
-                      ? "bg-amber-500 text-slate-950 shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  type="button"
+                  aria-label="Edit card preferences"
+                  title="Preferences"
+                  onClick={() => setPreferencesOpen(true)}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  High End
+                  <Settings className="h-3.5 w-3.5" />
                 </button>
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setAccountOpen(true)}
+              className="flex h-10 items-center gap-2 rounded-full border border-border bg-card px-3 text-xs font-black text-foreground transition-colors hover:bg-accent"
+              aria-label={accountUser ? "Open account" : "Log in"}
+            >
+              {accountUser?.picture ? (
+                <img src={accountUser.picture} alt="" className="h-5 w-5 rounded-full object-cover" />
+              ) : (
+                <UserRound className="h-4 w-4 text-muted-foreground" />
+              )}
+              <span className="hidden sm:inline">{accountUser ? "Account" : "Log in"}</span>
+            </button>
 
             <button
               onClick={() => setWatchlistOpen(true)}

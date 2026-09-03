@@ -88,7 +88,10 @@ export async function getEbayToken(env) {
 }
 
 // ── Core eBay Browse API search ───────────────────────────────────────────────
-const BULK_EXCLUSION = "-lot -bundle -box -case -pack";
+// Always keep searches to individual physical cards, even when callers supply
+// their own query text.
+const BULK_EXCLUSION =
+  "-lot -repack -digital -binder -sleeves -box -break -case -pack -bundle " + CARD_ONLY;
 
 export async function ebaySearch(
   token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0
@@ -128,17 +131,32 @@ export async function ebaySearch(
 // ── Category feed search config ───────────────────────────────────────────────
 // catTerm is the base eBay search query for each category.
 // The feed layer dynamically enriches it with the user's positive attribute tags.
-// minPrice: 0.99 so live auctions starting low are included.
+// Stable UI label/normalized-tag mapping.  Category IDs are used only where
+// they are established eBay card categories; null deliberately uses the query.
+export const CATEGORY_TAG_MAP = {
+  "baseball": "Baseball", "football": "Football", "basketball": "Basketball",
+  "hockey": "Hockey", "pokemon": "Pokemon", "magic-the-gathering": "Magic: The Gathering",
+  "mtg": "Magic: The Gathering", "soccer": "Soccer", "f1": "F1",
+  "formula-1": "F1", "wwe": "WWE", "mma": "MMA", "golf": "Golf",
+  "boxing": "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", "yugioh": "Yu-Gi-Oh!",
+  "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
+};
 export const CATEGORY_FEED_CONFIG = {
-  Football:   { categoryId: "217",    catTerm: "football trading card",                minPrice: 0.99 },
-  Basketball: { categoryId: "214",    catTerm: "basketball trading card",              minPrice: 0.99 },
-  Baseball:   { categoryId: "213",    catTerm: "baseball trading card",                minPrice: 0.99 },
-  Hockey:     { categoryId: "216",    catTerm: "hockey trading card",                  minPrice: 0.99 },
-  Soccer:     { categoryId: "183444", catTerm: "soccer trading card",                  minPrice: 0.99 },
-  Pokemon:    { categoryId: "183050", catTerm: "pokemon card",                         minPrice: 0.99 },
-  MTG:        { categoryId: "19107",  catTerm: "magic the gathering mtg card",         minPrice: 0.99 },
-  Racing:     { categoryId: "261328", catTerm: "formula 1 f1 racing trading card",     minPrice: 0.99 },
-  PopCulture: { categoryId: "182035", catTerm: "pop culture trading card",             minPrice: 0.99 },
+  Football: { categoryId: "215", catTerm: "football trading card", minPrice: 20 },
+  Basketball: { categoryId: "214", catTerm: "basketball trading card", minPrice: 20 },
+  Baseball: { categoryId: "213", catTerm: "baseball trading card", minPrice: 20 },
+  Hockey: { categoryId: "216", catTerm: "hockey trading card", minPrice: 20 },
+  Pokemon: { categoryId: "183050", catTerm: "pokemon trading card", minPrice: 20 },
+  "Magic: The Gathering": { categoryId: "19107", catTerm: "magic the gathering trading card", minPrice: 20 },
+  Soccer: { categoryId: "183444", catTerm: "soccer trading card", minPrice: 20 },
+  F1: { categoryId: null, catTerm: "formula 1 f1 trading card", minPrice: 20 },
+  WWE: { categoryId: null, catTerm: "wwe wrestling trading card", minPrice: 20 },
+  MMA: { categoryId: null, catTerm: "mma ufc trading card", minPrice: 20 },
+  Golf: { categoryId: null, catTerm: "golf trading card", minPrice: 20 },
+  Boxing: { categoryId: null, catTerm: "boxing trading card", minPrice: 20 },
+  "Yu-Gi-Oh!": { categoryId: null, catTerm: "yu-gi-oh trading card", minPrice: 20 },
+  "One Piece": { categoryId: null, catTerm: "one piece trading card", minPrice: 20 },
+  "Disney Lorcana": { categoryId: null, catTerm: "disney lorcana trading card", minPrice: 20 },
 };
 
 // ── Item helpers ──────────────────────────────────────────────────────────────

@@ -475,7 +475,7 @@ function mapItem(item, selectedCats) {
 }
 
 function isSuppliesCategory(item) {
-  return (item.categories || []).some((c) => String(c.categoryId) === "183444" || String(c.categoryId) === "550");
+  return (item.categories || []).some((c) => String(c.categoryId) === "183452" || String(c.categoryId) === "550");
 }
 
 // ─── Engagement helpers ───────────────────────────────────────────────────────
@@ -510,7 +510,11 @@ const SORT_MAP = {
   bidCountDescending: "bidCountDescending",
 };
 
-const BULK_EXCLUSION = ["-lot", "-bundle", "-box", "-case", "-pack"].join(" ");
+const BULK_EXCLUSION = [
+  "-lot", "-repack", "-digital", "-binder", "-sleeves", "-box", "-break", "-case", "-pack", "-bundle",
+  "-helmet", "-pennant", "-poster", "-bobblehead", "-figurine", "-plaque", "-jersey",
+  "-\"signed ball\"", "-\"cut signature\"", "-photograph", "-photo", "-lithograph", "-ticket", "-program",
+].join(" ");
 
 function buildConditionParams(conditions) {
   if (!conditions || conditions.length === 0) return { conditionFilter: null, aspectFilter: null };
@@ -876,15 +880,6 @@ const PLAYLIST_DEFS = {
     skipModifiers: true,
   },
 
-  "high-end-showcase": {
-    categoryId:   "261328",
-    categoryHint: null,
-    terms: [
-      `(auto, patch, rpa, "1/1", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened ${CARD_ONLY}`
-    ],
-    minPrice:     250,
-    skipModifiers: true,
-  },
 };
 // ─── GET /api/onboarding — serve 20 static onboarding cards ─────────────────
 app.get("/api/onboarding", (_req, res) => {
@@ -920,17 +915,23 @@ app.get("/api/onboarding", (_req, res) => {
 
 // ─── Category → eBay search config (used by /api/onboarding/complete + /api/feed) ──
 // catTerm is the base query; feed layer enriches with attribute tags from tag_weights.
-// minPrice: 0.99 — no high-end floor, adaptive price learning handles bracketing.
+// Feed searches have a quality floor; adaptive price learning handles bracketing.
 const CATEGORY_FEED_CONFIG = {
-  Football:   { categoryId: "217",    catTerm: "football trading card",             minPrice: 0.99 },
-  Basketball: { categoryId: "214",    catTerm: "basketball trading card",           minPrice: 0.99 },
-  Baseball:   { categoryId: "213",    catTerm: "baseball trading card",             minPrice: 0.99 },
-  Hockey:     { categoryId: "216",    catTerm: "hockey trading card",               minPrice: 0.99 },
-  Soccer:     { categoryId: "183444", catTerm: "soccer trading card",               minPrice: 0.99 },
-  Pokemon:    { categoryId: "183050", catTerm: "pokemon card",                      minPrice: 0.99 },
-  MTG:        { categoryId: "19107",  catTerm: "magic the gathering mtg card",      minPrice: 0.99 },
-  Racing:     { categoryId: "261328", catTerm: "formula 1 f1 racing trading card",  minPrice: 0.99 },
-  PopCulture: { categoryId: "182035", catTerm: "pop culture trading card",          minPrice: 0.99 },
+  Football: { categoryId: "215", catTerm: "football trading card", minPrice: 20 },
+  Basketball: { categoryId: "214", catTerm: "basketball trading card", minPrice: 20 },
+  Baseball: { categoryId: "213", catTerm: "baseball trading card", minPrice: 20 },
+  Hockey: { categoryId: "216", catTerm: "hockey trading card", minPrice: 20 },
+  Pokemon: { categoryId: "183050", catTerm: "pokemon trading card", minPrice: 20 },
+  "Magic: The Gathering": { categoryId: "19107", catTerm: "magic the gathering trading card", minPrice: 20 },
+  Soccer: { categoryId: "183444", catTerm: "soccer trading card", minPrice: 20 },
+  F1: { categoryId: null, catTerm: "formula 1 f1 trading card", minPrice: 20 },
+  WWE: { categoryId: null, catTerm: "wwe wrestling trading card", minPrice: 20 },
+  MMA: { categoryId: null, catTerm: "mma ufc trading card", minPrice: 20 },
+  Golf: { categoryId: null, catTerm: "golf trading card", minPrice: 20 },
+  Boxing: { categoryId: null, catTerm: "boxing trading card", minPrice: 20 },
+  "Yu-Gi-Oh!": { categoryId: null, catTerm: "yu-gi-oh trading card", minPrice: 20 },
+  "One Piece": { categoryId: null, catTerm: "one piece trading card", minPrice: 20 },
+  "Disney Lorcana": { categoryId: null, catTerm: "disney lorcana trading card", minPrice: 20 },
 };
 
 // ── LEGACY PLAYLIST CONFIG (kept for /api/playlist only — do NOT use for feed) ──
@@ -1162,9 +1163,10 @@ const CAT_TAG_TO_CONFIG_FEED = {
   hockey:     "Hockey",
   soccer:     "Soccer",
   pokemon:    "Pokemon",
-  mtg:        "MTG",
-  racing:     "Racing",
-  popculture: "PopCulture",
+  mtg: "Magic: The Gathering", "magic-the-gathering": "Magic: The Gathering",
+  f1: "F1", "formula-1": "F1", wwe: "WWE", mma: "MMA", golf: "Golf",
+  boxing: "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", yugioh: "Yu-Gi-Oh!",
+  "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
 };
 const FEED_DEFAULT_CATS = ["Football", "Baseball", "Basketball"];
 
@@ -1173,15 +1175,14 @@ function dotScore(tags, tagWeights) {
   return tags.reduce((sum, tag) => sum + (tagWeights[tag] ?? 0), 0);
 }
 
-function rankAndExplore(items, tagWeights, returnCount, prioritizeHighEnd = false) {
+function rankAndExplore(items, tagWeights, returnCount) {
   const n = Math.min(items.length, returnCount);
   if (n === 0) return [];
   const scored = items.map((item) => ({
     ...item,
-    _tagScore: dotScore(item.tags, tagWeights),
-    _highEndScore: prioritizeHighEnd ? highEndScore(item) : 0,
+    _tagScore: dotScore(item.tags, tagWeights) + item.engagementScore,
   }));
-  scored.sort((a, b) => b._highEndScore - a._highEndScore || b._tagScore - a._tagScore);
+  scored.sort((a, b) => b._tagScore - a._tagScore);
   const topN = Math.ceil(n * 0.8);
   const top  = scored.slice(0, topN);
   const pool = scored.slice(topN);
@@ -1225,40 +1226,19 @@ function buildPriceFilterFeed(priceMedian, isWildcard = false, minimum = 0.99) {
   return `price:[${low}..${high}],priceCurrency:USD`;
 }
 
-const HIGH_END_KEYWORDS = [
-  ["national treasures", 4], ["flawless", 4], ["dynasty", 4], ["immaculate", 4],
-  ["1/1", 3], ["serial numbered", 3], ["rpa", 3], ["patch", 2],
-  ["autograph", 2], ["auto", 2], ["psa", 2], ["bgs", 2],
-];
-
-function highEndScore(item) {
-  const title = String(item.name || "").toLowerCase();
-  return HIGH_END_KEYWORDS.reduce((score, [keyword, points]) => (
-    score + (title.includes(keyword) ? points : 0)
-  ), 0);
-}
-
-function sortHighEnd(items) {
-  return items
-    .map((item) => ({ ...item, _highEndScore: highEndScore(item) }))
-    .sort((a, b) => b._highEndScore - a._highEndScore);
-}
-
-app.get("/api/feed", async (req, res) => {
+app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
       seen = "", count = "20",
       tag_weights: twRaw = "{}",
       mode       = "for-you",
-      price_median: priceRaw = "",
-      highEnd    = "false",
+      price_median: priceRaw = "", categories = "", trending = "false",
     } = req.query;
 
     const seenSet        = new Set(seen ? seen.split(",").filter(Boolean) : []);
     const returnCount    = Math.min(parseInt(count) || 20, 40);
     const priceMedian    = parseFloat(priceRaw) || 0;
     const isEndingSoonest = mode === "ending-soonest";
-    const isHighEnd      = highEnd === "true" || highEnd === "1";
 
     let tagWeights = {};
     try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
@@ -1271,20 +1251,25 @@ app.get("/api/feed", async (req, res) => {
         catWeights[configKey] = (catWeights[configKey] || 0) + weight;
       }
     }
-    const useDefault = Object.keys(catWeights).length === 0;
-    if (useDefault) FEED_DEFAULT_CATS.forEach((cat) => { if (CATEGORY_FEED_CONFIG[cat]) catWeights[cat] = 1; });
+    const requestedCats = categories.split(",").map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")]).filter(Boolean);
+    if (requestedCats.length) {
+      requestedCats.forEach((cat) => { catWeights[cat] = Math.max(1, catWeights[cat] || 0); });
+      Object.keys(catWeights).forEach((cat) => { if (!requestedCats.includes(cat)) delete catWeights[cat]; });
+    } else if (trending === "true") {
+      Object.keys(CATEGORY_FEED_CONFIG).forEach((cat) => { catWeights[cat] = Math.max(1, catWeights[cat] || 0); });
+    } else if (Object.keys(catWeights).length === 0) FEED_DEFAULT_CATS.forEach((cat) => { catWeights[cat] = 1; });
 
+    const allCategoryTrending = trending === "true" && requestedCats.length === 0;
     const totalWeight = Object.values(catWeights).reduce((s, w) => s + w, 0);
     const fetchPool   = returnCount * 4;
     const fetchPlan   = Object.entries(catWeights)
-      .map(([cat, weight]) => ({ cat, proportion: weight / totalWeight, budget: Math.max(20, Math.ceil(fetchPool * weight / totalWeight)) }))
+      .map(([cat, weight]) => ({ cat, proportion: weight / totalWeight, budget: allCategoryTrending ? 4 : Math.max(20, Math.ceil(fetchPool * weight / totalWeight)) }))
       .sort((a, b) => b.proportion - a.proportion);
 
     console.log(
       `[feed] mode:${mode} cats:${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(",")}` +
-      (useDefault ? " [default]" : "") +
-      (priceMedian ? ` price_median:$${priceMedian}` : "") +
-      (isHighEnd ? " [high-end min:$250]" : "")
+      (trending === "true" ? " [trending-all]" : "") +
+      (priceMedian ? ` price_median:$${priceMedian}` : "")
     );
 
     const token    = await getEbayToken();
@@ -1296,9 +1281,16 @@ app.get("/api/feed", async (req, res) => {
         if (!cfg) return;
         const { catTerm, categoryId } = cfg;
         const searchQuery    = buildSearchQueryFeed(catTerm, tagWeights);
+        if (allCategoryTrending) {
+          const result = await ebaySearch(token, searchQuery, "bestMatch", "price:[20.00..],priceCurrency:USD", null, categoryId, budget, 0);
+          for (const raw of (result.itemSummaries || [])) {
+            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [cat]));
+          }
+          return;
+        }
         const bracketBudget  = Math.ceil(budget * 0.8);
         const wildcardBudget = budget - bracketBudget;
-        const minimum         = isHighEnd ? 250 : 0.99;
+        const minimum         = 20;
         const bracketFilter  = buildPriceFilterFeed(priceMedian, false, minimum);
         const wildcardFilter = buildPriceFilterFeed(0, true, minimum);
 
@@ -1332,12 +1324,15 @@ app.get("/api/feed", async (req, res) => {
 
     const unique = new Set();
     const fresh  = allItems.filter((i) => {
-      if (isHighEnd && i.currentBid < 250) return false;
       if (seenSet.has(i.id) || unique.has(i.id)) return false;
       unique.add(i.id);
       return true;
     });
 
+    if (isEndingSoonest) {
+      fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
+      return res.json({ items: fresh.slice(0, returnCount) });
+    }
     const now     = Date.now();
     const boosted = fresh.map((item) => {
       let urgency = 1;
@@ -1348,7 +1343,7 @@ app.get("/api/feed", async (req, res) => {
       return { ...item, engagementScore: item.engagementScore * urgency };
     });
     console.log(`[feed] pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
-    return res.json({ items: rankAndExplore(boosted, tagWeights, returnCount, isHighEnd) });
+    return res.json({ items: rankAndExplore(boosted, tagWeights, returnCount) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });
@@ -1447,7 +1442,7 @@ app.get("/api/playlist", async (req, res) => {
     const isCacheFresh = cache && cache.updated_at && (Date.now() - new Date(cache.updated_at).getTime() < CACHE_TTL_LIMIT);
 
     if (isCacheFresh) {
-      console.log(`[HIGH-END CACHE HIT] Delivering '${playlistId}' snapshot instantly from Cloudflare KV.`);
+      console.log(`[playlist cache hit] Delivering '${playlistId}' snapshot instantly from Cloudflare KV.`);
       return res.json({ items: cache.items, fromCache: true });
     }
 
@@ -1555,7 +1550,7 @@ app.get("/api/playlist", async (req, res) => {
           updated_at: new Date().toISOString()
         };
     await kv.put(`playlist_v10_${playlistId}`, JSON.stringify(cachePayload), { expirationTtl: 30 * 60 });
-        console.log(`[HIGH-END CACHE WRITE] Successfully updated snapshot table for target: '${playlistId}'`);
+        console.log(`[playlist cache write] Successfully updated snapshot table for target: '${playlistId}'`);
       } catch (upsertError) {
         console.error("[Database Layer Warning] Failed saving processed entries to cache table:", upsertError.message);
       }
@@ -1768,7 +1763,92 @@ app.get("/api/auth/google/callback", async (req, res) => {
   }
 });
 
-// ── Production: serve built React app + SPA catch-all ─────────────────────
+// Shared authenticated preference persistence used by swipe and settings routes.
+async function savePreferencePayload(req, res, includeSwipe = false) {
+  const body = req.body || {};
+  const token = (req.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) return res.json({ saved: false, guest: true, status: "not_authenticated" });
+  if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(503).json({ saved: false, guest: false, status: "missing_supabase_config" });
+  const service = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, service ? undefined : { global: { headers: { Authorization: `Bearer ${token}` } } });
+  const { data: auth, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !auth.user) return res.status(401).json({ saved: false, guest: false, status: "invalid_session" });
+  if (body.userId && body.userId !== auth.user.id) return res.status(403).json({ saved: false, guest: false, status: "ownership_mismatch" });
+  const { data: old, error: readError } = await supabase.from("user_quiz_results").select("preferences,tag_weights,swipes").eq("user_id", auth.user.id).maybeSingle();
+  if (readError) return res.status(500).json({ saved: false, status: "read_failed", error: readError.message });
+  const preferences = { ...(old?.preferences || {}), ...(body.preferences || {}) };
+  if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
+  const tag_weights = { ...(old?.tag_weights || {}), ...(body.tagWeights || {}), ...(body.tag_weights || {}) };
+  if (includeSwipe && body.event && typeof body.event === "object") {
+    const event = {
+      ...body.event,
+      eventId: body.event.eventId ||
+        `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
+    };
+    const { error: rpcError } = await supabase.rpc("record_user_swipe_event", {
+      p_user_id: auth.user.id,
+      p_event: event,
+      p_preferences: preferences,
+      p_tag_weights: tag_weights,
+    });
+    if (!rpcError) {
+      return res.json({
+        saved: true, guest: false, status: "persisted_atomic",
+        preferences, tag_weights,
+      });
+    }
+    // Preserve compatibility until the corresponding migration reaches this database.
+    if (rpcError.code !== "PGRST202") {
+      return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: rpcError.message });
+    }
+  }
+  if (!includeSwipe) {
+    const { error: preferenceError } = await supabase.rpc("merge_user_preferences", {
+      p_user_id: auth.user.id,
+      p_preferences: preferences,
+      p_tag_weights: tag_weights,
+    });
+    if (!preferenceError) {
+      return res.json({ saved: true, guest: false, status: "persisted_atomic", preferences, tag_weights });
+    }
+    if (preferenceError.code !== "PGRST202") {
+      return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: preferenceError.message });
+    }
+    const { error: fallbackError } = await supabase.from("user_quiz_results").upsert({
+      user_id: auth.user.id, preferences, tag_weights, updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+    if (fallbackError) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: fallbackError.message });
+    return res.json({ saved: true, guest: false, status: "persisted", preferences, tag_weights });
+  }
+  let swipes = Array.isArray(old?.swipes) ? old.swipes : [];
+  if (includeSwipe) {
+    const event = body.event;
+    if (!event || typeof event !== "object") return res.status(400).json({ saved: false, error: "event is required" });
+    const eventId = event.eventId || `${event.cardId || "unknown"}:${event.action || "event"}:${event.occurredAt || Date.now()}`;
+    const merged = new Map(swipes.map((item, i) => [item.eventId || `legacy:${i}`, item]));
+    merged.set(eventId, { ...event, eventId }); swipes = [...merged.values()];
+  }
+  const { error } = await supabase.from("user_quiz_results").upsert({ user_id: auth.user.id, preferences, tag_weights, swipes, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: error.message });
+  return res.json({ saved: true, guest: false, status: "persisted", preferences, tag_weights });
+}
+app.post("/api/swipe", (req, res) => savePreferencePayload(req, res, true));
+app.get("/api/preferences", async (req, res) => {
+  const token = (req.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) return res.json({ authenticated: false, guest: true, preferences: {}, tag_weights: {} });
+  if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(503).json({ authenticated: false, error: "missing_supabase_config" });
+  const service = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, service ? undefined : { global: { headers: { Authorization: `Bearer ${token}` } } });
+  const { data: auth, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !auth.user) return res.status(401).json({ authenticated: false, error: "invalid_session" });
+  const { data, error } = await supabase.from("user_quiz_results").select("preferences,tag_weights").eq("user_id", auth.user.id).maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  return res.json({ authenticated: true, preferences: data?.preferences || {}, tag_weights: data?.tag_weights || {} });
+});
+app.put("/api/preferences", (req, res) => savePreferencePayload(req, res));
+app.post("/api/preferences", (req, res) => savePreferencePayload(req, res));
+
+// Production SPA fallback must remain after every API route.
 const distPath = path.join(__dirname, "..", "dist");
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
