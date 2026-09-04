@@ -961,8 +961,11 @@ function forceHD(url) {
 
 // Shared item mapper for feed endpoints
 function mapFeedItem(item, catHints = []) {
+  const engagementDataAvailable = ["viewCount", "watchCount", "bidCount"].some((key) =>
+    item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
+  const viewCount  = item.viewCount  || 0;
   const mapped = {
     id:              item.itemId,
     name:            item.title || "Unknown Card",
@@ -976,7 +979,9 @@ function mapFeedItem(item, catHints = []) {
     endTime:         item.itemEndDate || null,
     watchCount,
     bidCount,
-    engagementScore: (watchCount * 2) + (bidCount * 3),
+    viewCount,
+    engagementDataAvailable,
+    engagementScore: viewCount + (watchCount * 2) + (bidCount * 3),
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
   };
@@ -1307,9 +1312,11 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const searchQuery    = buildSearchQueryFeed(catTerm, tagWeights);
         if (allCategoryTrending) {
           const result = await ebaySearch(token, searchQuery, "bestMatch", "price:[20.00..],priceCurrency:USD", null, categoryId, budget, 0);
-          for (const raw of (result.itemSummaries || [])) {
-            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [cat]));
-          }
+          const eligible = (result.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+          eligible.forEach((raw, index) => allItems.push({
+            ...mapFeedItem(raw, [cat]),
+            ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+          }));
           return;
         }
         const bracketBudget  = Math.ceil(budget * 0.8);
@@ -1330,18 +1337,20 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
           const auctWild    = Math.ceil(wildcardBudget * 0.65);
           const binWild     = wildcardBudget - auctWild;
           searches = [
-            ebaySearch(token, searchQuery, "endingSoonest", `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, auctBracket, 0),
+            ebaySearch(token, searchQuery, "bestMatch",     `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, auctBracket, 0),
             ebaySearch(token, searchQuery, "bestMatch",     `${bracketFilter},buyingOptions:{FIXED_PRICE}`,  null, categoryId, binBracket,  0),
-            ebaySearch(token, searchQuery, "endingSoonest", `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, auctWild,    0),
+            ebaySearch(token, searchQuery, "bestMatch",     `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, auctWild,    0),
             ebaySearch(token, searchQuery, "bestMatch",     `${wildcardFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, binWild,     0),
           ];
         }
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
-          for (const raw of (r.value.itemSummaries || [])) {
-            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [cat]));
-          }
+          const eligible = (r.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+          eligible.forEach((raw, index) => allItems.push({
+            ...mapFeedItem(raw, [cat]),
+            ebayBestMatchScore: isEndingSoonest ? 0 : eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+          }));
         }
       })
     );
@@ -1364,8 +1373,8 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       boosted,
       { count: returnCount },
     );
-    items.forEach(({ id, card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score }) =>
-      console.log("[recommendation]", id, { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score }));
+    items.forEach(({ id, card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, low_attention_penalty, final_score }) =>
+      console.log("[recommendation]", id, { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, low_attention_penalty, final_score }));
     return res.json({ items });
   } catch (err) {
     console.error("[feed]", err.message);

@@ -80,7 +80,11 @@ export async function onRequestGet({ env, request }) {
       const query = buildQuery(cfg.catTerm, weights);
       if (allCategoryTrending) {
         const result = await ebaySearch(token, query, "bestMatch", "price:[20.00..],priceCurrency:USD", null, cfg.categoryId, budget, 0);
-        for (const raw of result.itemSummaries || []) if (!isSuppliesCategory(raw)) all.push(mapFeedItem(raw, [category]));
+        const eligible = (result.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+        eligible.forEach((raw, index) => all.push({
+          ...mapFeedItem(raw, [category]),
+          ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+        }));
         return;
       }
       const bracket = Math.ceil(budget * .8), wild = budget - bracket;
@@ -88,10 +92,16 @@ export async function onRequestGet({ env, request }) {
         [priceFilter(0, true), wild]];
       const searches = filters.flatMap(([filter, limit]) => endingSoonest
         ? [ebaySearch(token, query, "endingSoonest", `${filter},buyingOptions:{AUCTION}`, null, cfg.categoryId, limit, 0)]
-        : [ebaySearch(token, query, "endingSoonest", `${filter},buyingOptions:{AUCTION}`, null, cfg.categoryId, Math.ceil(limit * .65), 0),
+        : [ebaySearch(token, query, "bestMatch", `${filter},buyingOptions:{AUCTION}`, null, cfg.categoryId, Math.ceil(limit * .65), 0),
           ebaySearch(token, query, "bestMatch", `${filter},buyingOptions:{FIXED_PRICE}`, null, cfg.categoryId, Math.floor(limit * .35), 0)]);
       for (const result of await Promise.allSettled(searches)) if (result.status === "fulfilled")
-        for (const raw of result.value.itemSummaries || []) if (!isSuppliesCategory(raw)) all.push(mapFeedItem(raw, [category]));
+        {
+          const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+          eligible.forEach((raw, index) => all.push({
+            ...mapFeedItem(raw, [category]),
+            ebayBestMatchScore: endingSoonest ? 0 : eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+          }));
+        }
     }));
     const ids = new Set();
     const fresh = all.filter((item) => !seen.has(item.id) && !ids.has(item.id) && ids.add(item.id));
@@ -105,7 +115,8 @@ export async function onRequestGet({ env, request }) {
       items.forEach((item) => console.log("[recommendation]", item.id, {
         card_desirability_score: item.card_desirability_score, personal_match_score: item.personal_match_score,
         market_demand_score: item.market_demand_score, momentum_score: item.momentum_score,
-        price_fit_score: item.price_fit_score, final_score: item.final_score,
+        price_fit_score: item.price_fit_score, low_attention_penalty: item.low_attention_penalty,
+        final_score: item.final_score,
       }));
       return jsonResponse({ items });
     }

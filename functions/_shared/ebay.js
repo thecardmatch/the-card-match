@@ -404,8 +404,11 @@ export function extractPlayer(title) {
 
 export function mapFeedItem(item, catHints = []) {
   const title      = item.title || "Unknown Card";
+  const engagementDataAvailable = ["viewCount", "watchCount", "bidCount"].some((key) =>
+    item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
+  const viewCount  = item.viewCount  || 0;
   const category   = detectCategory(
     title,
     catHints,
@@ -430,7 +433,9 @@ export function mapFeedItem(item, catHints = []) {
     endTime:         item.itemEndDate || null,
     watchCount,
     bidCount,
-    engagementScore: watchCount * 2 + bidCount * 3,
+    viewCount,
+    engagementDataAvailable,
+    engagementScore: viewCount + watchCount * 2 + bidCount * 3,
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
     // ── Multi-attribute metadata ──────────────────────────────────────────────

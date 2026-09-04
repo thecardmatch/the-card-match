@@ -3,12 +3,15 @@ export const DEFAULT_WEIGHTS = Object.freeze({
   USER_MATCH: .40, CARD_DESIRABILITY: .25, MARKET_DEMAND: .20, MOMENTUM: .10, PRICE_FIT: .05,
 });
 
+const featureSlug = (value) => String(value || "").toLowerCase()
+  .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
 export function expandWeightAliases(weights = {}) {
   const expanded = { ...weights };
   for (const [key, value] of Object.entries(weights)) {
     const match = key.match(/^(?:category|attribute|era):(.+)$/);
     if (!match) continue;
-    const alias = match[1].replace(/_/g, "-");
+    const alias = featureSlug(match[1]);
     const current = Number(expanded[alias]) || 0;
     if (Math.abs(Number(value) || 0) >= Math.abs(current)) expanded[alias] = Number(value) || 0;
   }
@@ -40,7 +43,7 @@ export function cardFeatures(card) {
     if (known.has(canonical)) tags.add(canonical);
   }
   const add = (key, test) => { if (test) tags.add(key); };
-  add(String(card?.category || "").toLowerCase().replace(/\s+/g, "-"), card?.category);
+  add(featureSlug(card?.category), card?.category);
   add("auto", /\b(auto|autograph)\b/.test(value)); add("rpa", /\brpa\b/.test(value));
   add("patch", /\b(patch|relic)\b/.test(value)); add("rookie", /\b(rookie|rc)\b/.test(value));
   add("numbered", /(?:\b\d{1,2}\/(?:99|75|50|25|10|5|1)\b|\/(?:99|75|50|25|10|5|1)\b)/.test(value));
@@ -52,7 +55,7 @@ export function cardFeatures(card) {
   add("refractor", /\brefractor\b/.test(value)); add("parallel", /\bparallel\b/.test(value));
   add("alt-art", /\b(?:alt art|alternate art)\b/.test(value));
   add("color-refractor", /\b(?:color|colour)\s+refractor\b/.test(value));
-  add("graded_slab", /\b(?:psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b/.test(value) ||
+  add("graded_slab", /\b(?:psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b|\bgraded\s*10\b/.test(value) ||
     tags.has("graded") || tags.has("psa10") || tags.has("bgs95"));
   const year = Number(value.match(/\b(?:19|20)\d{2}\b/)?.[0] || 0);
   const era = card?.era || (year ? (year < 2000 ? "vintage" : year < 2021 ? "modern" : "current") : "");
@@ -96,7 +99,7 @@ export function dedupeCards(cards) {
 }
 
 function featureWeight(tagWeights, feature, card) {
-  const category = String(card?.category || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const category = featureSlug(card?.category);
   const era = String(card?.era || "").toLowerCase();
   const namespace = feature === category ? "category" : feature === era || ["vintage", "modern", "current"].includes(feature) ? "era" : "attribute";
   const candidates = [
@@ -110,27 +113,64 @@ function featureWeight(tagWeights, feature, card) {
 
 export function scoreCard(card, { tag_weights = {}, weights = {}, price_median = 0 } = {}) {
   const features = cardFeatures(card), value = text(card);
-  const positive = features.reduce((sum, feature) => sum + Math.max(0, featureWeight(tag_weights, feature, card)), 0);
-  const negative = features.reduce((sum, feature) => sum + Math.max(0, -featureWeight(tag_weights, feature, card)), 0);
-  const personal_match_score = clamp((positive - negative + 1) / 3);
+  const categoryFeature = featureSlug(card?.category);
+  const categoryWeight = featureWeight(tag_weights, categoryFeature, card);
+  const attributeWeight = features
+    .filter((feature) => feature !== categoryFeature)
+    .reduce((sum, feature) => sum + featureWeight(tag_weights, feature, card), 0);
+  // Category selection should qualify a card, not overwhelm quality signals.
+  const personal_match_score = clamp(.25 + Math.tanh(categoryWeight / 3) * .20 + Math.tanh(attributeWeight / 3) * .55);
   let desirability = 0;
   if (/\b(topps chrome|prizm|national treasures|flawless|bowman chrome)\b/.test(value)) desirability += .25;
-  if (/\b(auto|autograph)\b/.test(value)) desirability += .20;
-  if (/\brpa\b/.test(value)) desirability += .15;
-  if (/\b(patch|relic)\b/.test(value)) desirability += .12;
-  if (/(?:\b1\/1\b|\/(?:99|75|50|25|10|5|1)\b)/.test(value)) desirability += .18;
-  if (/\bpsa\s*10\b|\bcgc\s*10\b|\bbgs\s*(?:9\.5|10)\b/.test(value)) desirability += .18;
+  if (/\b(auto|autograph)\b/.test(value)) desirability += .24;
+  if (/\b(?:rpa|rookie\s+(?:auto(?:graph)?\s+)?patch|rookie\s+patch\s+auto(?:graph)?)\b/.test(value)) desirability += .28;
+  else if (/\b(patch|relic)\b/.test(value)) desirability += .14;
+  if (/\brookie\b|\brc\b/.test(value)) desirability += .10;
+  if (/\b1\/1\b|\bone of one\b/.test(value)) desirability += .42;
+  else if (/\/5\b/.test(value)) desirability += .34;
+  else if (/\/10\b/.test(value)) desirability += .29;
+  else if (/\/25\b/.test(value)) desirability += .24;
+  else if (/\/(?:50|75|99)\b/.test(value)) desirability += .15;
+  if (/\b(?:psa|cgc)\s*10\b|\bbgs\s*(?:9\.5|10)\b|\bgraded\s*10\b/.test(value)) desirability += .27;
   const card_desirability_score = clamp(desirability - (isJunk(card) ? .85 : 0));
-  const market_demand_score = clamp((Math.log1p(Number(card.watchCount) || 0) + Math.log1p(Number(card.bidCount) || 0) * 1.35) / 8);
+  const views = Math.max(0, Number(card.viewCount) || 0);
+  const watchers = Math.max(0, Number(card.watchCount) || 0);
+  const bids = Math.max(0, Number(card.bidCount) || 0);
+  const viewSignal = Math.log1p(views) / Math.log(501);
+  const watcherSignal = Math.log1p(watchers) / Math.log(31);
+  const bidSignal = Math.log1p(bids) / Math.log(16);
+  const explicitDemand = clamp(viewSignal * .20 + watcherSignal * .35 + bidSignal * .45);
+  const counterWasSupplied = ["viewCount", "watchCount", "bidCount"].some((key) =>
+    Object.prototype.hasOwnProperty.call(card || {}, key) && Number.isFinite(Number(card[key])));
+  const hasExplicitEngagement = typeof card?.engagementDataAvailable === "boolean"
+    ? card.engagementDataAvailable
+    : counterWasSupplied;
+  // Browse does not consistently expose engagement counts. Its proprietary
+  // Best Match rank is a conservative fallback, never additive with real data.
+  const bestMatchDemandProxy = clamp(Number(card.ebayBestMatchScore) || 0) * .45;
+  const market_demand_score = hasExplicitEngagement ? explicitDemand : bestMatchDemandProxy;
   const hours = card.endTime ? (new Date(card.endTime).getTime() - Date.now()) / 3600000 : 72;
-  const momentum_score = clamp(market_demand_score * .65 + (hours > 0 && hours < 24 ? (24 - hours) / 60 : 0));
+  const urgency = hours > 0 && hours < 24 ? (24 - hours) / 24 : 0;
+  // Ending soon only amplifies real attention; it never creates momentum by itself.
+  const momentum_score = clamp(market_demand_score * (.75 + urgency * .50));
   const price = number(card);
   const price_fit_score = price_median > 0 ? clamp(1 - Math.abs(Math.log((price || 1) / price_median)) / Math.log(8)) : .5;
   const configured = { ...DEFAULT_WEIGHTS, ...weights };
   const total = Object.values(configured).reduce((sum, n) => sum + Number(n), 0) || 1;
-  const final_score = clamp((personal_match_score * configured.USER_MATCH + card_desirability_score * configured.CARD_DESIRABILITY +
-    market_demand_score * configured.MARKET_DEMAND + momentum_score * configured.MOMENTUM + price_fit_score * configured.PRICE_FIT) / total);
-  return { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score, features };
+  const weightedScore = (personal_match_score * configured.USER_MATCH + card_desirability_score * configured.CARD_DESIRABILITY +
+    market_demand_score * configured.MARKET_DEMAND + momentum_score * configured.MOMENTUM + price_fit_score * configured.PRICE_FIT) / total;
+  const noAttention = hasExplicitEngagement
+    ? bids === 0 && watchers < 2 && views < 10
+    : bestMatchDemandProxy < .16;
+  const overpricedWithoutAttention = noAttention && price_median > 0 && price > price_median * 2;
+  const low_attention_penalty = noAttention
+    ? (card_desirability_score >= .75 ? .06 : .18) + (overpricedWithoutAttention ? .14 : 0)
+    : 0;
+  const final_score = clamp(weightedScore - low_attention_penalty);
+  return {
+    card_desirability_score, personal_match_score, market_demand_score, momentum_score,
+    price_fit_score, low_attention_penalty, final_score, features,
+  };
 }
 
 export function mixRecommendations(cards, count) {
@@ -164,7 +204,10 @@ export function mixRecommendations(cards, count) {
   // Reserve non-direct segments first so premium, trending, and discovery cards
   // cannot all be consumed by the direct-preference ranking.
   const adjacent = take(
-    [...sorted].sort((a, b) => b.card_desirability_score - a.card_desirability_score || b.final_score - a.final_score),
+    [...sorted].sort((a, b) =>
+      (b.card_desirability_score * .65 + b.momentum_score * .35) -
+      (a.card_desirability_score * .65 + a.momentum_score * .35) ||
+      b.final_score - a.final_score),
     quotas.adjacent_high_end, "adjacent_high_end",
   );
   const trending = take(
@@ -176,7 +219,7 @@ export function mixRecommendations(cards, count) {
     quotas.discovery, "discovery",
   );
   const direct = take(
-    [...sorted].sort((a, b) => b.personal_match_score - a.personal_match_score || b.final_score - a.final_score),
+    [...sorted].sort((a, b) => b.final_score - a.final_score || b.personal_match_score - a.personal_match_score),
     quotas.direct_preference, "direct_preference",
   );
   return [...direct, ...adjacent, ...trending, ...discovery];

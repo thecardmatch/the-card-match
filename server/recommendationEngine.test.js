@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { cardFeatures, cardIdentity, dedupeCards, expandWeightAliases, isJunk, mixRecommendations, recommendCards, scoreCard, swipeWeightDeltas } from "./recommendationEngine.js";
 
-const premium = { id: "a", name: "2023 Topps Chrome Jane Doe Auto /25 PSA 10 #7", currentBid: 120, watchCount: 12, bidCount: 3, tags: ["baseball"] };
+const premium = { id: "a", name: "2023 Topps Chrome Jane Doe Auto /25 PSA 10 #7", category: "Baseball", currentBid: 120, watchCount: 12, bidCount: 3, tags: ["baseball"] };
 test("scores premium cards with itemized normalized factors", () => {
   const result = scoreCard(premium, { tag_weights: { auto: 1, baseball: 1 }, price_median: 100 });
   for (const key of ["card_desirability_score", "personal_match_score", "market_demand_score", "momentum_score", "price_fit_score", "final_score"]) assert.ok(result[key] >= 0 && result[key] <= 1);
@@ -70,4 +70,79 @@ test("legacy Cloudflare tags cannot change canonical price/listing features", ()
       swipeWeightDeltas({ action: "LIKE", card: base }),
     );
   }
+});
+test("hot appealing cards outrank overpriced listings with no attention", () => {
+  const hot = {
+    id: "hot", name: "2023 Topps Chrome Rookie Patch Auto /10 PSA 10",
+    category: "Baseball", currentBid: 180, bidCount: 8, watchCount: 22, viewCount: 240,
+    listingType: "Auction",
+  };
+  const overpriced = {
+    id: "cold", name: "2023 Topps Chrome Base Card",
+    category: "Baseball", currentBid: 900, bidCount: 0, watchCount: 0, viewCount: 2,
+    listingType: "Auction",
+  };
+  const profile = { tag_weights: { "category:baseball": 2 }, price_median: 150 };
+  const hotScore = scoreCard(hot, profile);
+  const coldScore = scoreCard(overpriced, profile);
+  assert.ok(hotScore.market_demand_score > coldScore.market_demand_score);
+  assert.ok(hotScore.momentum_score > coldScore.momentum_score);
+  assert.ok(coldScore.momentum_score < .05);
+  assert.ok(coldScore.low_attention_penalty >= .3);
+  assert.ok(hotScore.final_score > coldScore.final_score);
+});
+test("zero-bid premium cards remain eligible but are mildly downranked", () => {
+  const rare = {
+    id: "rare", name: "2024 Rookie Patch Auto 1/1 Graded 10",
+    category: "Football", currentBid: 220, bidCount: 0, watchCount: 0, viewCount: 3,
+    listingType: "Auction",
+  };
+  const scored = scoreCard(rare, { price_median: 200 });
+  assert.equal(scored.card_desirability_score, 1);
+  assert.ok(scored.momentum_score < .05);
+  assert.equal(scored.low_attention_penalty, .06);
+  assert.ok(scored.final_score > 0);
+});
+test("multiword category affinity stays capped and consistently normalized", () => {
+  const profile = { tag_weights: expandWeightAliases({
+    "category:one_piece": 10,
+    "category:magic_the_gathering": 10,
+    "category:baseball": 10,
+  }) };
+  const onePiece = scoreCard({ name: "Monkey D. Luffy Parallel", category: "One Piece", currentBid: 40 }, profile);
+  const magic = scoreCard({ name: "Black Lotus Refractor", category: "Magic: The Gathering", currentBid: 40 }, profile);
+  const baseball = scoreCard({ name: "Jane Doe Refractor", category: "Baseball", currentBid: 40 }, profile);
+  assert.ok(onePiece.features.includes("one-piece"));
+  assert.ok(magic.features.includes("magic-the-gathering"));
+  assert.equal(onePiece.personal_match_score, baseball.personal_match_score);
+  assert.equal(magic.personal_match_score, baseball.personal_match_score);
+  assert.ok(onePiece.personal_match_score <= .45);
+});
+test("best-match rank supplies conservative demand only when counts are unavailable", () => {
+  const ranked = scoreCard({
+    name: "2024 Prizm Rookie PSA 10", category: "Basketball", currentBid: 80,
+    ebayBestMatchScore: 1,
+  });
+  const explicit = scoreCard({
+    name: "2024 Prizm Rookie PSA 10", category: "Basketball", currentBid: 80,
+    ebayBestMatchScore: 1, bidCount: 1,
+  });
+  const cold = scoreCard({
+    name: "2024 Prizm Rookie PSA 10", category: "Basketball", currentBid: 80,
+    ebayBestMatchScore: 0,
+  });
+  assert.equal(ranked.market_demand_score, .45);
+  assert.ok(explicit.market_demand_score < ranked.market_demand_score);
+  assert.equal(cold.market_demand_score, 0);
+  assert.ok(cold.low_attention_penalty > ranked.low_attention_penalty);
+});
+test("explicit zero engagement never receives the best-match fallback", () => {
+  const scored = scoreCard({
+    name: "2024 Prizm Rookie PSA 10", category: "Basketball", currentBid: 600,
+    bidCount: 0, watchCount: 0, viewCount: 0, engagementDataAvailable: true,
+    ebayBestMatchScore: 1,
+  }, { price_median: 150 });
+  assert.equal(scored.market_demand_score, 0);
+  assert.equal(scored.momentum_score, 0);
+  assert.ok(scored.low_attention_penalty >= .2);
 });
