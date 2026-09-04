@@ -1,0 +1,205 @@
+// Deterministic, dependency-free recommendation scoring shared with Pages.
+export const DEFAULT_WEIGHTS = Object.freeze({
+  USER_MATCH: .40, CARD_DESIRABILITY: .25, MARKET_DEMAND: .20, MOMENTUM: .10, PRICE_FIT: .05,
+});
+
+export function expandWeightAliases(weights = {}) {
+  const expanded = { ...weights };
+  for (const [key, value] of Object.entries(weights)) {
+    const match = key.match(/^(?:category|attribute|era):(.+)$/);
+    if (!match) continue;
+    const alias = match[1].replace(/_/g, "-");
+    const current = Number(expanded[alias]) || 0;
+    if (Math.abs(Number(value) || 0) >= Math.abs(current)) expanded[alias] = Number(value) || 0;
+  }
+  return expanded;
+}
+
+const text = (card) => `${card?.name || card?.title || ""} ${card?.grade || ""} ${card?.condition || ""}`.toLowerCase();
+const clamp = (n) => Math.max(0, Math.min(1, Number(n) || 0));
+const tokenise = (value) => new Set(String(value || "").toLowerCase().match(/[a-z0-9]+(?:\/[a-z0-9]+)?/g) || []);
+const has = (value, re) => re.test(text(value));
+const number = (card) => Number(card?.currentBid ?? card?.price?.value ?? card?.price ?? 0) || 0;
+
+export function cardFeatures(card) {
+  const value = text(card), tags = new Set();
+  const aliases = {
+    psa10: "psa-10", "psa-10": "psa-10", bgs95: "bgs-9.5", "bgs-9.5": "bgs-9.5",
+    "1-of-1": "1/1", "one-of-one": "1/1", graded: "graded_slab", "graded-slab": "graded_slab",
+    "buy-it-now": "buy-it-now", bin: "buy-it-now",
+  };
+  const known = new Set([
+    "rookie", "auto", "rpa", "patch", "refractor", "prizm", "1/1", "numbered",
+    "graded_slab", "psa-10", "bgs-9.5", "cgc-10", "parallel", "alt-art",
+    "color-refractor", "topps-chrome", "bowman-chrome", "national-treasures",
+    "flawless", "vintage", "modern", "current",
+  ]);
+  for (const raw of card?.tags || []) {
+    const normalized = String(raw).toLowerCase().replace(/\s+/g, "-");
+    const canonical = aliases[normalized] || normalized;
+    if (known.has(canonical)) tags.add(canonical);
+  }
+  const add = (key, test) => { if (test) tags.add(key); };
+  add(String(card?.category || "").toLowerCase().replace(/\s+/g, "-"), card?.category);
+  add("auto", /\b(auto|autograph)\b/.test(value)); add("rpa", /\brpa\b/.test(value));
+  add("patch", /\b(patch|relic)\b/.test(value)); add("rookie", /\b(rookie|rc)\b/.test(value));
+  add("numbered", /(?:\b\d{1,2}\/(?:99|75|50|25|10|5|1)\b|\/(?:99|75|50|25|10|5|1)\b)/.test(value));
+  add("1/1", /(?:\b1\/1\b|one of one)/.test(value)); add("topps-chrome", /\btopps chrome\b/.test(value));
+  add("bowman-chrome", /\bbowman chrome\b/.test(value)); add("prizm", /\bprizm\b/.test(value));
+  add("national-treasures", /\bnational treasures\b/.test(value)); add("flawless", /\bflawless\b/.test(value));
+  add("psa-10", /\bpsa\s*10\b/.test(value)); add("bgs-9.5", /\bbgs\s*(?:9\.5|10)\b/.test(value));
+  add("cgc-10", /\bcgc\s*10\b/.test(value));
+  add("refractor", /\brefractor\b/.test(value)); add("parallel", /\bparallel\b/.test(value));
+  add("alt-art", /\b(?:alt art|alternate art)\b/.test(value));
+  add("color-refractor", /\b(?:color|colour)\s+refractor\b/.test(value));
+  add("graded_slab", /\b(?:psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b/.test(value) ||
+    tags.has("graded") || tags.has("psa10") || tags.has("bgs95"));
+  const year = Number(value.match(/\b(?:19|20)\d{2}\b/)?.[0] || 0);
+  const era = card?.era || (year ? (year < 2000 ? "vintage" : year < 2021 ? "modern" : "current") : "");
+  if (era) tags.add(String(era).toLowerCase());
+  const price = number(card);
+  tags.add(price >= 250 ? "high-value" : price >= 50 ? "mid-value" : "entry-value");
+  tags.add(String(card?.listingType || "").toLowerCase() === "auction" ? "auction" : "buy-it-now");
+  return [...tags].sort();
+}
+
+export function isJunk(card) {
+  const value = text(card);
+  return /\b(repack|digital|custom|lot|base set|complete set)\b/.test(value) ||
+    (/\bbase\b/.test(value) && !/\b(auto|autograph|patch|relic|\/(?:99|75|50|25|10|5|1)\b|psa\s*10|bgs\s*(?:9\.5|10)|cgc\s*10)\b/.test(value));
+}
+
+export function cardIdentity(card) {
+  const original = text(card);
+  const value = original.replace(/\b(psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b/g, " ");
+  const year = value.match(/\b(?:19|20)\d{2}\b/)?.[0] || "";
+  const set = value.match(/\b(topps chrome|bowman chrome|national treasures|flawless|prizm|select|optic|mosaic|donruss)\b/)?.[0] || "";
+  const cardNo = value.match(/(?:#\s*|card\s*#?\s*)([a-z]*\d+[a-z]*)\b/)?.[1] || "";
+  const excluded = new Set([
+    ...tokenise(set), year, cardNo, "the", "and", "of", "card", "rookie", "rc", "auto",
+    "autograph", "patch", "relic", "base", "graded", "gem", "mint", "numbered",
+    "topps", "panini", "upper", "deck", "sports", "trading",
+  ]);
+  const subject = String(card?.player || card?.subject || "").toLowerCase().trim() ||
+    [...tokenise(value)].filter((word) => !excluded.has(word) && !/^\d+$/.test(word)).slice(0, 5).join(" ");
+  const grade = original.match(/\b(?:psa|bgs|cgc|sgc)\s*\d+(?:\.\d+)?\b/)?.[0] || "raw";
+  return `${subject}|${year}|${set}|${cardNo}|${grade}`.replace(/\s+/g, " ").trim();
+}
+
+export function dedupeCards(cards) {
+  const best = new Map();
+  for (const card of cards || []) {
+    const key = cardIdentity(card), current = best.get(key);
+    if (!current || Number(card.final_score ?? card.score ?? 0) > Number(current.final_score ?? current.score ?? 0)) best.set(key, card);
+  }
+  return [...best.values()];
+}
+
+function featureWeight(tagWeights, feature, card) {
+  const category = String(card?.category || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const era = String(card?.era || "").toLowerCase();
+  const namespace = feature === category ? "category" : feature === era || ["vintage", "modern", "current"].includes(feature) ? "era" : "attribute";
+  const candidates = [
+    tagWeights[feature],
+    tagWeights[feature.replace(/-/g, "_")],
+    tagWeights[`${namespace}:${feature}`],
+    tagWeights[`${namespace}:${feature.replace(/-/g, "_")}`],
+  ].map(Number).filter(Number.isFinite);
+  return candidates.sort((a, b) => Math.abs(b) - Math.abs(a))[0] || 0;
+}
+
+export function scoreCard(card, { tag_weights = {}, weights = {}, price_median = 0 } = {}) {
+  const features = cardFeatures(card), value = text(card);
+  const positive = features.reduce((sum, feature) => sum + Math.max(0, featureWeight(tag_weights, feature, card)), 0);
+  const negative = features.reduce((sum, feature) => sum + Math.max(0, -featureWeight(tag_weights, feature, card)), 0);
+  const personal_match_score = clamp((positive - negative + 1) / 3);
+  let desirability = 0;
+  if (/\b(topps chrome|prizm|national treasures|flawless|bowman chrome)\b/.test(value)) desirability += .25;
+  if (/\b(auto|autograph)\b/.test(value)) desirability += .20;
+  if (/\brpa\b/.test(value)) desirability += .15;
+  if (/\b(patch|relic)\b/.test(value)) desirability += .12;
+  if (/(?:\b1\/1\b|\/(?:99|75|50|25|10|5|1)\b)/.test(value)) desirability += .18;
+  if (/\bpsa\s*10\b|\bcgc\s*10\b|\bbgs\s*(?:9\.5|10)\b/.test(value)) desirability += .18;
+  const card_desirability_score = clamp(desirability - (isJunk(card) ? .85 : 0));
+  const market_demand_score = clamp((Math.log1p(Number(card.watchCount) || 0) + Math.log1p(Number(card.bidCount) || 0) * 1.35) / 8);
+  const hours = card.endTime ? (new Date(card.endTime).getTime() - Date.now()) / 3600000 : 72;
+  const momentum_score = clamp(market_demand_score * .65 + (hours > 0 && hours < 24 ? (24 - hours) / 60 : 0));
+  const price = number(card);
+  const price_fit_score = price_median > 0 ? clamp(1 - Math.abs(Math.log((price || 1) / price_median)) / Math.log(8)) : .5;
+  const configured = { ...DEFAULT_WEIGHTS, ...weights };
+  const total = Object.values(configured).reduce((sum, n) => sum + Number(n), 0) || 1;
+  const final_score = clamp((personal_match_score * configured.USER_MATCH + card_desirability_score * configured.CARD_DESIRABILITY +
+    market_demand_score * configured.MARKET_DEMAND + momentum_score * configured.MOMENTUM + price_fit_score * configured.PRICE_FIT) / total);
+  return { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score, features };
+}
+
+export function mixRecommendations(cards, count) {
+  const sorted = [...cards].sort((a, b) => b.final_score - a.final_score), size = Math.min(count || sorted.length, sorted.length);
+  const ratios = [
+    ["direct_preference", .60], ["adjacent_high_end", .20],
+    ["trending", .10], ["discovery", .10],
+  ];
+  const quotas = Object.fromEntries(ratios.map(([name, ratio]) => [name, Math.floor(size * ratio)]));
+  let unallocated = size - Object.values(quotas).reduce((sum, value) => sum + value, 0);
+  for (const [name, ratio] of [...ratios].sort((a, b) =>
+    ((size * b[1]) % 1) - ((size * a[1]) % 1) || ratios.findIndex(([key]) => key === a[0]) - ratios.findIndex(([key]) => key === b[0])
+  )) {
+    if (unallocated-- <= 0) break;
+    quotas[name] += 1;
+  }
+  const used = new Set();
+  const take = (pool, amount, segment) => {
+    const selected = [];
+    for (const card of pool) {
+      if (amount <= 0) break;
+      if (used.has(card.id)) continue;
+      used.add(card.id);
+      selected.push({ ...card, recommendation_segment: segment });
+      amount -= 1;
+    }
+    return selected;
+  };
+  const stableDiscovery = (card) => [...String(card.id || cardIdentity(card))]
+    .reduce((hash, char) => ((hash * 31) + char.charCodeAt(0)) >>> 0, 7);
+  // Reserve non-direct segments first so premium, trending, and discovery cards
+  // cannot all be consumed by the direct-preference ranking.
+  const adjacent = take(
+    [...sorted].sort((a, b) => b.card_desirability_score - a.card_desirability_score || b.final_score - a.final_score),
+    quotas.adjacent_high_end, "adjacent_high_end",
+  );
+  const trending = take(
+    [...sorted].sort((a, b) => (b.market_demand_score + b.momentum_score) - (a.market_demand_score + a.momentum_score)),
+    quotas.trending, "trending",
+  );
+  const discovery = take(
+    [...sorted].sort((a, b) => stableDiscovery(a) - stableDiscovery(b)),
+    quotas.discovery, "discovery",
+  );
+  const direct = take(
+    [...sorted].sort((a, b) => b.personal_match_score - a.personal_match_score || b.final_score - a.final_score),
+    quotas.direct_preference, "direct_preference",
+  );
+  return [...direct, ...adjacent, ...trending, ...discovery];
+}
+
+export function recommendCards(userProfile = {}, candidateCards = [], options = {}) {
+  const count = options.count ?? userProfile.count;
+  const scored = (candidateCards || []).filter((card) => !isJunk(card))
+    .map((card) => ({ ...card, ...scoreCard(card, userProfile) }));
+  return mixRecommendations(dedupeCards(scored), count);
+}
+
+export function swipeWeightDeltas(event = {}) {
+  const delta = /^like$/i.test(event.action) ? 1 : /^buy$/i.test(event.action) ? 1.25 : /^pass$/i.test(event.action) ? -.5 : 0;
+  if (!delta) return {};
+  const card = event.card || event.item || event;
+  const category = String(card.category || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const era = String(card.era || "").toLowerCase();
+  const deltas = {};
+  for (const feature of cardFeatures(card)) {
+    const namespace = feature === category ? "category" :
+      feature === era || ["vintage", "modern", "current"].includes(feature) ? "era" : "attribute";
+    deltas[`${namespace}:${feature.replace(/-/g, "_")}`] = delta;
+  }
+  return deltas;
+}

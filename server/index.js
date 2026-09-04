@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
+import { cardFeatures, expandWeightAliases, recommendCards, swipeWeightDeltas } from "./recommendationEngine.js";
 
 if (!globalThis.WebSocket) {
   globalThis.WebSocket = WebSocket;
@@ -962,7 +963,7 @@ function forceHD(url) {
 function mapFeedItem(item, catHints = []) {
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
-  return {
+  const mapped = {
     id:              item.itemId,
     name:            item.title || "Unknown Card",
     category:        detectCategory(item.title || "", catHints, (item.categories || []).map((c) => String(c.categoryId))),
@@ -979,6 +980,10 @@ function mapFeedItem(item, catHints = []) {
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
   };
+  const tags = cardFeatures(mapped);
+  const era = ["vintage", "modern", "current"].find((value) => tags.includes(value)) || "modern";
+  const cardType = ["rpa", "auto", "patch", "rookie", "numbered", "graded_slab"].find((value) => tags.includes(value)) || "base";
+  return { ...mapped, tags, era, cardType, card_type: cardType };
 }
 
 // ─── POST /api/onboarding/complete ────────────────────────────────────────────
@@ -1241,7 +1246,26 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
     const isEndingSoonest = mode === "ending-soonest";
 
     let tagWeights = {};
-    try { tagWeights = JSON.parse(twRaw); } catch { /* use empty */ }
+    try { tagWeights = expandWeightAliases(JSON.parse(twRaw)); } catch { /* use empty */ }
+    // A signed-in profile takes precedence over query-string guest weights.  Keep
+    // the legacy quiz row as a compatibility fallback while the new table rolls out.
+    const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+    let engineWeights = {};
+    if (bearer && SUPABASE_URL && SUPABASE_KEY) {
+      try {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY,
+          SUPABASE_KEY === process.env.SUPABASE_SERVICE_ROLE_KEY ? undefined : { global: { headers: { Authorization: `Bearer ${bearer}` } } });
+        const { data: auth } = await supabase.auth.getUser(bearer);
+        if (auth?.user) {
+          const { data: profile } = await supabase.from("user_preferences").select("weights").eq("user_id", auth.user.id).maybeSingle();
+          const { data: quiz } = await supabase.from("user_quiz_results").select("tag_weights").eq("user_id", auth.user.id).maybeSingle();
+          tagWeights = expandWeightAliases(
+            profile?.weights && Object.keys(profile.weights).length ? profile.weights : (quiz?.tag_weights || tagWeights),
+          );
+          engineWeights = profile?.weights?.recommendation_weights || {};
+        }
+      } catch (error) { console.warn("[feed] profile unavailable:", error.message); }
+    }
 
     // STRICT: only positive-weight categories are fetched
     const catWeights = {};
@@ -1333,17 +1357,16 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
       return res.json({ items: fresh.slice(0, returnCount) });
     }
-    const now     = Date.now();
-    const boosted = fresh.map((item) => {
-      let urgency = 1;
-      if (item.endTime) {
-        const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
-        if (hrs > 0 && hrs < 2) urgency = 3; else if (hrs >= 2 && hrs < 12) urgency = 2;
-      }
-      return { ...item, engagementScore: item.engagementScore * urgency };
-    });
+    const boosted = fresh;
     console.log(`[feed] pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
-    return res.json({ items: rankAndExplore(boosted, tagWeights, returnCount) });
+    const items = recommendCards(
+      { tag_weights: tagWeights, weights: engineWeights, price_median: priceMedian },
+      boosted,
+      { count: returnCount },
+    );
+    items.forEach(({ id, card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score }) =>
+      console.log("[recommendation]", id, { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, final_score }));
+    return res.json({ items });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });
@@ -1785,11 +1808,12 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    const { error: rpcError } = await supabase.rpc("record_user_swipe_event", {
+    const { error: rpcError } = await supabase.rpc("record_swipe_with_preference_adjust", {
       p_user_id: auth.user.id,
       p_event: event,
       p_preferences: preferences,
       p_tag_weights: tag_weights,
+      p_deltas: swipeWeightDeltas(event),
     });
     if (!rpcError) {
       return res.json({

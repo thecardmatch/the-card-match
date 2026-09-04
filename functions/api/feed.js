@@ -2,6 +2,8 @@ import {
   jsonResponse, onRequestOptions as _cors, getEbayToken, ebaySearch, mapFeedItem,
   isSuppliesCategory, CATEGORY_FEED_CONFIG, CATEGORY_TAG_MAP,
 } from "../_shared/ebay.js";
+import { expandWeightAliases, recommendCards } from "../_shared/recommendationEngine.js";
+import { authenticatedClient } from "../_shared/userPreferences.js";
 
 export { _cors as onRequestOptions };
 
@@ -34,7 +36,21 @@ export async function onRequestGet({ env, request }) {
   const trending = params.get("trending") === "true";
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   let weights = {};
-  try { weights = JSON.parse(params.get("tag_weights") || "{}") || {}; } catch { /* empty */ }
+  try { weights = expandWeightAliases(JSON.parse(params.get("tag_weights") || "{}") || {}); } catch { /* empty */ }
+  let engineWeights = {};
+  try {
+    const auth = await authenticatedClient(env, request);
+    if (!auth.guest && !auth.error) {
+      const [{ data: profile }, { data: quiz }] = await Promise.all([
+        auth.client.from("user_preferences").select("weights").eq("user_id", auth.userId).maybeSingle(),
+        auth.client.from("user_quiz_results").select("tag_weights").eq("user_id", auth.userId).maybeSingle(),
+      ]);
+      weights = expandWeightAliases(
+        profile?.weights && Object.keys(profile.weights).length ? profile.weights : (quiz?.tag_weights || weights),
+      );
+      engineWeights = profile?.weights?.recommendation_weights || {};
+    }
+  } catch (error) { console.warn("[feed] profile unavailable", error.message); }
 
   const catWeights = {};
   for (const [tag, weight] of Object.entries(weights)) {
@@ -80,7 +96,19 @@ export async function onRequestGet({ env, request }) {
     const ids = new Set();
     const fresh = all.filter((item) => !seen.has(item.id) && !ids.has(item.id) && ids.add(item.id));
     if (endingSoonest) fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
-    else fresh.sort((a, b) => score(b, weights) - score(a, weights));
+    else {
+      const items = recommendCards(
+        { tag_weights: weights, weights: engineWeights, price_median: parseFloat(params.get("price_median") || "0") },
+        fresh,
+        { count },
+      );
+      items.forEach((item) => console.log("[recommendation]", item.id, {
+        card_desirability_score: item.card_desirability_score, personal_match_score: item.personal_match_score,
+        market_demand_score: item.market_demand_score, momentum_score: item.momentum_score,
+        price_fit_score: item.price_fit_score, final_score: item.final_score,
+      }));
+      return jsonResponse({ items });
+    }
     return jsonResponse({ items: fresh.slice(0, count) });
   } catch (error) {
     console.error("[feed]", error.message);

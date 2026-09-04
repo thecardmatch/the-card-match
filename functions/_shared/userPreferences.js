@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { jsonResponse } from "./ebay.js";
+import { swipeWeightDeltas } from "./recommendationEngine.js";
 
 function config(env) {
   const node = typeof process !== "undefined" ? process.env : {};
@@ -36,11 +37,12 @@ export async function saveUserData(env, request, body, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    const { error: rpcError } = await auth.client.rpc("record_user_swipe_event", {
+    const { error: rpcError } = await auth.client.rpc("record_swipe_with_preference_adjust", {
       p_user_id: auth.userId,
       p_event: event,
       p_preferences: preferences,
       p_tag_weights: tagWeights,
+      p_deltas: swipeWeightDeltas(event),
     });
     if (!rpcError) {
       return jsonResponse({
