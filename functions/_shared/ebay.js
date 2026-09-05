@@ -128,6 +128,56 @@ export async function ebaySearch(
   return res.json();
 }
 
+const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];
+const hasEngagementCount = (item) => ENGAGEMENT_KEYS.some((key) =>
+  item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
+
+export function applyEngagementDetails(items, details = []) {
+  const byId = new Map((details || []).map((item) => [String(item.itemId), item]));
+  return (items || []).map((item) => {
+    if (item.engagementDataAvailable) return item;
+    const detail = byId.get(String(item.id));
+    if (!hasEngagementCount(detail)) return item;
+    const viewCount = Number(detail.viewCount) || 0;
+    const watchCount = Number(detail.watchCount) || 0;
+    const bidCount = Number(detail.bidCount) || 0;
+    return {
+      ...item,
+      viewCount,
+      watchCount,
+      bidCount,
+      engagementDataAvailable: true,
+      engagementScore: viewCount + watchCount * 2 + bidCount * 3,
+    };
+  });
+}
+
+// Browse getItems accepts up to 20 item IDs. Enrich only the ranking shortlist,
+// capped at two parallel calls, so direct activity never creates per-item fan-out.
+// watchCount requires eBay App Check approval; bidCount is returned for auctions.
+export async function enrichFeedItemsWithEngagement(token, items, maxItems = 40) {
+  const candidates = (items || []).filter((item) =>
+    !item.engagementDataAvailable && item.id).slice(0, maxItems);
+  if (!candidates.length) return items;
+  const chunks = [];
+  for (let index = 0; index < candidates.length; index += 20) chunks.push(candidates.slice(index, index + 20));
+  const results = await Promise.allSettled(chunks.map(async (chunk) => {
+    const params = new URLSearchParams({ item_ids: chunk.map((item) => item.id).join(",") });
+    const response = await fetch(`https://api.ebay.com/buy/browse/v1/item?${params}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      },
+    });
+    if (!response.ok) throw new Error(`eBay getItems error ${response.status}`);
+    return response.json();
+  }));
+  const details = results.flatMap((result) =>
+    result.status === "fulfilled" ? (result.value.items || []) : []);
+  return applyEngagementDetails(items, details);
+}
+
 // ── Category feed search config ───────────────────────────────────────────────
 // catTerm is the base eBay search query for each category.
 // The feed layer dynamically enriches it with the user's positive attribute tags.
@@ -404,8 +454,7 @@ export function extractPlayer(title) {
 
 export function mapFeedItem(item, catHints = []) {
   const title      = item.title || "Unknown Card";
-  const engagementDataAvailable = ["viewCount", "watchCount", "bidCount"].some((key) =>
-    item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
+  const engagementDataAvailable = hasEngagementCount(item);
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
   const viewCount  = item.viewCount  || 0;

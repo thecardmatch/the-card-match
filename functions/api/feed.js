@@ -1,6 +1,6 @@
 import {
   jsonResponse, onRequestOptions as _cors, getEbayToken, ebaySearch, mapFeedItem,
-  isSuppliesCategory, CATEGORY_FEED_CONFIG, CATEGORY_TAG_MAP,
+  enrichFeedItemsWithEngagement, isSuppliesCategory, CATEGORY_FEED_CONFIG, CATEGORY_TAG_MAP,
 } from "../_shared/ebay.js";
 import { chaseSearchQueries, expandWeightAliases, isJunk, recommendCards } from "../_shared/recommendationEngine.js";
 import { authenticatedClient } from "../_shared/userPreferences.js";
@@ -121,9 +121,15 @@ export async function onRequestGet({ env, request }) {
     const fresh = all.filter((item) => !isJunk(item) && !seen.has(item.id) && !ids.has(item.id) && ids.add(item.id));
     if (endingSoonest) fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
     else {
-      const items = recommendCards(
+      const shortlist = recommendCards(
         { tag_weights: weights, weights: engineWeights, price_median: parseFloat(params.get("price_median") || "0") },
         fresh,
+        { count: Math.min(40, Math.max(count * 2, count)) },
+      );
+      const enriched = await enrichFeedItemsWithEngagement(token, shortlist);
+      const items = recommendCards(
+        { tag_weights: weights, weights: engineWeights, price_median: parseFloat(params.get("price_median") || "0") },
+        enriched,
         { count },
       );
       items.forEach((item) => console.log("[recommendation]", item.id, {

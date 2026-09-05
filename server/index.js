@@ -583,6 +583,47 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   }
   return res.json();
 }
+
+const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];
+const hasEngagementCount = (item) => ENGAGEMENT_KEYS.some((key) =>
+  item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
+
+function applyEngagementDetails(items, details = []) {
+  const byId = new Map((details || []).map((item) => [String(item.itemId), item]));
+  return (items || []).map((item) => {
+    if (item.engagementDataAvailable) return item;
+    const detail = byId.get(String(item.id));
+    if (!hasEngagementCount(detail)) return item;
+    const viewCount = Number(detail.viewCount) || 0;
+    const watchCount = Number(detail.watchCount) || 0;
+    const bidCount = Number(detail.bidCount) || 0;
+    return {
+      ...item, viewCount, watchCount, bidCount, engagementDataAvailable: true,
+      engagementScore: viewCount + watchCount * 2 + bidCount * 3,
+    };
+  });
+}
+
+async function enrichFeedItemsWithEngagement(token, items, maxItems = 40) {
+  const candidates = (items || []).filter((item) => !item.engagementDataAvailable && item.id).slice(0, maxItems);
+  if (!candidates.length) return items;
+  const chunks = [];
+  for (let index = 0; index < candidates.length; index += 20) chunks.push(candidates.slice(index, index + 20));
+  const results = await Promise.allSettled(chunks.map(async (chunk) => {
+    const params = new URLSearchParams({ item_ids: chunk.map((item) => item.id).join(",") });
+    const response = await fetch(`https://api.ebay.com/buy/browse/v1/item?${params}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "X-EBAY-C-ENDUSERCTX": `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      },
+    });
+    if (!response.ok) throw new Error(`eBay getItems error ${response.status}`);
+    return response.json();
+  }));
+  const details = results.flatMap((result) => result.status === "fulfilled" ? (result.value.items || []) : []);
+  return applyEngagementDetails(items, details);
+}
 // ─── GET /api/entities — autocomplete ────────────────────────────────────────
 app.get("/api/entities", async (req, res) => {
   const kv = getKV();
@@ -961,8 +1002,7 @@ function forceHD(url) {
 
 // Shared item mapper for feed endpoints
 function mapFeedItem(item, catHints = []) {
-  const engagementDataAvailable = ["viewCount", "watchCount", "bidCount"].some((key) =>
-    item?.[key] !== undefined && item?.[key] !== null && Number.isFinite(Number(item[key])));
+  const engagementDataAvailable = hasEngagementCount(item);
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
   const viewCount  = item.viewCount  || 0;
@@ -1368,7 +1408,12 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
       return res.json({ items: fresh.slice(0, returnCount) });
     }
-    const boosted = fresh;
+    const shortlist = recommendCards(
+      { tag_weights: tagWeights, weights: engineWeights, price_median: priceMedian },
+      fresh,
+      { count: Math.min(40, Math.max(returnCount * 2, returnCount)) },
+    );
+    const boosted = await enrichFeedItemsWithEngagement(token, shortlist);
     console.log(`[feed] pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
     const items = recommendCards(
       { tag_weights: tagWeights, weights: engineWeights, price_median: priceMedian },
