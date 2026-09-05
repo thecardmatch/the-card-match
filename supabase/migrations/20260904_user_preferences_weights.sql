@@ -3,9 +3,19 @@
 create table if not exists public.user_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,
   weights jsonb not null default '{}'::jsonb,
+  swipes jsonb not null default '[]'::jsonb,
+  preferences jsonb not null default '{}'::jsonb,
+  tag_weights jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.user_preferences add column if not exists weights jsonb not null default '{}'::jsonb;
+alter table public.user_preferences add column if not exists swipes jsonb not null default '[]'::jsonb;
+alter table public.user_preferences add column if not exists preferences jsonb not null default '{}'::jsonb;
+alter table public.user_preferences add column if not exists tag_weights jsonb not null default '{}'::jsonb;
+alter table public.user_preferences add column if not exists created_at timestamptz not null default now();
+alter table public.user_preferences add column if not exists updated_at timestamptz not null default now();
 
 alter table public.user_preferences enable row level security;
 do $$ begin
@@ -15,6 +25,10 @@ exception when duplicate_object then null; end $$;
 do $$ begin
   create policy "users update own preference weights" on public.user_preferences
     for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "users insert own preference weights" on public.user_preferences
+    for insert with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 
 create or replace function public.adjust_user_preference_weights(

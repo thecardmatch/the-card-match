@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
-import { cardFeatures, expandWeightAliases, recommendCards, swipeWeightDeltas } from "./recommendationEngine.js";
+import { cardFeatures, chaseSearchQueries, expandWeightAliases, isJunk, recommendCards, swipeWeightDeltas } from "./recommendationEngine.js";
 
 if (!globalThis.WebSocket) {
   globalThis.WebSocket = WebSocket;
@@ -1332,15 +1332,16 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
             ebaySearch(token, searchQuery, "endingSoonest", `${wildcardFilter},buyingOptions:{AUCTION}`, null, categoryId, wildcardBudget, 0),
           ];
         } else {
-          const auctBracket = Math.ceil(bracketBudget  * 0.65);
-          const binBracket  = bracketBudget  - auctBracket;
-          const auctWild    = Math.ceil(wildcardBudget * 0.65);
-          const binWild     = wildcardBudget - auctWild;
+          const [gradedQuery, rookieQuery, numberedQuery] = chaseSearchQueries(searchQuery, cat);
+          const broadAuction = Math.max(1, Math.ceil(budget * .35));
+          const gradedBin = Math.max(1, Math.ceil(budget * .25));
+          const rookieAuction = Math.max(1, Math.ceil(budget * .20));
+          const numberedBin = Math.max(1, budget - broadAuction - gradedBin - rookieAuction);
           searches = [
-            ebaySearch(token, searchQuery, "bestMatch",     `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, auctBracket, 0),
-            ebaySearch(token, searchQuery, "bestMatch",     `${bracketFilter},buyingOptions:{FIXED_PRICE}`,  null, categoryId, binBracket,  0),
-            ebaySearch(token, searchQuery, "bestMatch",     `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, auctWild,    0),
-            ebaySearch(token, searchQuery, "bestMatch",     `${wildcardFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, binWild,     0),
+            ebaySearch(token, searchQuery,    "bestMatch", `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, broadAuction, 0),
+            ebaySearch(token, gradedQuery,    "bestMatch", `${bracketFilter},buyingOptions:{FIXED_PRICE}`,  null, categoryId, gradedBin, 0),
+            ebaySearch(token, rookieQuery,    "bestMatch", `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, rookieAuction, 0),
+            ebaySearch(token, numberedQuery,  "bestMatch", `${wildcardFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, numberedBin, 0),
           ];
         }
         const settled = await Promise.allSettled(searches);
@@ -1357,6 +1358,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
 
     const unique = new Set();
     const fresh  = allItems.filter((i) => {
+      if (isJunk(i)) return false;
       if (seenSet.has(i.id) || unique.has(i.id)) return false;
       unique.add(i.id);
       return true;
@@ -1796,6 +1798,37 @@ app.get("/api/auth/google/callback", async (req, res) => {
 });
 
 // Shared authenticated preference persistence used by swipe and settings routes.
+async function persistCompatibilitySwipe(supabase, userId, event, preferences, tagWeights) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { data: stored, error: readError } = await supabase.from("user_preferences")
+      .select("weights,swipes,updated_at").eq("user_id", userId).maybeSingle();
+    if (readError) return { error: readError };
+    const byId = new Map((Array.isArray(stored?.swipes) ? stored.swipes : [])
+      .map((value, index) => [value.eventId || `legacy:${index}`, value]));
+    const duplicate = byId.has(event.eventId);
+    byId.set(event.eventId, event);
+    const weights = { ...(stored?.weights || {}) };
+    if (!duplicate) for (const [key, delta] of Object.entries(swipeWeightDeltas(event))) {
+      weights[key] = Math.max(-10, Math.min(10, (Number(weights[key]) || 0) + (Number(delta) || 0)));
+    }
+    const payload = {
+      user_id: userId, preferences, tag_weights: tagWeights,
+      swipes: [...byId.values()], weights, updated_at: new Date().toISOString(),
+    };
+    if (!stored) {
+      const { error } = await supabase.from("user_preferences").insert(payload);
+      if (!error) return { duplicate };
+      if (error.code === "23505") continue;
+      return { error };
+    }
+    let update = supabase.from("user_preferences").update(payload).eq("user_id", userId);
+    if (stored.updated_at) update = update.eq("updated_at", stored.updated_at);
+    const { data: updated, error } = await update.select("user_id");
+    if (error) return { error };
+    if (updated?.length === 1) return { duplicate };
+  }
+  return { error: { message: "Preference update conflicted repeatedly; retry the swipe." } };
+}
 async function savePreferencePayload(req, res, includeSwipe = false) {
   const body = req.body || {};
   const token = (req.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1];
@@ -1806,23 +1839,29 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
   const { data: auth, error: authError } = await supabase.auth.getUser(token);
   if (authError || !auth.user) return res.status(401).json({ saved: false, guest: false, status: "invalid_session" });
   if (body.userId && body.userId !== auth.user.id) return res.status(403).json({ saved: false, guest: false, status: "ownership_mismatch" });
-  const { data: old, error: readError } = await supabase.from("user_quiz_results").select("preferences,tag_weights,swipes").eq("user_id", auth.user.id).maybeSingle();
-  if (readError) return res.status(500).json({ saved: false, status: "read_failed", error: readError.message });
+  const [{ data: legacy, error: legacyError }, { data: canonical, error: canonicalError }] = await Promise.all([
+    supabase.from("user_quiz_results").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_preferences").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+  ]);
+  if (legacyError || canonicalError) return res.status(500).json({ saved: false, status: "read_failed", error: (legacyError || canonicalError).message });
+  const old = canonical && (!legacy || Date.parse(canonical.updated_at || 0) >= Date.parse(legacy.updated_at || 0))
+    ? canonical : legacy;
   const preferences = { ...(old?.preferences || {}), ...(body.preferences || {}) };
   if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
   const tag_weights = { ...(old?.tag_weights || {}), ...(body.tagWeights || {}), ...(body.tag_weights || {}) };
+  let normalizedEvent = null;
   if (includeSwipe && body.event && typeof body.event === "object") {
-    const event = {
+    normalizedEvent = {
       ...body.event,
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
     const { error: rpcError } = await supabase.rpc("record_swipe_with_preference_adjust", {
       p_user_id: auth.user.id,
-      p_event: event,
+      p_event: normalizedEvent,
       p_preferences: preferences,
       p_tag_weights: tag_weights,
-      p_deltas: swipeWeightDeltas(event),
+      p_deltas: swipeWeightDeltas(normalizedEvent),
     });
     if (!rpcError) {
       return res.json({
@@ -1841,29 +1880,21 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
       p_preferences: preferences,
       p_tag_weights: tag_weights,
     });
-    if (!preferenceError) {
-      return res.json({ saved: true, guest: false, status: "persisted_atomic", preferences, tag_weights });
-    }
-    if (preferenceError.code !== "PGRST202") {
+    if (preferenceError && preferenceError.code !== "PGRST202") {
       return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: preferenceError.message });
     }
-    const { error: fallbackError } = await supabase.from("user_quiz_results").upsert({
+    const { error: canonicalError } = await supabase.from("user_preferences").upsert({
       user_id: auth.user.id, preferences, tag_weights, updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
-    if (fallbackError) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: fallbackError.message });
-    return res.json({ saved: true, guest: false, status: "persisted", preferences, tag_weights });
+    if (canonicalError) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: canonicalError.message });
+    return res.json({ saved: true, guest: false, status: preferenceError ? "persisted_canonical" : "persisted_atomic", preferences, tag_weights });
   }
-  let swipes = Array.isArray(old?.swipes) ? old.swipes : [];
-  if (includeSwipe) {
-    const event = body.event;
-    if (!event || typeof event !== "object") return res.status(400).json({ saved: false, error: "event is required" });
-    const eventId = event.eventId || `${event.cardId || "unknown"}:${event.action || "event"}:${event.occurredAt || Date.now()}`;
-    const merged = new Map(swipes.map((item, i) => [item.eventId || `legacy:${i}`, item]));
-    merged.set(eventId, { ...event, eventId }); swipes = [...merged.values()];
-  }
-  const { error } = await supabase.from("user_quiz_results").upsert({ user_id: auth.user.id, preferences, tag_weights, swipes, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
-  if (error) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: error.message });
-  return res.json({ saved: true, guest: false, status: "persisted", preferences, tag_weights });
+  if (!normalizedEvent) return res.status(400).json({ saved: false, error: "event is required" });
+  const compat = await persistCompatibilitySwipe(supabase, auth.user.id, normalizedEvent, preferences, tag_weights);
+  if (compat.error) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: compat.error.message });
+  // user_preferences is the canonical compatibility store. Avoid mirroring a
+  // stale swipe snapshot into the legacy quiz row during concurrent requests.
+  return res.json({ saved: true, guest: false, status: compat.duplicate ? "persisted_duplicate" : "persisted_compat_weights", preferences, tag_weights });
 }
 app.post("/api/swipe", (req, res) => savePreferencePayload(req, res, true));
 app.get("/api/preferences", async (req, res) => {
@@ -1874,9 +1905,19 @@ app.get("/api/preferences", async (req, res) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, service ? undefined : { global: { headers: { Authorization: `Bearer ${token}` } } });
   const { data: auth, error: authError } = await supabase.auth.getUser(token);
   if (authError || !auth.user) return res.status(401).json({ authenticated: false, error: "invalid_session" });
-  const { data, error } = await supabase.from("user_quiz_results").select("preferences,tag_weights").eq("user_id", auth.user.id).maybeSingle();
-  if (error) return res.status(500).json({ error: error.message });
-  return res.json({ authenticated: true, preferences: data?.preferences || {}, tag_weights: data?.tag_weights || {} });
+  const [{ data: legacy, error }, { data: learned, error: learnedError }] = await Promise.all([
+    supabase.from("user_quiz_results").select("preferences,tag_weights,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_preferences").select("preferences,tag_weights,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+  ]);
+  if (error || learnedError) return res.status(500).json({ error: (error || learnedError).message });
+  const canonicalIsNewest = learned && (!legacy ||
+    Date.parse(learned.updated_at || 0) >= Date.parse(legacy.updated_at || 0));
+  const current = canonicalIsNewest ? learned : legacy;
+  return res.json({
+    authenticated: true,
+    preferences: current?.preferences || {},
+    tag_weights: current?.tag_weights || {},
+  });
 });
 app.put("/api/preferences", (req, res) => savePreferencePayload(req, res));
 app.post("/api/preferences", (req, res) => savePreferencePayload(req, res));

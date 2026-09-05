@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cardFeatures, cardIdentity, dedupeCards, expandWeightAliases, isJunk, mixRecommendations, recommendCards, scoreCard, swipeWeightDeltas } from "./recommendationEngine.js";
+import { cardFeatures, cardIdentity, chaseSearchQueries, dedupeCards, expandWeightAliases, isJunk, mixRecommendations, recommendCards, scoreCard, swipeWeightDeltas } from "./recommendationEngine.js";
 
 const premium = { id: "a", name: "2023 Topps Chrome Jane Doe Auto /25 PSA 10 #7", category: "Baseball", currentBid: 120, watchCount: 12, bidCount: 3, tags: ["baseball"] };
 test("scores premium cards with itemized normalized factors", () => {
@@ -11,6 +11,19 @@ test("scores premium cards with itemized normalized factors", () => {
 test("rejects junk and ungraded common base", () => {
   assert.equal(isJunk({ name: "2022 Base Card Lot Repack" }), true);
   assert.equal(recommendCards({}, [{ id: "junk", name: "2022 Base Rookie Card" }]).length, 0);
+});
+test("rejects vague listings, sealed product, lots, and autographed memorabilia", () => {
+  for (const name of [
+    "Football Card", "Baseball Single", "2024 Baseball Card",
+    "2024 NFL Football Card",
+    "Football Card Lot", "Factory Sealed Hobby Box", "Case of 12 Baseball Boxes",
+    "2024 Topps Chrome Sealed Box",
+    "Patrick Mahomes Signed Football", "Shohei Ohtani Autographed Jersey",
+    "Tom Brady Signed Mini Helmet",
+    "Michael Jordan Autographed Photograph",
+  ]) assert.equal(isJunk({ name }), true, name);
+  assert.equal(isJunk({ name: "Patrick Mahomes Rookie Patch Auto /10 PSA 10 Card" }), false);
+  assert.equal(isJunk({ name: "2023 Panini Patrick Mahomes Autographed Jersey Patch Card /99" }), false);
 });
 test("identity dedupe retains highest listing score", () => {
   const low = { ...premium, id: "low", final_score: .2 }, high = { ...premium, id: "high", final_score: .9 };
@@ -145,4 +158,29 @@ test("explicit zero engagement never receives the best-match fallback", () => {
   assert.equal(scored.market_demand_score, 0);
   assert.equal(scored.momentum_score, 0);
   assert.ok(scored.low_attention_penalty >= .2);
+});
+test("popular players, grades 9 and 10, and numbered cards earn chase value", () => {
+  const base = { category: "Football", currentBid: 80, engagementDataAvailable: false, ebayBestMatchScore: .5 };
+  const unknownRaw = scoreCard({ ...base, name: "2024 Alex Example Card" });
+  const popularRaw = scoreCard({ ...base, name: "2024 Patrick Mahomes Card" });
+  const gradedNine = scoreCard({ ...base, name: "2024 Patrick Mahomes Rookie PSA 9 /199" });
+  const gradedTen = scoreCard({ ...base, name: "2024 Patrick Mahomes Rookie PSA 10 /25" });
+  assert.ok(popularRaw.card_desirability_score > unknownRaw.card_desirability_score);
+  assert.ok(gradedNine.features.includes("graded-9"));
+  assert.ok(gradedNine.features.includes("numbered"));
+  assert.ok(gradedNine.card_desirability_score > popularRaw.card_desirability_score);
+  assert.ok(gradedTen.card_desirability_score > gradedNine.card_desirability_score);
+});
+test("candidate sourcing reserves distinct chase searches without OR syntax", () => {
+  assert.deepEqual(chaseSearchQueries("baseball trading card", "Baseball"), [
+    "baseball trading card PSA 10",
+    "baseball trading card rookie auto",
+    "baseball trading card numbered",
+  ]);
+  assert.deepEqual(chaseSearchQueries("pokemon trading card", "Pokemon"), [
+    "pokemon trading card PSA 10",
+    "pokemon trading card graded 10",
+    "pokemon trading card alt art",
+  ]);
+  assert.equal(chaseSearchQueries("football trading card", "Football").some((query) => /\bOR\b/.test(query)), false);
 });

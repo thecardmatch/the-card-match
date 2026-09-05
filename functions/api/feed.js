@@ -2,7 +2,7 @@ import {
   jsonResponse, onRequestOptions as _cors, getEbayToken, ebaySearch, mapFeedItem,
   isSuppliesCategory, CATEGORY_FEED_CONFIG, CATEGORY_TAG_MAP,
 } from "../_shared/ebay.js";
-import { expandWeightAliases, recommendCards } from "../_shared/recommendationEngine.js";
+import { chaseSearchQueries, expandWeightAliases, isJunk, recommendCards } from "../_shared/recommendationEngine.js";
 import { authenticatedClient } from "../_shared/userPreferences.js";
 
 export { _cors as onRequestOptions };
@@ -87,13 +87,27 @@ export async function onRequestGet({ env, request }) {
         }));
         return;
       }
-      const bracket = Math.ceil(budget * .8), wild = budget - bracket;
-      const filters = [[priceFilter(parseFloat(params.get("price_median") || "0"), false), bracket],
-        [priceFilter(0, true), wild]];
-      const searches = filters.flatMap(([filter, limit]) => endingSoonest
-        ? [ebaySearch(token, query, "endingSoonest", `${filter},buyingOptions:{AUCTION}`, null, cfg.categoryId, limit, 0)]
-        : [ebaySearch(token, query, "bestMatch", `${filter},buyingOptions:{AUCTION}`, null, cfg.categoryId, Math.ceil(limit * .65), 0),
-          ebaySearch(token, query, "bestMatch", `${filter},buyingOptions:{FIXED_PRICE}`, null, cfg.categoryId, Math.floor(limit * .35), 0)]);
+      const bracket = priceFilter(parseFloat(params.get("price_median") || "0"), false);
+      const wild = priceFilter(0, true);
+      let searches;
+      if (endingSoonest) {
+        searches = [
+          ebaySearch(token, query, "endingSoonest", `${bracket},buyingOptions:{AUCTION}`, null, cfg.categoryId, Math.ceil(budget * .8), 0),
+          ebaySearch(token, query, "endingSoonest", `${wild},buyingOptions:{AUCTION}`, null, cfg.categoryId, Math.max(1, Math.floor(budget * .2)), 0),
+        ];
+      } else {
+        const [gradedQuery, rookieQuery, numberedQuery] = chaseSearchQueries(query, category);
+        const broadAuction = Math.max(1, Math.ceil(budget * .35));
+        const gradedBin = Math.max(1, Math.ceil(budget * .25));
+        const rookieAuction = Math.max(1, Math.ceil(budget * .20));
+        const numberedBin = Math.max(1, budget - broadAuction - gradedBin - rookieAuction);
+        searches = [
+          ebaySearch(token, query, "bestMatch", `${bracket},buyingOptions:{AUCTION}`, null, cfg.categoryId, broadAuction, 0),
+          ebaySearch(token, gradedQuery, "bestMatch", `${bracket},buyingOptions:{FIXED_PRICE}`, null, cfg.categoryId, gradedBin, 0),
+          ebaySearch(token, rookieQuery, "bestMatch", `${wild},buyingOptions:{AUCTION}`, null, cfg.categoryId, rookieAuction, 0),
+          ebaySearch(token, numberedQuery, "bestMatch", `${wild},buyingOptions:{FIXED_PRICE}`, null, cfg.categoryId, numberedBin, 0),
+        ];
+      }
       for (const result of await Promise.allSettled(searches)) if (result.status === "fulfilled")
         {
           const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
@@ -104,7 +118,7 @@ export async function onRequestGet({ env, request }) {
         }
     }));
     const ids = new Set();
-    const fresh = all.filter((item) => !seen.has(item.id) && !ids.has(item.id) && ids.add(item.id));
+    const fresh = all.filter((item) => !isJunk(item) && !seen.has(item.id) && !ids.has(item.id) && ids.add(item.id));
     if (endingSoonest) fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
     else {
       const items = recommendCards(
