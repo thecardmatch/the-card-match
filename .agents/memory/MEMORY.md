@@ -3,3 +3,4 @@
 - [eBay Browse API OR queries](ebay-or-query.md) — `q` param does NOT support OR keyword; fix is parallel per-term calls merged server-side.
 - [CF Pages Functions architecture](cf-pages-functions.md) — production API lives in functions/; server/index.js is local-dev only; btoa not Buffer, context.env not process.env.
 - [eBay engagement availability](ebay-engagement-signals.md) — Browse may omit bid/watch/view counters; distinguish missing metrics from explicit zeros before using a ranking proxy.
+- [User quiz profile uniqueness](user-quiz-results-constraint.md) — Existing Supabase projects may lack the user_id uniqueness required by conflict-safe profile RPCs.
