@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { SwipeCard } from "@/components/SwipeCard";
 import { supabase } from "@/lib/supabaseClient";
+import { getAuthRedirectUrl } from "@/lib/authRedirect";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
 const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
@@ -58,7 +59,7 @@ function AuthModal({
     localStorage.setItem("cardmatch:pending_swipes", JSON.stringify(pendingSwipes));
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: getAuthRedirectUrl() },
     });
     if (error) {
       localStorage.removeItem("cardmatch:pending_swipes");
@@ -74,7 +75,7 @@ function AuthModal({
     setAuthError("");
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: getAuthRedirectUrl() },
     });
     setBusy(false);
     if (error) {

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { LogIn, LogOut, Mail, X } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { getAuthRedirectUrl } from "@/lib/authRedirect";
 
 type AccountUser = {
   email?: string;
@@ -29,7 +30,7 @@ export function AccountModal({ open, user, onClose }: Props) {
     setMessage("");
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: getAuthRedirectUrl() },
     });
     if (error) {
       setMessage(error.message);
@@ -44,7 +45,7 @@ export function AccountModal({ open, user, onClose }: Props) {
     setMessage("");
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim(),
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: getAuthRedirectUrl() },
     });
     setBusy(false);
     setMessage(error ? error.message : "Check your email for a secure sign-in link.");
