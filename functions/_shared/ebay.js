@@ -15,7 +15,7 @@ export const EPN_CAMP_ID = "5339150952";
 
 const CARD_ONLY =
   `-helmet -pennant -poster -bobblehead -figurine -plaque -jersey ` +
-  `"-signed ball" "-cut signature" -photograph -photo -lithograph -ticket -program`;
+  `-"signed ball" -"cut signature" -photograph -photo -lithograph -ticket -program`;
 
 // ── Cloudflare-compatible JSON response ───────────────────────────────────────
 export function jsonResponse(data, status = 200) {

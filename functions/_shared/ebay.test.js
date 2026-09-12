@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyEngagementDetails } from "./ebay.js";
+import { applyEngagementDetails, ebaySearch } from "./ebay.js";
 
 const unavailable = {
   id: "v1|1|0",
@@ -39,4 +39,25 @@ test("unavailable engagement preserves the Best Match fallback state", () => {
   }]);
   assert.equal(item.engagementDataAvailable, false);
   assert.equal(item.engagementScore, 0);
+});
+
+test("physical-card exclusions remain negative eBay phrases", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ itemSummaries: [] }), { status: 200 });
+  };
+
+  try {
+    await ebaySearch("test-token", "football trading card", "bestMatch", null, null, "215", 5);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const query = new URL(requestedUrl).searchParams.get("q");
+  assert.match(query, /-"signed ball"/);
+  assert.match(query, /-"cut signature"/);
+  assert.doesNotMatch(query, /"-signed ball"/);
+  assert.doesNotMatch(query, /"-cut signature"/);
 });
