@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
-import { Heart, Settings, Timer, UserRound } from "lucide-react";
+import { Heart, Settings, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
@@ -60,7 +60,6 @@ type SwipeRecord = {
   title?:     string;
   price?:     number;
   tags?:      string[];
-  feedMode?:  "for-you" | "ending-soonest";
 };
 
 // "session-checking" is a transient mode shown while initSession() queries
@@ -255,7 +254,6 @@ function getInitialMode(): AppMode {
 function buildFeedUrl(
   seenIds:     Set<string>,
   passedIds:   Set<string>,
-  mode:        "for-you" | "ending-soonest",
   preferences: Preferences | null,
   offset:      number,
 ): string {
@@ -269,8 +267,7 @@ function buildFeedUrl(
     `/api/deck` +
     `?seen=${encodeURIComponent(seen)}` +
     `&count=20` +
-    `&offset=${Math.max(0, offset)}` +
-    `&mode=${mode}`
+    `&offset=${Math.max(0, offset)}`
   );
   const selectedCategories = preferences?.selectedCategories ?? [];
   if (selectedCategories.length > 0) {
@@ -292,7 +289,6 @@ export default function App() {
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
-  const [feedMode,      setFeedMode]      = useState<"for-you" | "ending-soonest">("for-you");
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountUser, setAccountUser] = useState<{ email?: string; name?: string; picture?: string } | null>(() => {
@@ -302,7 +298,6 @@ export default function App() {
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
-  const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
   // authenticated user ID.  At mount they're initialised with the anonymous
@@ -333,7 +328,6 @@ export default function App() {
   const profileCheckResultRef  = useRef<"unchecked" | RestoreResult>("unchecked");
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
-  useEffect(() => { feedModeRef.current = feedMode; }, [feedMode]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
@@ -357,7 +351,6 @@ export default function App() {
         const response = await fetch(buildFeedUrl(
           seenIds.current,
           passedIds.current,
-          feedModeRef.current,
           prefsRef.current,
           pageOffset,
         ));
@@ -515,7 +508,6 @@ export default function App() {
       title: card.name,
       price: card.currentBid,
       tags: card.tags || [],
-      feedMode: feedModeRef.current,
     };
     if (userId) {
       stageSwipeEvent(userId, event);
@@ -1422,52 +1414,15 @@ export default function App() {
                 THE CARD MATCH
               </h1>
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
-                Your personalized feed
+                Live high-end auctions
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Feed mode and preference controls */}
+            {/* Preferences */}
             {appMode === "feed" && (
-              <div className="flex items-center gap-1 rounded-full border border-border bg-card p-0.5 text-[10px] font-bold">
-                <button
-                  onClick={() => {
-                    feedModeRef.current = "for-you";   // update ref immediately so loadFeed sees the new mode
-                    setFeedMode("for-you");
-                    setCards([]);
-                    seenIds.current = new Set();
-                    setDeckResetKey((k) => k + 1);
-                    loadFeed(false);
-                  }}
-                  className={`px-2.5 py-1 rounded-full transition-colors ${
-                    feedMode === "for-you"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  For You
-                </button>
-                <button
-                  aria-label={feedMode === "ending-soonest" ? "Show personalized trending cards" : "Sort by ending soonest"}
-                  title={feedMode === "ending-soonest" ? "Show personalized trending cards" : "Ending Soonest"}
-                  onClick={() => {
-                    const nextMode = feedModeRef.current === "ending-soonest" ? "for-you" : "ending-soonest";
-                    feedModeRef.current = nextMode;
-                    setFeedMode(nextMode);
-                    setCards([]);
-                    seenIds.current = new Set();
-                    setDeckResetKey((k) => k + 1);
-                    loadFeed(false);
-                  }}
-                  className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
-                    feedMode === "ending-soonest"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Timer className="h-3.5 w-3.5" />
-                </button>
+              <div className="flex items-center rounded-full border border-border bg-card p-0.5">
                 <button
                   type="button"
                   aria-label="Edit card preferences"
@@ -1515,33 +1470,17 @@ export default function App() {
 
         <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 min-h-0 overflow-hidden">
           <div className="w-full max-w-sm h-full flex flex-col min-h-0">
-            {appMode === "feed" && cards.length === 0 ? (
+            {appMode === "feed" && feedError && cards.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
-                {feedError ? (
-                  <>
-                    <p className="text-4xl">⚠️</p>
-                    <p className="text-base font-semibold">Couldn't load cards</p>
-                    <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
-                    <button
-                      onClick={() => { setFeedError(false); loadFeed(false); }}
-                      className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
-                    >
-                      Try Again ↺
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-4xl">🃏</p>
-                    <p className="text-base font-semibold">You've seen everything!</p>
-                    <p className="text-sm text-muted-foreground">We're pulling fresh listings for you.</p>
-                    <button
-                      onClick={() => loadFeed(false)}
-                      className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
-                    >
-                      Refresh Feed ↺
-                    </button>
-                  </>
-                )}
+                <p className="text-4xl">⚠️</p>
+                <p className="text-base font-semibold">Couldn't load cards</p>
+                <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
+                <button
+                  onClick={() => { setFeedError(false); loadFeed(false); }}
+                  className="mt-2 px-6 py-2.5 bg-primary text-primary-foreground text-sm font-bold rounded-full active:scale-95 transition-transform"
+                >
+                  Try Again ↺
+                </button>
               </div>
             ) : (
               <SwipeDeck

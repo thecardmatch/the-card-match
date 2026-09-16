@@ -15,7 +15,7 @@ import {
   isSuppliesCategory,
   CATEGORY_FEED_CONFIG,
 } from "../../_shared/ebay.js";
-import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, selectDesirableTerms, sortHotCards } from "../../_shared/hotCards.js";
+import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, sortHotCards } from "../../_shared/hotCards.js";
 import { isJunk } from "../../_shared/recommendationEngine.js";
 
 export { _cors as onRequestOptions };
@@ -144,24 +144,20 @@ export async function onRequestPost(context) {
       : FALLBACK_CATEGORIES;
     const token    = await getEbayToken(env);
     const allItems = [];
-    const desirableTerms = selectDesirableTerms();
-
     await Promise.all(
       fetchCategories.map(async (category) => {
         const cfg = CATEGORY_FEED_CONFIG[category];
         if (!cfg) return;
-        const searches = desirableTerms.map((keyword) =>
-          ebaySearch(
-            token,
-            buildHotSearchQuery(cfg.catTerm, keyword),
-            "endingSoonest",
-            `${hotPriceFilter()},buyingOptions:{AUCTION}`,
-            null,
-            cfg.categoryId,
-            Math.max(4, Math.ceil(40 / fetchCategories.length)),
-            0,
-          )
-        );
+        const searches = [ebaySearch(
+          token,
+          buildHotSearchQuery(cfg.catTerm),
+          "endingSoonest",
+          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+          null,
+          cfg.categoryId,
+          Math.max(20, Math.ceil(40 / fetchCategories.length)),
+          0,
+        )];
 
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {

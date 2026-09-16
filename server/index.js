@@ -7,7 +7,7 @@ import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
-  meetsHotCardFloor, passesHotEngagement, selectDesirableTerms, sortHotCards,
+  meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
 
 if (!globalThis.WebSocket) {
@@ -1134,24 +1134,20 @@ app.post("/api/onboarding/complete", async (req, res) => {
         const fetchCategories = selectedCategories.length > 0 ? selectedCategories : FALLBACK_CATEGORIES;
         const token    = await getEbayToken();
         const allItems = [];
-        const desirableTerms = selectDesirableTerms();
-
         await Promise.all(
           fetchCategories.map(async (category) => {
             const cfg = CATEGORY_FEED_CONFIG[category];
             if (!cfg) return;
-            const searches = desirableTerms.map((keyword) =>
-              ebaySearch(
-                token,
-                buildHotSearchQuery(cfg.catTerm, keyword),
-                "endingSoonest",
-                `${hotPriceFilter()},buyingOptions:{AUCTION}`,
-                null,
-                cfg.categoryId,
-                Math.max(4, Math.ceil(40 / fetchCategories.length)),
-                0,
-              )
-            );
+            const searches = [ebaySearch(
+              token,
+              buildHotSearchQuery(cfg.catTerm),
+              "endingSoonest",
+              `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+              null,
+              cfg.categoryId,
+              Math.max(20, Math.ceil(40 / fetchCategories.length)),
+              0,
+            )];
             const settled = await Promise.allSettled(searches);
             for (const r of settled) {
               if (r.status !== "fulfilled") continue;
@@ -1202,19 +1198,17 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
       seen = "", count = "20",
-       mode = "for-you", categories = "", offset = "0",
+       categories = "", offset = "0",
     } = req.query;
 
     const seenSet = new Set(seen ? seen.split(",").filter(Boolean) : []);
     const returnCount = Math.min(Math.max(parseInt(count) || 20, 1), 40);
     const ebayOffset = Math.max(0, parseInt(offset, 10) || 0);
-    const isEndingSoonest = mode === "ending-soonest";
     const requestedCats = categories.split(",")
       .map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")] || value.trim())
       .filter((value) => CATEGORY_FEED_CONFIG[value]);
     const selectedCats = [...new Set(requestedCats.length ? requestedCats : FALLBACK_CATEGORIES)];
-    console.log(`[feed] hot-card mode:${mode} cats:${selectedCats.join(",")}${requestedCats.length ? "" : " [curated-fallback]"}`);
-    const desirableTerms = selectDesirableTerms();
+    console.log(`[feed] hot-card cats:${selectedCats.join(",")}${requestedCats.length ? "" : " [curated-fallback]"}`);
 
     const token    = await getEbayToken();
     const allItems = [];
@@ -1224,11 +1218,16 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const cfg = CATEGORY_FEED_CONFIG[cat];
         if (!cfg) return;
         const { catTerm, categoryId } = cfg;
-        const searches = desirableTerms.map((keyword) =>
-          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), "endingSoonest",
-            `${hotPriceFilter()},buyingOptions:{AUCTION}`,
-            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), ebayOffset)
-        );
+        const searches = [ebaySearch(
+          token,
+          buildHotSearchQuery(catTerm),
+          "endingSoonest",
+          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+          null,
+          categoryId,
+          Math.max(20, Math.ceil(returnCount / selectedCats.length)),
+          ebayOffset,
+        )];
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;

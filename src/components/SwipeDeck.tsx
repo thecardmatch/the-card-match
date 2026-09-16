@@ -21,7 +21,7 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
 
   useEffect(() => {
     const remainingCards = cards.length - currentIndex;
-    if (cards.length > 0 && remainingCards < 5 && !isLoadingMore) onNeedMore();
+    if (remainingCards < 8 && !isLoadingMore) onNeedMore();
   }, [currentIndex, cards.length, isLoadingMore, onNeedMore]);
 
   const handleSwipe = (direction: "left" | "right" | "up") => {
@@ -41,8 +41,11 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
       {/* Card stack */}
       <div className="relative w-full flex-1 min-h-0 mb-3">
         {isDone ? (
-          <div className="absolute inset-0 flex items-center justify-center text-center p-8 bg-muted/20 rounded-3xl border-2 border-dashed border-muted">
-            <p className="text-muted-foreground font-medium">You've seen all the cards!</p>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-8 bg-muted/20 rounded-3xl border-2 border-dashed border-muted">
+            <div className="h-8 w-8 rounded-full border-2 border-primary/25 border-t-primary animate-spin" aria-hidden="true" />
+            <p className="text-muted-foreground font-medium">
+              {isLoadingMore ? "Finding more live cards…" : "Loading more live cards…"}
+            </p>
           </div>
         ) : (
           <AnimatePresence mode="popLayout">

@@ -1,58 +1,17 @@
-export const HOT_CARD_MIN_PRICE = 30;
-
-export const DESIRABLE_TERMS = [
-  "PSA 10", "BGS 9.5", "Auto", "Auto Patch", "Refractor", "Rookie RPA",
-  "Kaboom", "Downtown", "Alt Art", "1/1", "/5", "/10", "/15", "/20",
-];
+export const HOT_CARD_MIN_PRICE = 25;
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
   "Pokemon", "Magic: The Gathering",
 ];
 
-export const SPORTS_HOT_KEYWORDS = [
-  "PSA 10", "BGS 9.5", "SGC 10", "Auto", "RPA", "Patch",
-  "Kaboom", "Downtown", "Refractor", "/99", "/25", "\"1/1\"",
-];
-
-export const TCG_HOT_KEYWORDS = [
-  "PSA 10", "BGS 10", "CGC 10", "\"Alt Art\"",
-  "\"Special Illustration Rare\"", "\"Gold Star\"", "Shadowless",
-];
-
 export const HOT_EXCLUSIONS = [
   "-lot", "-repack", "-digital", "-binder", "-sleeves", "-box", "-break",
-  "-case", "-pack", "-lots", "-custom", "-proxies", "-reproduction", "-rp",
+  "-case", "-pack", "-lots", "-bundle", "-custom", "-proxies", "-reproduction", "-rp",
 ].join(" ");
 
-const HOT_TERMS_PER_CATEGORY = 4;
-
-export function selectDesirableTerms(random = Math.random) {
-  const count = 2 + Math.floor(random() * 2);
-  const terms = [...DESIRABLE_TERMS];
-  for (let index = terms.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [terms[index], terms[swapIndex]] = [terms[swapIndex], terms[index]];
-  }
-  return terms.slice(0, count);
-}
-
-export function isTcgCategory(category) {
-  return /pokemon|magic|yu-?gi-?oh|one piece|lorcana/i.test(String(category || ""));
-}
-
-// Keep the eBay fan-out bounded while rotating through the full signal list as
-// the client requests more pages.
-export function hotTermsForCategory(category, seed = 0) {
-  const source = isTcgCategory(category) ? TCG_HOT_KEYWORDS : SPORTS_HOT_KEYWORDS;
-  const start = Math.abs(Number(seed) || 0) % source.length;
-  return Array.from({ length: Math.min(HOT_TERMS_PER_CATEGORY, source.length) }, (_, index) =>
-    source[(start + index) % source.length]
-  );
-}
-
-export function buildHotSearchQuery(categoryTerm, keyword) {
-  return `${categoryTerm} ${keyword} ${HOT_EXCLUSIONS}`;
+export function buildHotSearchQuery(categoryTerm) {
+  return `${categoryTerm} ${HOT_EXCLUSIONS}`;
 }
 
 export function hotPriceFilter() {
@@ -133,13 +92,10 @@ export function canonicalFeedItem(item) {
   };
 }
 
-export function hotKeywordScore(item) {
-  const text = titleText(item);
-  const keywords = isTcgCategory(item?.category) ? TCG_HOT_KEYWORDS : SPORTS_HOT_KEYWORDS;
-  return keywords.reduce((score, keyword) => score + (text.includes(keyword.toLowerCase()) ? 1 : 0), 0);
-}
-
 export function sortHotCards(a, b) {
-  return hotQualityScore(b) - hotQualityScore(a) ||
+  const aEnd = a?.endTime ? new Date(a.endTime).getTime() : Number.POSITIVE_INFINITY;
+  const bEnd = b?.endTime ? new Date(b.endTime).getTime() : Number.POSITIVE_INFINITY;
+  return aEnd - bEnd ||
+    hotQualityScore(b) - hotQualityScore(a) ||
     hotEngagementScore(b) - hotEngagementScore(a);
 }

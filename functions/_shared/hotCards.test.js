@@ -4,40 +4,22 @@ import {
   FALLBACK_CATEGORIES,
   HOT_CARD_MIN_PRICE,
   HOT_EXCLUSIONS,
-  DESIRABLE_TERMS,
-  SPORTS_HOT_KEYWORDS,
-  TCG_HOT_KEYWORDS,
   buildHotSearchQuery,
   hotEngagementScore,
   hotQualityScore,
   hotPriceFilter,
-  hotTermsForCategory,
   isAuctionListing,
   meetsHotCardFloor,
   passesHotEngagement,
-  selectDesirableTerms,
   sortHotCards,
 } from "./hotCards.js";
 
-test("hot searches enforce the $30 floor and strict exclusions", () => {
-  assert.equal(hotPriceFilter(), "price:[30.00..],priceCurrency:USD");
-  const query = buildHotSearchQuery("football trading card", "PSA 10");
-  assert.match(query, /football trading card PSA/);
+test("hot searches enforce the $25 floor and strict exclusions", () => {
+  assert.equal(hotPriceFilter(), "price:[25.00..],priceCurrency:USD");
+  const query = buildHotSearchQuery("football trading card");
+  assert.doesNotMatch(query, /PSA 10/);
   assert.match(query, /-lot -repack -digital -binder -sleeves -box/);
-  assert.match(query, /-case -pack -lots -custom -proxies -reproduction -rp/);
-});
-
-test("sports and TCG hot terms rotate through the complete signal sets", () => {
-  assert.deepEqual(hotTermsForCategory("Football", 0), SPORTS_HOT_KEYWORDS.slice(0, 4));
-  assert.deepEqual(hotTermsForCategory("Pokemon", 0), TCG_HOT_KEYWORDS.slice(0, 4));
-  assert.ok(SPORTS_HOT_KEYWORDS.includes("Kaboom"));
-  assert.ok(TCG_HOT_KEYWORDS.includes("\"Special Illustration Rare\""));
-});
-
-test("desirable terms select two or three random high-value signals", () => {
-  const terms = selectDesirableTerms(() => 0.25);
-  assert.ok(terms.length >= 2 && terms.length <= 3);
-  assert.ok(terms.every((term) => DESIRABLE_TERMS.includes(term)));
+  assert.match(query, /-case -pack -lots -bundle -custom -proxies -reproduction -rp/);
 });
 
 test("fallback covers a curated mix of sports and TCG categories", () => {
@@ -48,9 +30,9 @@ test("fallback covers a curated mix of sports and TCG categories", () => {
   assert.ok(FALLBACK_CATEGORIES.includes("Magic: The Gathering"));
 });
 
-test("hot-card floor rejects sub-$30 and missing-price listings", () => {
+test("hot-card floor rejects sub-$25 and missing-price listings", () => {
   assert.equal(meetsHotCardFloor({ currentBid: HOT_CARD_MIN_PRICE }), true);
-  assert.equal(meetsHotCardFloor({ currentBid: 29.99 }), false);
+  assert.equal(meetsHotCardFloor({ currentBid: 24.99 }), false);
   assert.equal(meetsHotCardFloor({ currentBid: 0 }), false);
 });
 
@@ -91,4 +73,26 @@ test("high-end quality signals outrank a quiet raw listing", () => {
 
   assert.ok(hotQualityScore(premiumAuction) > hotQualityScore(rawBuyItNow));
   assert.equal([rawBuyItNow, premiumAuction].sort(sortHotCards)[0].id, "premium");
+});
+
+test("feed ordering is always ending soonest before quality tie-breakers", () => {
+  const laterPremium = {
+    id: "later-premium",
+    title: "PSA 10 Auto 1/1",
+    listingType: "Auction",
+    bidCount: 20,
+    endTime: "2030-01-01T12:00:00.000Z",
+  };
+  const soonerRaw = {
+    id: "sooner-raw",
+    title: "Raw trading card",
+    listingType: "Auction",
+    bidCount: 0,
+    endTime: "2030-01-01T11:00:00.000Z",
+  };
+
+  assert.deepEqual([laterPremium, soonerRaw].sort(sortHotCards).map(({ id }) => id), [
+    "sooner-raw",
+    "later-premium",
+  ]);
 });

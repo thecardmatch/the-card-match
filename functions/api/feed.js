@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
-  meetsHotCardFloor, passesHotEngagement, selectDesirableTerms, sortHotCards,
+  meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -18,29 +18,24 @@ export async function onRequestGet({ env, request }) {
   const seen = new Set((params.get("seen") || "").split(",").filter(Boolean));
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
-  const mode = params.get("mode") || "for-you";
-  const endingSoonest = mode === "ending-soonest";
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
   try {
     const token = await getEbayToken(env);
-    const desirableTerms = selectDesirableTerms();
     const all = [];
     await Promise.all(selected.map(async (category) => {
       const cfg = CATEGORY_FEED_CONFIG[category];
       if (!cfg) return;
-       const searches = desirableTerms.map((keyword) =>
-         ebaySearch(
-           token,
-           buildHotSearchQuery(cfg.catTerm, keyword),
-           "endingSoonest",
-           `${hotPriceFilter()},buyingOptions:{AUCTION}`,
-           null,
-           cfg.categoryId,
-           Math.max(3, Math.ceil(count / selected.length)),
-           offset,
-         )
-       );
+        const searches = [ebaySearch(
+          token,
+          buildHotSearchQuery(cfg.catTerm),
+          "endingSoonest",
+          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+          null,
+          cfg.categoryId,
+          Math.max(20, Math.ceil(count / selected.length)),
+          offset,
+        )];
       for (const result of await Promise.allSettled(searches)) {
         if (result.status !== "fulfilled") continue;
         const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
