@@ -7,9 +7,12 @@ import {
   SPORTS_HOT_KEYWORDS,
   TCG_HOT_KEYWORDS,
   buildHotSearchQuery,
+  hotEngagementScore,
   hotPriceFilter,
   hotTermsForCategory,
+  isAuctionListing,
   meetsHotCardFloor,
+  passesHotEngagement,
   sortHotCards,
 } from "./hotCards.js";
 
@@ -42,12 +45,22 @@ test("hot-card floor rejects cheap and missing-price listings", () => {
   assert.equal(meetsHotCardFloor({ currentBid: 0 }), false);
 });
 
-test("engagement ordering prefers watchers, then bids, then desirability", () => {
+test("strict engagement gates remove stale auctions and BIN listings", () => {
+  assert.equal(isAuctionListing({ listingType: "Auction" }), true);
+  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 2 }), false);
+  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 3 }), true);
+  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 1, watchCount: 0 }), true);
+  assert.equal(passesHotEngagement({ listingType: "Buy It Now", bidCount: 0, watchCount: 4 }), false);
+  assert.equal(passesHotEngagement({ listingType: "Buy It Now", bidCount: 0, watchCount: 5 }), true);
+});
+
+test("engagement ordering uses three points per bid and two per watcher", () => {
   const cards = [
-    { id: "bids", watchCount: 0, bidCount: 4, engagementScore: 12 },
-    { id: "watchers", watchCount: 8, bidCount: 0, engagementScore: 16 },
-    { id: "quiet", watchCount: 0, bidCount: 0, engagementScore: 0, title: "football card" },
+    { id: "bids", watchCount: 0, bidCount: 3, engagementScore: 999 },
+    { id: "watchers", watchCount: 4, bidCount: 0, engagementScore: 0 },
+    { id: "quiet", watchCount: 0, bidCount: 0, title: "football card" },
   ];
+  assert.equal(hotEngagementScore(cards[0]), 9);
   cards.sort(sortHotCards);
-  assert.deepEqual(cards.map(({ id }) => id), ["watchers", "bids", "quiet"]);
+  assert.deepEqual(cards.map(({ id }) => id), ["bids", "watchers", "quiet"]);
 });

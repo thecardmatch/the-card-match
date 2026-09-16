@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
-  hotTermsForCategory, meetsHotCardFloor, sortHotCards,
+  hotTermsForCategory, meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -29,18 +29,28 @@ export async function onRequestGet({ env, request }) {
     await Promise.all(selected.map(async (category) => {
       const cfg = CATEGORY_FEED_CONFIG[category];
       if (!cfg) return;
-      const searches = hotTermsForCategory(category, termSeed).map((keyword) =>
-        ebaySearch(
-          token,
-          buildHotSearchQuery(cfg.catTerm, keyword),
-          endingSoonest ? "endingSoonest" : "bestMatch",
-          `${hotPriceFilter()}${endingSoonest ? ",buyingOptions:{AUCTION}" : ""}`,
-          null,
-          cfg.categoryId,
-          Math.max(3, Math.ceil(count / selected.length)),
-          0,
-        )
-      );
+       const searches = hotTermsForCategory(category, termSeed).flatMap((keyword) => [
+         ebaySearch(
+           token,
+           buildHotSearchQuery(cfg.catTerm, keyword),
+           "endingSoonest",
+           `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+           null,
+           cfg.categoryId,
+           Math.max(3, Math.ceil(count / selected.length)),
+           0,
+         ),
+         ebaySearch(
+           token,
+           buildHotSearchQuery(cfg.catTerm, keyword),
+           "bestMatch",
+           `${hotPriceFilter()},buyingOptions:{FIXED_PRICE}`,
+           null,
+           cfg.categoryId,
+           Math.max(3, Math.ceil(count / selected.length)),
+           0,
+         ),
+       ]);
       for (const result of await Promise.allSettled(searches)) {
         if (result.status !== "fulfilled") continue;
         const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
@@ -60,15 +70,8 @@ export async function onRequestGet({ env, request }) {
       ids.add(item.id)
     );
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(count * 2, 40)));
-    if (endingSoonest) {
-      enriched.sort((a, b) =>
-        new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000) ||
-        sortHotCards(a, b)
-      );
-    } else {
-      enriched.sort(sortHotCards);
-    }
-    return jsonResponse({ items: enriched.slice(0, count).map(canonicalFeedItem) });
+    const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
+    return jsonResponse({ items: engaged.slice(0, count).map(canonicalFeedItem) });
   } catch (error) {
     console.error("[feed]", error.message);
     return jsonResponse({ items: [], error: error.message }, 500);

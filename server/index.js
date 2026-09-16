@@ -7,7 +7,7 @@ import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
-  hotTermsForCategory, meetsHotCardFloor, sortHotCards,
+  hotTermsForCategory, meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
 
 if (!globalThis.WebSocket) {
@@ -473,7 +473,7 @@ function mapItem(item, selectedCats) {
     endTime:         item.itemEndDate || null,
     watchCount,
     bidCount,
-    engagementScore: (watchCount * 2) + (bidCount * 3),
+    engagementScore: (bidCount * 3) + (watchCount * 2),
     condition:       item.condition || "",
     listingType,
   };
@@ -485,21 +485,12 @@ function isSuppliesCategory(item) {
 
 // ─── Engagement helpers ───────────────────────────────────────────────────────
 /**
- * Split a mapped card array into engaged vs cold, return engaged-first.
- * Auction: keep if bidCount > 0 OR watchCount > 0
- * BIN:     keep if watchCount > 0
- * Safety:  if engaged count < minCount, append cold items at the end.
+ * Keep only listings with enough direct activity to be worth showing.
+ * Auctions need a bid or at least three watchers; BIN listings need five
+ * watchers so stale fixed-price inventory does not enter the deck.
  */
-function applyEngagementFilter(cards, minCount = 30) {
-  const engaged = cards.filter((c) =>
-    c.listingType === "Auction"
-      ? c.bidCount > 0 || c.watchCount > 0
-      : c.watchCount > 0
-  );
-  if (engaged.length >= minCount) return engaged;
-  const engagedIds = new Set(engaged.map((c) => c.id));
-  const cold = cards.filter((c) => !engagedIds.has(c.id));
-  return [...engaged, ...cold];
+function applyEngagementFilter(cards) {
+  return cards.filter(passesHotEngagement);
 }
 
 function sortByEngagement(cards) {
@@ -603,7 +594,7 @@ function applyEngagementDetails(items, details = []) {
     const bidCount = Number(detail.bidCount) || 0;
     return {
       ...item, viewCount, watchCount, bidCount, engagementDataAvailable: true,
-      engagementScore: viewCount + watchCount * 2 + bidCount * 3,
+      engagementScore: (bidCount * 3) + (watchCount * 2),
     };
   });
 }
@@ -1247,11 +1238,14 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const cfg = CATEGORY_FEED_CONFIG[cat];
         if (!cfg) return;
         const { catTerm, categoryId } = cfg;
-        const searches = hotTermsForCategory(cat, termSeed).map((keyword) =>
-          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), isEndingSoonest ? "endingSoonest" : "bestMatch",
-            `${hotPriceFilter()}${isEndingSoonest ? ",buyingOptions:{AUCTION}" : ""}`,
-            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0)
-        );
+        const searches = hotTermsForCategory(cat, termSeed).flatMap((keyword) => [
+          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), "endingSoonest",
+            `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0),
+          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), "bestMatch",
+            `${hotPriceFilter()},buyingOptions:{FIXED_PRICE}`,
+            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0),
+        ]);
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
@@ -1272,16 +1266,9 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       return true;
     });
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(returnCount * 2, 40)));
-    if (isEndingSoonest) {
-      enriched.sort((a, b) =>
-        new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000) ||
-        sortHotCards(a, b)
-      );
-    } else {
-      enriched.sort(sortHotCards);
-    }
-    console.log(`[feed] hot pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
-    return res.json({ items: enriched.slice(0, returnCount).map(canonicalFeedItem) });
+    const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
+    console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
+    return res.json({ items: engaged.slice(0, returnCount).map(canonicalFeedItem) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });

@@ -55,6 +55,22 @@ export function meetsHotCardFloor(item) {
   return itemPrice(item) >= HOT_CARD_MIN_PRICE;
 }
 
+export function isAuctionListing(item) {
+  return item?.listingType === "Auction" ||
+    (Array.isArray(item?.buyingOptions) && item.buyingOptions.includes("AUCTION"));
+}
+
+export function hotEngagementScore(item) {
+  return (Number(item?.bidCount) || 0) * 3 + (Number(item?.watchCount) || 0) * 2;
+}
+
+export function passesHotEngagement(item) {
+  const watchCount = Number(item?.watchCount) || 0;
+  const bidCount = Number(item?.bidCount) || 0;
+  if (isAuctionListing(item)) return bidCount > 0 || watchCount >= 3;
+  return watchCount >= 5;
+}
+
 export function canonicalFeedItem(item) {
   const title = item.name || item.title || "Trading card";
   const price = itemPrice(item);
@@ -85,8 +101,6 @@ export function hotKeywordScore(item) {
 }
 
 export function sortHotCards(a, b) {
-  return (Number(b.watchCount) || 0) - (Number(a.watchCount) || 0) ||
-    (Number(b.bidCount) || 0) - (Number(a.bidCount) || 0) ||
-    (Number(b.engagementScore) || 0) - (Number(a.engagementScore) || 0) ||
+  return hotEngagementScore(b) - hotEngagementScore(a) ||
     hotKeywordScore(b) - hotKeywordScore(a);
 }
