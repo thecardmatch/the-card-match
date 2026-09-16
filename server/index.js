@@ -6,7 +6,8 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
-  FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
+  FALLBACK_CATEGORIES, buildHotSearchQuery, buildStrictSearchQuery, canonicalFeedItem,
+  hotPriceFilter, hotSellerFeedbackFilter,
   meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
 
@@ -548,15 +549,15 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   if (offset > 0) params.set("offset", String(offset));
 
   if (q && q.trim()) {
-    let targetQuery = q.trim();
-    if (!targetQuery.toLowerCase().includes("-lot")) {
-      targetQuery += ` ${BULK_EXCLUSION}`;
-    }
+    const targetQuery = `${buildStrictSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
     params.set("q", targetQuery);
     console.log("[EBAY API QUERY]:", targetQuery, "| category:", categoryId ?? "any", "| filter:", filterStr ?? "none");
   }
 
-  if (filterStr) params.set("filter", filterStr);
+  const strictFilter = filterStr?.includes("sellerFeedbackScore:")
+    ? filterStr
+    : [filterStr, hotSellerFeedbackFilter()].filter(Boolean).join(",");
+  if (strictFilter) params.set("filter", strictFilter);
   if (aspectFilter) params.set("aspect_filter", aspectFilter);
 
   if (categoryId) {
@@ -669,9 +670,9 @@ app.get("/api/search", async (req, res) => {
     const token  = await getEbayToken();
     const catId  = category ? (CATEGORY_IDS[category] ?? null) : null;
 
-    const luxuryModifiers = " (auto, patch, rpa, \"1/1\", \"/1 \", /10, /25, /99, psa 10, bgs 9.5) -base -reprint -unopened";
+    const luxuryModifiers = "";
     const kw     = `${ebayKeyword}${luxuryModifiers}`;
-    const baseFilter = "price:[75..],priceCurrency:USD";
+    const baseFilter = `${hotPriceFilter()},${hotSellerFeedbackFilter()}`;
 
     const mapItemWithAbsoluteHD = (item, selectedCats) => {
       const forceMaximumHD = (url) => {
@@ -1396,7 +1397,8 @@ app.get("/api/playlist", async (req, res) => {
     };
 
     const { terms, categoryId, categoryHint, minPrice, skipModifiers } = def;
-    const baseFilterPrice = `price:[${minPrice}..],priceCurrency:USD`;
+    const playlistMinPrice = Math.max(25, Number(minPrice) || 0);
+    const baseFilterPrice = `price:[${playlistMinPrice.toFixed(2)}..],priceCurrency:USD,${hotSellerFeedbackFilter()}`;
     const hintCats = categoryHint ? [categoryHint] : [];
 
     // Dual-format parallel fetch: AUCTION (endingSoonest, 200) + FIXED_PRICE (bestMatch, 200)
@@ -1478,7 +1480,7 @@ app.get("/api/ebay/search", async (req, res) => {
     const {
       categories  = "",
       sort        = "bestMatch",
-      minPrice    = "75",
+      minPrice    = "25",
       maxPrice    = "",
       query       = "",
       conditions  = "",
@@ -1492,9 +1494,9 @@ app.get("/api/ebay/search", async (req, res) => {
     const sortVal = SORT_MAP[sort] || "bestMatch";
     const ebayOffset = parseInt(offset, 10) || 0;
 
-    const min = Math.max(75, parseFloat(minPrice) || 0);
+    const min = Math.max(25, parseFloat(minPrice) || 0);
     const max = maxPrice === "" || maxPrice === "10000" ? "" : maxPrice;
-    const filterParts = [`price:[${min}..${max}],priceCurrency:USD`];
+    const filterParts = [`price:[${min.toFixed(2)}..${max}],priceCurrency:USD`];
     const { conditionFilter, aspectFilter } = buildConditionParams(conds);
     if (conditionFilter) filterParts.push(conditionFilter);
     if (listingType === "Auction")      filterParts.push("buyingOptions:{AUCTION}");

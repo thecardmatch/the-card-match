@@ -1,21 +1,75 @@
 export const HOT_CARD_MIN_PRICE = 25;
+export const HOT_MIN_SELLER_FEEDBACK = 500;
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
   "Pokemon", "Magic: The Gathering",
 ];
 
-export const HOT_EXCLUSIONS = [
-  "-lot", "-repack", "-digital", "-binder", "-sleeves", "-box", "-break",
-  "-case", "-pack", "-lots", "-bundle", "-custom", "-proxies", "-reproduction", "-rp",
-].join(" ");
+export const SPORTS_HIGH_VALUE_TERMS = [
+  "PSA 10", "PSA 9", "BGS 9.5", "BGS 10", "SGC 10", "SGC 9.5", "CGC 10",
+  "Kaboom", "Downtown", "Color Blast", "Manga", "RPA", "Auto", "Patch",
+  "Logoman", "Superfractor", "National Treasures", "Flawless", "Immaculate",
+  "/99", "/25", "/10", "1/1",
+];
+
+export const TCG_HIGH_VALUE_TERMS = [
+  "PSA 10", "PSA 9", "BGS 10", "CGC 10", "SGC 10", "Alt Art",
+  "Special Illustration Rare", "SIR", "Illustration Rare", "Gold Star",
+  "Shadowless", "Enchanted", "Starlight Rare", "Serialized",
+];
+
+export const HOT_EXCLUSION_TERMS = [
+  "-base", "-raw", "-lot", "-repack", "-digital", "-binder", "-sleeves",
+  "-box", "-break", "-case", "-pack", "-lots", "-custom", "-proxies",
+  "-reproduction", "-rp", "-novelty", "-reprint", "-facsimile", "-printed",
+  "-copy", "-toppsNOW", "-mystery",
+];
+
+export const HOT_EXCLUSIONS = HOT_EXCLUSION_TERMS.join(" ");
+
+function quoteQueryTerm(term) {
+  return /\s/.test(term) ? `"${term}"` : term;
+}
+
+function isTcgQuery(query, categoryId = null) {
+  const normalized = String(query || "").toLowerCase();
+  return String(categoryId || "") === "183050" ||
+    /\b(?:pokemon|pokémon|magic(?:\s+the\s+gathering)?|mtg|yu-gi-oh|yugioh|one piece|lorcana|tcg)\b/i.test(normalized);
+}
+
+function hasAnyHighValueTerm(query, terms) {
+  const normalized = String(query || "").toLowerCase();
+  return terms.some((term) => normalized.includes(term.toLowerCase()));
+}
+
+export function highValueQueryStack(query, categoryId = null) {
+  const terms = isTcgQuery(query, categoryId) ? TCG_HIGH_VALUE_TERMS : SPORTS_HIGH_VALUE_TERMS;
+  if (hasAnyHighValueTerm(query, terms)) return "";
+  return `(${terms.map(quoteQueryTerm).join(", ")})`;
+}
+
+export function buildStrictSearchQuery(query, categoryId = null) {
+  const baseQuery = String(query || "").trim();
+  const qualityStack = highValueQueryStack(baseQuery, categoryId);
+  const existingExclusions = new Set(
+    (baseQuery.toLowerCase().match(/-\S+/g) || []).map((term) => term.toLowerCase())
+  );
+  const missingExclusions = HOT_EXCLUSION_TERMS
+    .filter((term) => !existingExclusions.has(term.toLowerCase()));
+  return [baseQuery, qualityStack, missingExclusions.join(" ")].filter(Boolean).join(" ");
+}
 
 export function buildHotSearchQuery(categoryTerm) {
-  return `${categoryTerm} ${HOT_EXCLUSIONS}`;
+  return buildStrictSearchQuery(categoryTerm);
 }
 
 export function hotPriceFilter() {
   return `price:[${HOT_CARD_MIN_PRICE.toFixed(2)}..],priceCurrency:USD`;
+}
+
+export function hotSellerFeedbackFilter() {
+  return `sellerFeedbackScore:[${HOT_MIN_SELLER_FEEDBACK}..]`;
 }
 
 export function itemPrice(item) {
@@ -51,14 +105,18 @@ export function hotQualityScore(item) {
   const isNumbered = /\b\d+\s*\/\s*(?:\d+|1)\b/.test(title) ||
     /(?:1\/1|\/(?:5|10|15|20|25|50|99)\b)/.test(title) ||
     tags.includes("numbered");
-  const isAuction = isAuctionListing(item);
+  const isPsa10 = /\bpsa\s*10\b|\bbgs\s*10\b|\bsgc\s*10\b|\bcgc\s*10\b/.test(`${title} ${grade}`);
+  const isPsa9OrBetter = /\bpsa\s*9\b|\bbgs\s*9\.5\b|\bsgc\s*9\.5\b|\bcgc\s*9\.5\b/.test(`${title} ${grade}`);
+  const isOneOfOne = /\b1\/1\b|\bone\s*of\s*one\b/.test(title);
+  const isRpa = /\brpa\b|\bre(?:d|deemed)\s+patch\s+auto\b/.test(title);
 
   return (
-    (isAuction ? 40 : 0) +
-    (isGraded ? 24 : 0) +
-    (isAuto ? 22 : 0) +
-    (isNumbered ? 22 : 0) +
-    hotEngagementScore(item)
+    hotEngagementScore(item) +
+    (isPsa10 ? 35 : isPsa9OrBetter ? 20 : isGraded ? 10 : 0) +
+    (isOneOfOne ? 30 : 0) +
+    (isRpa ? 25 : 0) +
+    (isAuto ? 8 : 0) +
+    (isNumbered ? 8 : 0)
   );
 }
 
@@ -93,9 +151,8 @@ export function canonicalFeedItem(item) {
 }
 
 export function sortHotCards(a, b) {
+  const scoreDifference = hotQualityScore(b) - hotQualityScore(a);
   const aEnd = a?.endTime ? new Date(a.endTime).getTime() : Number.POSITIVE_INFINITY;
   const bEnd = b?.endTime ? new Date(b.endTime).getTime() : Number.POSITIVE_INFINITY;
-  return aEnd - bEnd ||
-    hotQualityScore(b) - hotQualityScore(a) ||
-    hotEngagementScore(b) - hotEngagementScore(a);
+  return scoreDifference || aEnd - bEnd;
 }

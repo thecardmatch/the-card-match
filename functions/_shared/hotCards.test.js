@@ -5,9 +5,11 @@ import {
   HOT_CARD_MIN_PRICE,
   HOT_EXCLUSIONS,
   buildHotSearchQuery,
+  highValueQueryStack,
   hotEngagementScore,
   hotQualityScore,
   hotPriceFilter,
+  hotSellerFeedbackFilter,
   isAuctionListing,
   meetsHotCardFloor,
   passesHotEngagement,
@@ -16,10 +18,21 @@ import {
 
 test("hot searches enforce the $25 floor and strict exclusions", () => {
   assert.equal(hotPriceFilter(), "price:[25.00..],priceCurrency:USD");
+  assert.equal(hotSellerFeedbackFilter(), "sellerFeedbackScore:[500..]");
   const query = buildHotSearchQuery("football trading card");
-  assert.doesNotMatch(query, /PSA 10/);
+  assert.match(query, /PSA 10/);
+  assert.match(query, /PSA 9/);
   assert.match(query, /-lot -repack -digital -binder -sleeves -box/);
-  assert.match(query, /-case -pack -lots -bundle -custom -proxies -reproduction -rp/);
+  assert.match(query, /-case -pack -lots -custom -proxies -reproduction -rp/);
+  for (const exclusion of HOT_EXCLUSIONS.split(" ")) assert.match(query, new RegExp(`\\${exclusion}`));
+});
+
+test("TCG searches use the TCG chase and slab stack", () => {
+  const query = buildHotSearchQuery("pokemon trading card");
+  assert.match(query, /Alt Art/);
+  assert.match(query, /Special Illustration Rare/);
+  assert.match(query, /Shadowless/);
+  assert.equal(highValueQueryStack("pokemon trading card", "183050").includes("Downtown"), false);
 });
 
 test("fallback covers a curated mix of sports and TCG categories", () => {
@@ -75,7 +88,7 @@ test("high-end quality signals outrank a quiet raw listing", () => {
   assert.equal([rawBuyItNow, premiumAuction].sort(sortHotCards)[0].id, "premium");
 });
 
-test("feed ordering is always ending soonest before quality tie-breakers", () => {
+test("feed ordering prioritizes engagement and top-tier quality before ending time", () => {
   const laterPremium = {
     id: "later-premium",
     title: "PSA 10 Auto 1/1",
@@ -92,7 +105,7 @@ test("feed ordering is always ending soonest before quality tie-breakers", () =>
   };
 
   assert.deepEqual([laterPremium, soonerRaw].sort(sortHotCards).map(({ id }) => id), [
-    "sooner-raw",
     "later-premium",
+    "sooner-raw",
   ]);
 });
