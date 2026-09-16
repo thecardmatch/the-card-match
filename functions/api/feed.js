@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
-  hotTermsForCategory, meetsHotCardFloor, passesHotEngagement, sortHotCards,
+  meetsHotCardFloor, passesHotEngagement, selectDesirableTerms, sortHotCards,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -17,19 +17,19 @@ export async function onRequestGet({ env, request }) {
   const params = new URL(request.url).searchParams;
   const seen = new Set((params.get("seen") || "").split(",").filter(Boolean));
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
+  const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
   const mode = params.get("mode") || "for-you";
   const endingSoonest = mode === "ending-soonest";
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
-  const termSeed = seen.size;
-
   try {
     const token = await getEbayToken(env);
+    const desirableTerms = selectDesirableTerms();
     const all = [];
     await Promise.all(selected.map(async (category) => {
       const cfg = CATEGORY_FEED_CONFIG[category];
       if (!cfg) return;
-       const searches = hotTermsForCategory(category, termSeed).map((keyword) =>
+       const searches = desirableTerms.map((keyword) =>
          ebaySearch(
            token,
            buildHotSearchQuery(cfg.catTerm, keyword),
@@ -38,7 +38,7 @@ export async function onRequestGet({ env, request }) {
            null,
            cfg.categoryId,
            Math.max(3, Math.ceil(count / selected.length)),
-           0,
+           offset,
          )
        );
       for (const result of await Promise.allSettled(searches)) {

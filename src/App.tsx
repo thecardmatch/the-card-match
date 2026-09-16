@@ -251,6 +251,7 @@ function buildFeedUrl(
   passedIds:   Set<string>,
   mode:        "for-you" | "ending-soonest",
   preferences: Preferences | null,
+  offset:      number,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -262,6 +263,7 @@ function buildFeedUrl(
     `/api/deck` +
     `?seen=${encodeURIComponent(seen)}` +
     `&count=20` +
+    `&offset=${Math.max(0, offset)}` +
     `&mode=${mode}`
   );
   const selectedCategories = preferences?.selectedCategories ?? [];
@@ -280,6 +282,7 @@ export default function App() {
   const [liked,         setLiked]         = useState<TradingCard[]>(loadLocalWatchlist);
   const [prefs,         setPrefs]         = useState<Preferences | null>(loadPrefs);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentOffset, setCurrentOffset] = useState(0);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
@@ -308,6 +311,7 @@ export default function App() {
   const passedIdsTimestamps    = useRef<Map<string, string>>(_initPassedTs);   // id → ISO passedAt
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
+  const currentOffsetRef       = useRef(0);
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
@@ -343,17 +347,22 @@ export default function App() {
     setIsLoadingMore(true);
     if (!append) setAppMode("feed-loading");
     setFeedError(false);
+    let requestOffset = append ? currentOffsetRef.current + 20 : 0;
 
     try {
-      const url  = buildFeedUrl(
-        seenIds.current,
-        passedIds.current,
-        feedModeRef.current,
-        prefsRef.current,
-      );
-      let res  = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      let data = await res.json();
+      const fetchPage = async (pageOffset: number) => {
+        const response = await fetch(buildFeedUrl(
+          seenIds.current,
+          passedIds.current,
+          feedModeRef.current,
+          prefsRef.current,
+          pageOffset,
+        ));
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      };
+
+      let data = await fetchPage(requestOffset);
 
       // Recovery for browsers that were populated by the old onboarding bug:
       // those sessions may have every current listing in seenIds even though
@@ -363,31 +372,39 @@ export default function App() {
         console.warn("[feed] empty result with historical seen IDs — retrying without non-passed seen IDs");
         seenIds.current = new Set(passedIds.current);
         persistSeenIds(seenIds.current);
-        res = await fetch(buildFeedUrl(
-          seenIds.current,
-          passedIds.current,
-          feedModeRef.current,
-          prefsRef.current,
-        ));
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
+        data = await fetchPage(requestOffset);
       }
       // Client-side filter: remove anything in the permanent pass list that slipped
       // through the URL cap (passedIds can exceed the 200-ID seen param limit).
-      const incoming: TradingCard[] = (data.items ?? []).filter(
+      let incoming: TradingCard[] = (data.items ?? []).filter(
         (c: TradingCard) => !passedIds.current.has(c.id)
       );
+      // A page can contain only zero-bid auctions after server-side quality
+      // filtering. Advance through at most two empty pages so the UI does not
+      // stop at a false empty state.
+      for (let emptyPage = 0; incoming.length === 0 && emptyPage < 2; emptyPage += 1) {
+        requestOffset += 20;
+        data = await fetchPage(requestOffset);
+        incoming = (data.items ?? []).filter(
+          (c: TradingCard) => !passedIds.current.has(c.id)
+        );
+      }
 
       incoming.forEach((c) => seenIds.current.add(c.id));
       persistSeenIds(seenIds.current);   // keep across sessions
 
       if (append) {
-        setCards((prev) => [...prev, ...incoming]);
+        setCards((prev) => {
+          const existingIds = new Set(prev.map((card) => card.id));
+          return [...prev, ...incoming.filter((card) => !existingIds.has(card.id))];
+        });
       } else {
         setCards(incoming);
         setDeckResetKey((k) => k + 1);
         setAppMode("feed");
       }
+      currentOffsetRef.current = requestOffset;
+      setCurrentOffset(requestOffset);
     } catch (err) {
       console.warn("[feed] load failed:", err);
       if (!append) {

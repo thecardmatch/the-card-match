@@ -20,7 +20,8 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
   useEffect(() => setCurrentIndex(0), [resetKey]);
 
   useEffect(() => {
-    if (cards.length > 0 && currentIndex >= cards.length - 5 && !isLoadingMore) onNeedMore();
+    const remainingCards = cards.length - currentIndex;
+    if (cards.length > 0 && remainingCards < 5 && !isLoadingMore) onNeedMore();
   }, [currentIndex, cards.length, isLoadingMore, onNeedMore]);
 
   const handleSwipe = (direction: "left" | "right" | "up") => {

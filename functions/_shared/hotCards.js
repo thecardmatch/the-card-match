@@ -1,4 +1,9 @@
-export const HOT_CARD_MIN_PRICE = 50;
+export const HOT_CARD_MIN_PRICE = 30;
+
+export const DESIRABLE_TERMS = [
+  "PSA 10", "BGS 9.5", "Auto Patch", "Refractor", "Rookie RPA",
+  "Kaboom", "Downtown", "Alt Art", "1/1",
+];
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
@@ -21,6 +26,16 @@ export const HOT_EXCLUSIONS = [
 ].join(" ");
 
 const HOT_TERMS_PER_CATEGORY = 4;
+
+export function selectDesirableTerms(random = Math.random) {
+  const count = 2 + Math.floor(random() * 2);
+  const terms = [...DESIRABLE_TERMS];
+  for (let index = terms.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [terms[index], terms[swapIndex]] = [terms[swapIndex], terms[index]];
+  }
+  return terms.slice(0, count);
+}
 
 export function isTcgCategory(category) {
   return /pokemon|magic|yu-?gi-?oh|one piece|lorcana/i.test(String(category || ""));
@@ -58,7 +73,7 @@ export function isAuctionListing(item) {
 }
 
 export function hotEngagementScore(item) {
-  return Number(item?.bidCount) || 0;
+  return (Number(item?.bidCount) || 0) * 3 + (Number(item?.watchCount) || 0) * 2;
 }
 
 export function passesHotEngagement(item) {
@@ -95,6 +110,5 @@ export function hotKeywordScore(item) {
 }
 
 export function sortHotCards(a, b) {
-  return (Number(b.bidCount) || 0) - (Number(a.bidCount) || 0) ||
-    hotKeywordScore(b) - hotKeywordScore(a);
+  return hotEngagementScore(b) - hotEngagementScore(a);
 }
