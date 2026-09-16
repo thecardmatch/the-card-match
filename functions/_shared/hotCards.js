@@ -23,6 +23,10 @@ export const HIGH_END_TERMS = [
 
 const TCG_ONLY_TERMS = ["Alt Art", "Illustration Rare", "Holo"];
 const QUERY_STACK_SIZE = 8;
+export const SPORTS_LIVE_QUERY_STACK =
+  "(PSA OR BGS OR Auto OR Patch OR Refractor OR Rookie OR RPA OR Numbered)";
+export const TCG_LIVE_QUERY_STACK =
+  '(PSA OR "Alt Art" OR "Illustration Rare" OR Holo OR Prizm OR Serialized OR Gold OR Holofoil)';
 
 function quoteQueryTerm(term) {
   return /\s|\/|-/.test(term) ? `"${term}"` : term;
@@ -71,7 +75,7 @@ function simplifyQuery(query) {
 }
 
 export function highValueQueryStack(query, categoryId = null) {
-  return highValueQueryStacks(query, categoryId)[0];
+  return isTcgQuery(query, categoryId) ? TCG_LIVE_QUERY_STACK : SPORTS_LIVE_QUERY_STACK;
 }
 
 export function highValueQueryStacks(query, categoryId = null) {
