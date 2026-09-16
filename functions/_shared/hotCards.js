@@ -44,8 +44,8 @@ function queryStacks(terms) {
 export const SPORTS_QUERY_STACKS = queryStacks(HIGH_END_TERMS);
 export const TCG_QUERY_STACKS = queryStacks([...TCG_ONLY_TERMS, ...HIGH_END_TERMS]);
 // Kept as the first short stack for callers that need one query string.
-export const SPORTS_QUERY_STACK = SPORTS_QUERY_STACKS[0];
-export const TCG_QUERY_STACK = TCG_QUERY_STACKS[0];
+export const SPORTS_QUERY_STACK = SPORTS_LIVE_QUERY_STACK;
+export const TCG_QUERY_STACK = TCG_LIVE_QUERY_STACK;
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
@@ -83,7 +83,9 @@ export function highValueQueryStacks(query, categoryId = null) {
 }
 
 export function buildStrictSearchQuery(query, categoryId = null) {
-  return buildStrictSearchQueries(query, categoryId)[0];
+  const baseQuery = simplifyQuery(query);
+  const qualityStack = highValueQueryStack(baseQuery, categoryId);
+  return [baseQuery, qualityStack, HOT_EXCLUSIONS].filter(Boolean).join(" ");
 }
 
 export function buildStrictSearchQueries(query, categoryId = null) {
