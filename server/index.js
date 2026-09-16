@@ -473,7 +473,7 @@ function mapItem(item, selectedCats) {
     endTime:         item.itemEndDate || null,
     watchCount,
     bidCount,
-    engagementScore: (bidCount * 3) + (watchCount * 2),
+    engagementScore: bidCount,
     condition:       item.condition || "",
     listingType,
   };
@@ -594,7 +594,7 @@ function applyEngagementDetails(items, details = []) {
     const bidCount = Number(detail.bidCount) || 0;
     return {
       ...item, viewCount, watchCount, bidCount, engagementDataAvailable: true,
-      engagementScore: (bidCount * 3) + (watchCount * 2),
+      engagementScore: bidCount,
     };
   });
 }
@@ -1238,14 +1238,11 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const cfg = CATEGORY_FEED_CONFIG[cat];
         if (!cfg) return;
         const { catTerm, categoryId } = cfg;
-        const searches = hotTermsForCategory(cat, termSeed).flatMap((keyword) => [
+        const searches = hotTermsForCategory(cat, termSeed).map((keyword) =>
           ebaySearch(token, buildHotSearchQuery(catTerm, keyword), "endingSoonest",
             `${hotPriceFilter()},buyingOptions:{AUCTION}`,
-            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0),
-          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), "bestMatch",
-            `${hotPriceFilter()},buyingOptions:{FIXED_PRICE}`,
-            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0),
-        ]);
+            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0)
+        );
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;

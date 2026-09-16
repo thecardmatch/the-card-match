@@ -147,7 +147,7 @@ export function applyEngagementDetails(items, details = []) {
       watchCount,
       bidCount,
       engagementDataAvailable: true,
-       engagementScore: (bidCount * 3) + (watchCount * 2),
+       engagementScore: bidCount,
     };
   });
 }
@@ -484,7 +484,7 @@ export function mapFeedItem(item, catHints = []) {
     bidCount,
     viewCount,
     engagementDataAvailable,
-    engagementScore: (bidCount * 3) + (watchCount * 2),
+    engagementScore: bidCount,
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
     // ── Multi-attribute metadata ──────────────────────────────────────────────

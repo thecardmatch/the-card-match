@@ -29,7 +29,7 @@ export async function onRequestGet({ env, request }) {
     await Promise.all(selected.map(async (category) => {
       const cfg = CATEGORY_FEED_CONFIG[category];
       if (!cfg) return;
-       const searches = hotTermsForCategory(category, termSeed).flatMap((keyword) => [
+       const searches = hotTermsForCategory(category, termSeed).map((keyword) =>
          ebaySearch(
            token,
            buildHotSearchQuery(cfg.catTerm, keyword),
@@ -39,18 +39,8 @@ export async function onRequestGet({ env, request }) {
            cfg.categoryId,
            Math.max(3, Math.ceil(count / selected.length)),
            0,
-         ),
-         ebaySearch(
-           token,
-           buildHotSearchQuery(cfg.catTerm, keyword),
-           "bestMatch",
-           `${hotPriceFilter()},buyingOptions:{FIXED_PRICE}`,
-           null,
-           cfg.categoryId,
-           Math.max(3, Math.ceil(count / selected.length)),
-           0,
-         ),
-       ]);
+         )
+       );
       for (const result of await Promise.allSettled(searches)) {
         if (result.status !== "fulfilled") continue;
         const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));

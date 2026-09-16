@@ -1,4 +1,4 @@
-export const HOT_CARD_MIN_PRICE = 25;
+export const HOT_CARD_MIN_PRICE = 50;
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
@@ -6,21 +6,18 @@ export const FALLBACK_CATEGORIES = [
 ];
 
 export const SPORTS_HOT_KEYWORDS = [
-  "PSA", "BGS", "SGC", "Auto", "RPA", "Patch", "Refractor", "Prizm",
-  "/99", "/25", "1/1", "RC", "Rookie",
+  "PSA 10", "BGS 9.5", "SGC 10", "Auto", "RPA", "Patch",
+  "Kaboom", "Downtown", "Refractor", "/99", "/25", "\"1/1\"",
 ];
 
 export const TCG_HOT_KEYWORDS = [
-  "PSA", "BGS", "CGC", "Alt Art", "Secret Rare", "Shadowless", "Holo",
+  "PSA 10", "BGS 10", "CGC 10", "\"Alt Art\"",
+  "\"Special Illustration Rare\"", "\"Gold Star\"", "Shadowless",
 ];
 
 export const HOT_EXCLUSIONS = [
-  "-lot", "-lots", "-repack", "-digital", "-binder", "-sleeves", "-box",
-  "-break", "-case", "-pack", "-custom", "-proxies", "-reproduction", "-rp",
-  "-code", "-playmat", "-coin", "-dice", "-storage", "-display", "-stand",
-  "-bundle", "-helmet", "-pennant", "-poster", "-bobblehead", "-figurine",
-  "-plaque", "-jersey", '-"signed ball"', '-"cut signature"', "-photograph",
-  "-photo", "-lithograph", "-ticket", "-program",
+  "-lot", "-repack", "-digital", "-binder", "-sleeves", "-box", "-break",
+  "-case", "-pack", "-lots", "-custom", "-proxies", "-reproduction", "-rp",
 ].join(" ");
 
 const HOT_TERMS_PER_CATEGORY = 4;
@@ -61,14 +58,11 @@ export function isAuctionListing(item) {
 }
 
 export function hotEngagementScore(item) {
-  return (Number(item?.bidCount) || 0) * 3 + (Number(item?.watchCount) || 0) * 2;
+  return Number(item?.bidCount) || 0;
 }
 
 export function passesHotEngagement(item) {
-  const watchCount = Number(item?.watchCount) || 0;
-  const bidCount = Number(item?.bidCount) || 0;
-  if (isAuctionListing(item)) return bidCount > 0 || watchCount >= 3;
-  return watchCount >= 5;
+  return !isAuctionListing(item) || (Number(item?.bidCount) || 0) >= 1;
 }
 
 export function canonicalFeedItem(item) {
@@ -101,6 +95,6 @@ export function hotKeywordScore(item) {
 }
 
 export function sortHotCards(a, b) {
-  return hotEngagementScore(b) - hotEngagementScore(a) ||
+  return (Number(b.bidCount) || 0) - (Number(a.bidCount) || 0) ||
     hotKeywordScore(b) - hotKeywordScore(a);
 }
