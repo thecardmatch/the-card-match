@@ -20,7 +20,7 @@ test("engagement details apply available attention counts", () => {
   assert.equal(item.engagementDataAvailable, true);
   assert.equal(item.watchCount, 7);
   assert.equal(item.bidCount, 3);
-  assert.equal(item.engagementScore, 23);
+  assert.equal(item.engagementScore, 3);
 });
 
 test("explicit zero engagement is available and suppresses fallback", () => {

@@ -16,19 +16,19 @@ import {
   sortHotCards,
 } from "./hotCards.js";
 
-test("hot searches enforce the $25 floor and aggressive exclusions", () => {
-  assert.equal(hotPriceFilter(), "price:[25.00..],priceCurrency:USD");
-  const query = buildHotSearchQuery("football trading card", "PSA");
+test("hot searches enforce the $50 floor and strict exclusions", () => {
+  assert.equal(hotPriceFilter(), "price:[50.00..],priceCurrency:USD");
+  const query = buildHotSearchQuery("football trading card", "PSA 10");
   assert.match(query, /football trading card PSA/);
-  assert.match(query, /-lot -lots -repack -digital/);
-  assert.match(query, /-proxies -reproduction -rp -code/);
-  assert.match(query, /-"signed ball"/);
+  assert.match(query, /-lot -repack -digital -binder -sleeves -box/);
+  assert.match(query, /-case -pack -lots -custom -proxies -reproduction -rp/);
 });
 
 test("sports and TCG hot terms rotate through the complete signal sets", () => {
   assert.deepEqual(hotTermsForCategory("Football", 0), SPORTS_HOT_KEYWORDS.slice(0, 4));
   assert.deepEqual(hotTermsForCategory("Pokemon", 0), TCG_HOT_KEYWORDS.slice(0, 4));
-  assert.ok(hotTermsForCategory("Football", SPORTS_HOT_KEYWORDS.length).includes("PSA"));
+  assert.ok(SPORTS_HOT_KEYWORDS.includes("Kaboom"));
+  assert.ok(TCG_HOT_KEYWORDS.includes("\"Special Illustration Rare\""));
 });
 
 test("fallback covers a curated mix of sports and TCG categories", () => {
@@ -39,28 +39,25 @@ test("fallback covers a curated mix of sports and TCG categories", () => {
   assert.ok(FALLBACK_CATEGORIES.includes("Magic: The Gathering"));
 });
 
-test("hot-card floor rejects cheap and missing-price listings", () => {
+test("hot-card floor rejects sub-$50 and missing-price listings", () => {
   assert.equal(meetsHotCardFloor({ currentBid: HOT_CARD_MIN_PRICE }), true);
-  assert.equal(meetsHotCardFloor({ currentBid: 24.99 }), false);
+  assert.equal(meetsHotCardFloor({ currentBid: 49.99 }), false);
   assert.equal(meetsHotCardFloor({ currentBid: 0 }), false);
 });
 
-test("strict engagement gates remove stale auctions and BIN listings", () => {
+test("active-auction gate rejects listings without a bid", () => {
   assert.equal(isAuctionListing({ listingType: "Auction" }), true);
-  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 2 }), false);
-  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 3 }), true);
+  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 100 }), false);
   assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 1, watchCount: 0 }), true);
-  assert.equal(passesHotEngagement({ listingType: "Buy It Now", bidCount: 0, watchCount: 4 }), false);
-  assert.equal(passesHotEngagement({ listingType: "Buy It Now", bidCount: 0, watchCount: 5 }), true);
 });
 
-test("engagement ordering uses three points per bid and two per watcher", () => {
+test("candidate ordering uses bid count and ignores watchers", () => {
   const cards = [
     { id: "bids", watchCount: 0, bidCount: 3, engagementScore: 999 },
-    { id: "watchers", watchCount: 4, bidCount: 0, engagementScore: 0 },
-    { id: "quiet", watchCount: 0, bidCount: 0, title: "football card" },
+    { id: "watchers", watchCount: 100, bidCount: 2, engagementScore: 0 },
+    { id: "quiet", watchCount: 1000, bidCount: 0, title: "football card" },
   ];
-  assert.equal(hotEngagementScore(cards[0]), 9);
+  assert.equal(hotEngagementScore(cards[0]), 3);
   cards.sort(sortHotCards);
   assert.deepEqual(cards.map(({ id }) => id), ["bids", "watchers", "quiet"]);
 });
