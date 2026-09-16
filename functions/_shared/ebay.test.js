@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyEngagementDetails, ebaySearch } from "./ebay.js";
-import { SPORTS_LIVE_QUERY_STACK } from "./hotCards.js";
 
 const unavailable = {
   id: "v1|1|0",
@@ -63,12 +62,12 @@ test("physical-card exclusions remain negative eBay phrases", async () => {
   assert.doesNotMatch(query, /"-cut signature"/);
 });
 
-test("empty primary searches retry with the compact category-plus-high-end query", async () => {
+test("primary high-end terms use separate eBay searches and retry broadly", async () => {
   const originalFetch = globalThis.fetch;
   const requestedQueries = [];
   globalThis.fetch = async (url) => {
     requestedQueries.push(new URL(String(url)).searchParams.get("q") || "");
-    const items = requestedQueries.length === 2
+    const items = requestedQueries.length === 5
       ? [{ itemId: "v1|1|fallback" }]
       : [];
     return new Response(JSON.stringify({ itemSummaries: items }), { status: 200 });
@@ -89,9 +88,11 @@ test("empty primary searches retry with the compact category-plus-high-end query
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(requestedQueries.length, 2);
-  assert.match(requestedQueries[0], /PSA OR BGS OR Auto OR Patch OR Refractor/);
-  assert.equal(requestedQueries[0].includes(SPORTS_LIVE_QUERY_STACK), true);
-  assert.match(requestedQueries[1], /^football \(/);
-  assert.doesNotMatch(requestedQueries[1], /National Treasures/);
+  assert.equal(requestedQueries.length, 5);
+  assert.deepEqual(requestedQueries.slice(0, 4).map((query) => query.split(" ")[3]), [
+    "PSA", "Auto", "Patch", "Rookie",
+  ]);
+  assert.ok(requestedQueries.slice(0, 4).every((query) => !/\bOR\b/.test(query)));
+  assert.match(requestedQueries[4], /^football trading card /);
+  assert.doesNotMatch(requestedQueries[4], /National Treasures/);
 });

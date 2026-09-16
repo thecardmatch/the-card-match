@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
-  FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQuery, canonicalFeedItem,
+  FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
   meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
@@ -577,16 +577,34 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
     return res.json();
   }
 
-  const primaryQuery = q?.trim()
-    ? `${buildStrictSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`
-    : "";
-  const data = await requestSearch(primaryQuery);
+  const primaryQueries = q?.trim()
+    ? buildStrictSearchQueries(q, categoryId)
+      .slice(0, 4)
+      .map((query) => `${query} ${BULK_EXCLUSION}`)
+    : [""];
+  const data = mergeEbaySearchResponses(await Promise.all(primaryQueries.map(requestSearch)));
   if (!data?.itemSummaries?.length && q?.trim()) {
     const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
     console.log("[ebay] primary search empty; retrying broadened query");
     return (await requestSearch(fallbackQuery)) || { itemSummaries: [], total: 0 };
   }
   return data || { itemSummaries: [], total: 0 };
+}
+
+function mergeEbaySearchResponses(responses) {
+  const validResponses = responses.filter(Boolean);
+  const firstResponse = validResponses[0] || {};
+  const itemSummaries = [];
+  const seenIds = new Set();
+  for (const response of validResponses) {
+    for (const item of response.itemSummaries || []) {
+      const id = item.itemId || item.itemWebUrl || item.title;
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+      itemSummaries.push(item);
+    }
+  }
+  return { ...firstResponse, itemSummaries, total: itemSummaries.length };
 }
 
 const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];
@@ -1247,7 +1265,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const { catTerm, categoryId } = cfg;
         const searches = [ebaySearch(
           token,
-          buildHotSearchQuery(catTerm),
+           catTerm,
           "endingSoonest",
           `${hotPriceFilter()},buyingOptions:{AUCTION}`,
           null,

@@ -4,7 +4,7 @@ import {
 } from "../_shared/ebay.js";
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
-  FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
+  FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
   meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../_shared/hotCards.js";
 
@@ -42,7 +42,7 @@ export async function onRequestGet({ env, request }) {
       if (!cfg) return;
         const searches = [ebaySearch(
           token,
-          buildHotSearchQuery(cfg.catTerm),
+          cfg.catTerm,
           "endingSoonest",
           `${hotPriceFilter()},buyingOptions:{AUCTION}`,
           null,

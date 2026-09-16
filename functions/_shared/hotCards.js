@@ -23,10 +23,8 @@ export const HIGH_END_TERMS = [
 
 const TCG_ONLY_TERMS = ["Alt Art", "Illustration Rare", "Holo"];
 const QUERY_STACK_SIZE = 8;
-export const SPORTS_LIVE_QUERY_STACK =
-  "(PSA OR BGS OR Auto OR Patch OR Refractor OR Rookie OR RPA OR Numbered)";
-export const TCG_LIVE_QUERY_STACK =
-  '(PSA OR "Alt Art" OR "Illustration Rare" OR Holo OR Prizm OR Serialized OR Gold OR Holofoil)';
+export const SPORTS_LIVE_QUERY_TERMS = ["PSA", "Auto", "Patch", "Rookie"];
+export const TCG_LIVE_QUERY_TERMS = ["PSA", "Alt Art", "Illustration Rare", "Holo"];
 
 function quoteQueryTerm(term) {
   return /\s|\/|-/.test(term) ? `"${term}"` : term;
@@ -43,9 +41,9 @@ function queryStacks(terms) {
 
 export const SPORTS_QUERY_STACKS = queryStacks(HIGH_END_TERMS);
 export const TCG_QUERY_STACKS = queryStacks([...TCG_ONLY_TERMS, ...HIGH_END_TERMS]);
-// Kept as the first short stack for callers that need one query string.
-export const SPORTS_QUERY_STACK = SPORTS_LIVE_QUERY_STACK;
-export const TCG_QUERY_STACK = TCG_LIVE_QUERY_STACK;
+// Kept as the first term for callers that need one query string.
+export const SPORTS_QUERY_STACK = SPORTS_LIVE_QUERY_TERMS[0];
+export const TCG_QUERY_STACK = TCG_LIVE_QUERY_TERMS[0];
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
@@ -75,7 +73,11 @@ function simplifyQuery(query) {
 }
 
 export function highValueQueryStack(query, categoryId = null) {
-  return isTcgQuery(query, categoryId) ? TCG_LIVE_QUERY_STACK : SPORTS_LIVE_QUERY_STACK;
+  return highValueQueryTerms(query, categoryId)[0];
+}
+
+export function highValueQueryTerms(query, categoryId = null) {
+  return isTcgQuery(query, categoryId) ? TCG_LIVE_QUERY_TERMS : SPORTS_LIVE_QUERY_TERMS;
 }
 
 export function highValueQueryStacks(query, categoryId = null) {
@@ -90,8 +92,8 @@ export function buildStrictSearchQuery(query, categoryId = null) {
 
 export function buildStrictSearchQueries(query, categoryId = null) {
   const baseQuery = simplifyQuery(query);
-  return highValueQueryStacks(baseQuery, categoryId)
-    .map((qualityStack) => [baseQuery, qualityStack, HOT_EXCLUSIONS].filter(Boolean).join(" "));
+  return highValueQueryTerms(baseQuery, categoryId)
+    .map((qualityTerm) => [baseQuery, quoteQueryTerm(qualityTerm), HOT_EXCLUSIONS].filter(Boolean).join(" "));
 }
 
 const CATEGORY_SEEDS = {
@@ -109,7 +111,7 @@ export function buildFallbackSearchQuery(query, categoryId = null) {
     (normalized.match(/\b(?:pokemon|pokémon|baseball|basketball|football|hockey|soccer|formula\s+1|f1|wwe|mma|golf|boxing|yu-gi-oh|yugioh|one piece|lorcana)\b/i)?.[0] ||
       normalized.split(/\s+/).slice(0, 3).join(" ") ||
       "trading card");
-  return [categorySeed, highValueQueryStack(categorySeed, categoryId), HOT_EXCLUSIONS]
+  return [categorySeed, "trading card", HOT_EXCLUSIONS]
     .filter(Boolean)
     .join(" ");
 }

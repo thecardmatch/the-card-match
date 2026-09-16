@@ -24,17 +24,18 @@ test("hot searches enforce the $25 floor and strict exclusions", () => {
   assert.equal(hotPriceFilter(), "price:[25.00..],priceCurrency:USD");
   assert.equal(hotSellerFeedbackFilter(), "sellerFeedbackScore:[500..]");
   const query = buildHotSearchQuery("football trading card");
-  assert.equal(query.split("(").length - 1, 1);
-  assert.match(query, /\(PSA OR BGS OR Auto OR Patch OR Refractor OR Rookie OR RPA OR Numbered\)/);
+  assert.doesNotMatch(query, /\bOR\b/);
+  assert.match(query, /football trading card PSA /);
   assert.match(query, /-lot -repack -digital -binder -sleeves -box/);
   assert.match(query, /-case -pack -lots -custom -proxies -reproduction -rp/);
   for (const exclusion of HOT_EXCLUSIONS.split(" ")) assert.match(query, new RegExp(`\\${exclusion}`));
-  assert.match(buildFallbackSearchQuery("football trading card", "215"), /^football \(/);
+  assert.match(buildFallbackSearchQuery("football trading card", "215"), /^football trading card /);
 });
 
 test("TCG searches use the TCG chase and slab stack", () => {
   const query = buildHotSearchQuery("pokemon trading card");
-  assert.match(query, /\(PSA OR "Alt Art" OR "Illustration Rare" OR Holo OR Prizm OR Serialized OR Gold OR Holofoil\)/);
+  assert.doesNotMatch(query, /\bOR\b/);
+  assert.match(query, /pokemon trading card PSA /);
   assert.equal(highValueQueryStack("pokemon trading card", "183050"), TCG_QUERY_STACK);
 });
 
@@ -44,7 +45,7 @@ test("all approved high-end terms are represented across short query stacks", ()
   for (const term of HIGH_END_TERMS) {
     assert.match(stacks, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  assert.equal(query.split("(").length - 1, 1);
+  assert.doesNotMatch(query, /\bOR\b/);
 });
 
 test("fallback covers a curated mix of sports and TCG categories", () => {

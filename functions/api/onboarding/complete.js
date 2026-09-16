@@ -150,7 +150,7 @@ export async function onRequestPost(context) {
         if (!cfg) return;
         const searches = [ebaySearch(
           token,
-          buildHotSearchQuery(cfg.catTerm),
+           cfg.catTerm,
           "endingSoonest",
           `${hotPriceFilter()},buyingOptions:{AUCTION}`,
           null,
