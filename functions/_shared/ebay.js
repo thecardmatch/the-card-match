@@ -9,6 +9,11 @@
  *  - KV token cache  instead of module-level _token variable
  *  - No `fs`, no `express`
  */
+import {
+  buildFallbackSearchQuery,
+  buildStrictSearchQuery,
+  hotSellerFeedbackFilter,
+} from "./hotCards.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 export const EPN_CAMP_ID = "5339150952";
@@ -91,41 +96,55 @@ export async function getEbayToken(env) {
 // Always keep searches to individual physical cards, even when callers supply
 // their own query text.
 const BULK_EXCLUSION =
-  "-lot -repack -digital -binder -sleeves -box -break -case -pack -bundle " + CARD_ONLY;
+  CARD_ONLY;
 
 export async function ebaySearch(
   token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0
 ) {
-  const params = new URLSearchParams({
-    sort: sortVal,
-    limit: String(limit),
-    fieldgroups: "MATCHING_ITEMS,EXTENDED",
-  });
-  if (offset > 0) params.set("offset", String(offset));
+  const strictFilter = filterStr?.includes("sellerFeedbackScore:")
+    ? filterStr
+    : [filterStr, hotSellerFeedbackFilter()].filter(Boolean).join(",");
 
-  if (q && q.trim()) {
-    let tq = q.trim();
-    if (!tq.toLowerCase().includes("-lot")) tq += ` ${BULK_EXCLUSION}`;
-    params.set("q", tq);
-    console.log("[EBAY API QUERY]:", tq, "| category:", categoryId ?? "any", "| filter:", filterStr ?? "none");
-  }
-  if (filterStr)    params.set("filter", filterStr);
-  if (aspectFilter) params.set("aspect_filter", aspectFilter);
-  if (categoryId)   params.set("category_ids", categoryId);
+  async function requestSearch(targetQuery) {
+    const params = new URLSearchParams({
+      sort: sortVal,
+      limit: String(limit),
+      fieldgroups: "MATCHING_ITEMS,EXTENDED",
+    });
+    if (offset > 0) params.set("offset", String(offset));
+    if (targetQuery) params.set("q", targetQuery);
+    if (strictFilter) params.set("filter", strictFilter);
+    if (aspectFilter) params.set("aspect_filter", aspectFilter);
+    if (categoryId) params.set("category_ids", categoryId);
 
-  const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization:              `Bearer ${token}`,
-      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
-    },
-  });
-  if (!res.ok) {
-    console.error("[ebay] search error", res.status, (await res.text()).slice(0, 200));
-    return { itemSummaries: [], total: 0 };
+    console.log("[EBAY API QUERY]:", targetQuery || "(no query)", "| category:", categoryId ?? "any", "| filter:", strictFilter ?? "none");
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization:              `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      },
+    });
+    if (!res.ok) {
+      console.error("[ebay] search error", res.status, (await res.text()).slice(0, 200));
+      return null;
+    }
+    return res.json();
   }
-  return res.json();
+
+  const primaryQuery = q?.trim()
+    ? `${buildStrictSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`
+    : "";
+  let data = await requestSearch(primaryQuery);
+  if (!data?.itemSummaries?.length && q?.trim()) {
+    const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
+    if (fallbackQuery !== primaryQuery) {
+      console.log("[ebay] primary search empty; retrying broadened query");
+      data = await requestSearch(fallbackQuery);
+    }
+  }
+  return data || { itemSummaries: [], total: 0 };
 }
 
 const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];

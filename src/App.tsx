@@ -249,11 +249,13 @@ function getInitialMode(): AppMode {
  *
  * Passed IDs are given highest dedup priority in the `seen` param — they fill
  * their slots first (up to 200), then remaining slots go to recent seen IDs.
- * Client-side filtering in loadFeed() is a second line of defence for overflow.
+ * Session swiped IDs are sent separately so the server can enforce the same
+ * no-repeat rule even when the legacy persisted seen list is capped.
  */
 function buildFeedUrl(
   seenIds:     Set<string>,
   passedIds:   Set<string>,
+  swipedIds:   Set<string>,
   preferences: Preferences | null,
   offset:      number,
 ): string {
@@ -266,6 +268,7 @@ function buildFeedUrl(
   let url = (
     `/api/deck` +
     `?seen=${encodeURIComponent(seen)}` +
+    `&swipedIds=${encodeURIComponent(JSON.stringify([...swipedIds].slice(-300)))}` +
     `&count=20` +
     `&offset=${Math.max(0, offset)}`
   );
@@ -289,6 +292,7 @@ export default function App() {
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
+  const [swipedIds,     setSwipedIds]     = useState<string[]>([]);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountUser, setAccountUser] = useState<{ email?: string; name?: string; picture?: string } | null>(() => {
@@ -299,6 +303,7 @@ export default function App() {
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
+  const swipedIdsRef           = useRef<Set<string>>(new Set());               // current browser session only
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
   // authenticated user ID.  At mount they're initialised with the anonymous
   // bucket (empty on first visit).  They are reset to the correct user-scoped
@@ -351,6 +356,7 @@ export default function App() {
         const response = await fetch(buildFeedUrl(
           seenIds.current,
           passedIds.current,
+          new Set([...swipedIds, ...swipedIdsRef.current]),
           prefsRef.current,
           pageOffset,
         ));
@@ -1296,8 +1302,14 @@ export default function App() {
   }
 
   // ── Swipe handlers ──────────────────────────────────────────────────────────
+  function markCardSwiped(cardId: string) {
+    if (swipedIdsRef.current.has(cardId)) return;
+    swipedIdsRef.current.add(cardId);
+    setSwipedIds((previous) => previous.includes(cardId) ? previous : [...previous, cardId]);
+  }
 
   function handleLike(card: TradingCard) {
+    markCardSwiped(card.id);
     setLiked((prev) => {
       const next = prev.some((c) => c.id === card.id) ? prev : [card, ...prev];
       localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
@@ -1308,6 +1320,7 @@ export default function App() {
   }
 
   function handlePass(card: TradingCard) {
+    markCardSwiped(card.id);
     // Record the pass timestamp before adding to the set so persistPassedIds
     // can write { id, passedAt } entries with accurate creation times.
     const passedAt = new Date().toISOString();
@@ -1325,6 +1338,7 @@ export default function App() {
   }
 
   function handleBuy(card: TradingCard) {
+    markCardSwiped(card.id);
     recordFeedSwipe(card, "BUY");
     const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
     if (!url) return;

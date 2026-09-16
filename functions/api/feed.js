@@ -13,9 +13,23 @@ export { _cors as onRequestOptions };
 const normalizeCategory = (value) => CATEGORY_TAG_MAP[String(value || "")
   .trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")];
 
+function parseIds(params, name) {
+  return params.getAll(name).flatMap((value) => {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through to comma-separated legacy format */ }
+    return value.split(",");
+  }).map(String).map((id) => id.trim()).filter(Boolean);
+}
+
 export async function onRequestGet({ env, request }) {
   const params = new URL(request.url).searchParams;
-  const seen = new Set((params.get("seen") || "").split(",").filter(Boolean));
+  const seen = new Set([
+    ...parseIds(params, "seen"),
+    ...parseIds(params, "seenIds"),
+    ...parseIds(params, "swipedIds"),
+  ]);
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);

@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
-  FALLBACK_CATEGORIES, buildHotSearchQuery, buildStrictSearchQuery, canonicalFeedItem,
+  FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQuery, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
   meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
@@ -508,7 +508,6 @@ const SORT_MAP = {
 };
 
 const BULK_EXCLUSION = [
-  "-lot", "-repack", "-digital", "-binder", "-sleeves", "-box", "-break", "-case", "-pack", "-bundle",
   "-helmet", "-pennant", "-poster", "-bobblehead", "-figurine", "-plaque", "-jersey",
   "-\"signed ball\"", "-\"cut signature\"", "-photograph", "-photo", "-lithograph", "-ticket", "-program",
 ].join(" ");
@@ -545,39 +544,51 @@ function passesGradeFilter(gradeStr, filter) {
 
 // ─── Core eBay Browse API Call Engine ─────────────────────────────────────────
 async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0) {
-  const params = new URLSearchParams({ sort: sortVal, limit: String(limit), fieldgroups: "MATCHING_ITEMS,EXTENDED" });
-  if (offset > 0) params.set("offset", String(offset));
-
-  if (q && q.trim()) {
-    const targetQuery = `${buildStrictSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
-    params.set("q", targetQuery);
-    console.log("[EBAY API QUERY]:", targetQuery, "| category:", categoryId ?? "any", "| filter:", filterStr ?? "none");
-  }
-
   const strictFilter = filterStr?.includes("sellerFeedbackScore:")
     ? filterStr
     : [filterStr, hotSellerFeedbackFilter()].filter(Boolean).join(",");
-  if (strictFilter) params.set("filter", strictFilter);
-  if (aspectFilter) params.set("aspect_filter", aspectFilter);
 
-  if (categoryId) {
-    params.set("category_ids", categoryId);
+  async function requestSearch(targetQuery) {
+    const params = new URLSearchParams({
+      sort: sortVal,
+      limit: String(limit),
+      fieldgroups: "MATCHING_ITEMS,EXTENDED",
+    });
+    if (offset > 0) params.set("offset", String(offset));
+    if (targetQuery) params.set("q", targetQuery);
+    if (strictFilter) params.set("filter", strictFilter);
+    if (aspectFilter) params.set("aspect_filter", aspectFilter);
+    if (categoryId) params.set("category_ids", categoryId);
+
+    console.log("[EBAY API QUERY]:", targetQuery || "(no query)", "| category:", categoryId ?? "any", "| filter:", strictFilter ?? "none");
+    const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization:              `Bearer ${token}`,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+        "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+      },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("[ebay] search error", res.status, body.slice(0, 200));
+      return null;
+    }
+    return res.json();
   }
 
-  const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization:              `Bearer ${token}`,
-      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.error("[ebay] search error", res.status, body.slice(0, 200));
-    return { itemSummaries: [], total: 0 };
+  const primaryQuery = q?.trim()
+    ? `${buildStrictSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`
+    : "";
+  let data = await requestSearch(primaryQuery);
+  if (!data?.itemSummaries?.length && q?.trim()) {
+    const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
+    if (fallbackQuery !== primaryQuery) {
+      console.log("[ebay] primary search empty; retrying broadened query");
+      data = await requestSearch(fallbackQuery);
+    }
   }
-  return res.json();
+  return data || { itemSummaries: [], total: 0 };
 }
 
 const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];
@@ -1195,14 +1206,31 @@ const CAT_TAG_TO_CONFIG_FEED = {
   boxing: "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", yugioh: "Yu-Gi-Oh!",
   "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
 };
+
+function parseFeedIds(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap((entry) => {
+    if (typeof entry !== "string") return [];
+    try {
+      const parsed = JSON.parse(entry);
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through to comma-separated legacy format */ }
+    return entry.split(",");
+  }).map(String).map((id) => id.trim()).filter(Boolean);
+}
+
 app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
-      seen = "", count = "20",
+      seen = "", seenIds = "", swipedIds = "", count = "20",
        categories = "", offset = "0",
     } = req.query;
 
-    const seenSet = new Set(seen ? seen.split(",").filter(Boolean) : []);
+    const seenSet = new Set([
+      ...parseFeedIds(seen),
+      ...parseFeedIds(seenIds),
+      ...parseFeedIds(swipedIds),
+    ]);
     const returnCount = Math.min(Math.max(parseInt(count) || 20, 1), 40);
     const ebayOffset = Math.max(0, parseInt(offset, 10) || 0);
     const requestedCats = categories.split(",")

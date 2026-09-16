@@ -61,3 +61,35 @@ test("physical-card exclusions remain negative eBay phrases", async () => {
   assert.doesNotMatch(query, /"-signed ball"/);
   assert.doesNotMatch(query, /"-cut signature"/);
 });
+
+test("empty primary searches retry with a simplified category-plus-PSA query", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedQueries = [];
+  globalThis.fetch = async (url) => {
+    requestedQueries.push(new URL(String(url)).searchParams.get("q") || "");
+    const items = requestedQueries.length === 2
+      ? [{ itemId: "v1|1|fallback" }]
+      : [];
+    return new Response(JSON.stringify({ itemSummaries: items }), { status: 200 });
+  };
+
+  try {
+    const result = await ebaySearch(
+      "test-token",
+      "football trading card (PSA 10, Downtown, National Treasures)",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      "215",
+      5,
+    );
+    assert.equal(result.itemSummaries.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedQueries.length, 2);
+  assert.match(requestedQueries[0], /\(PSA OR BGS OR Auto OR Patch OR Refractor\)/);
+  assert.match(requestedQueries[1], /^football PSA /);
+  assert.doesNotMatch(requestedQueries[1], /National Treasures/);
+});

@@ -1,22 +1,11 @@
 export const HOT_CARD_MIN_PRICE = 25;
 export const HOT_MIN_SELLER_FEEDBACK = 500;
+export const SPORTS_QUERY_STACK = "(PSA OR BGS OR Auto OR Patch OR Refractor)";
+export const TCG_QUERY_STACK = '(PSA OR "Alt Art" OR "Illustration Rare" OR Holo)';
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
   "Pokemon", "Magic: The Gathering",
-];
-
-export const SPORTS_HIGH_VALUE_TERMS = [
-  "PSA 10", "PSA 9", "BGS 9.5", "BGS 10", "SGC 10", "SGC 9.5", "CGC 10",
-  "Kaboom", "Downtown", "Color Blast", "Manga", "RPA", "Auto", "Patch",
-  "Logoman", "Superfractor", "National Treasures", "Flawless", "Immaculate",
-  "/99", "/25", "/10", "1/1",
-];
-
-export const TCG_HIGH_VALUE_TERMS = [
-  "PSA 10", "PSA 9", "BGS 10", "CGC 10", "SGC 10", "Alt Art",
-  "Special Illustration Rare", "SIR", "Illustration Rare", "Gold Star",
-  "Shadowless", "Enchanted", "Starlight Rare", "Serialized",
 ];
 
 export const HOT_EXCLUSION_TERMS = [
@@ -28,36 +17,45 @@ export const HOT_EXCLUSION_TERMS = [
 
 export const HOT_EXCLUSIONS = HOT_EXCLUSION_TERMS.join(" ");
 
-function quoteQueryTerm(term) {
-  return /\s/.test(term) ? `"${term}"` : term;
-}
-
 function isTcgQuery(query, categoryId = null) {
   const normalized = String(query || "").toLowerCase();
   return String(categoryId || "") === "183050" ||
     /\b(?:pokemon|pokémon|magic(?:\s+the\s+gathering)?|mtg|yu-gi-oh|yugioh|one piece|lorcana|tcg)\b/i.test(normalized);
 }
 
-function hasAnyHighValueTerm(query, terms) {
-  const normalized = String(query || "").toLowerCase();
-  return terms.some((term) => normalized.includes(term.toLowerCase()));
+function simplifyQuery(query) {
+  return String(query || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function highValueQueryStack(query, categoryId = null) {
-  const terms = isTcgQuery(query, categoryId) ? TCG_HIGH_VALUE_TERMS : SPORTS_HIGH_VALUE_TERMS;
-  if (hasAnyHighValueTerm(query, terms)) return "";
-  return `(${terms.map(quoteQueryTerm).join(", ")})`;
+  return isTcgQuery(query, categoryId) ? TCG_QUERY_STACK : SPORTS_QUERY_STACK;
 }
 
 export function buildStrictSearchQuery(query, categoryId = null) {
-  const baseQuery = String(query || "").trim();
+  const baseQuery = simplifyQuery(query);
   const qualityStack = highValueQueryStack(baseQuery, categoryId);
-  const existingExclusions = new Set(
-    (baseQuery.toLowerCase().match(/-\S+/g) || []).map((term) => term.toLowerCase())
-  );
-  const missingExclusions = HOT_EXCLUSION_TERMS
-    .filter((term) => !existingExclusions.has(term.toLowerCase()));
-  return [baseQuery, qualityStack, missingExclusions.join(" ")].filter(Boolean).join(" ");
+  return [baseQuery, qualityStack, HOT_EXCLUSIONS].filter(Boolean).join(" ");
+}
+
+const CATEGORY_SEEDS = {
+  "213": "baseball",
+  "214": "basketball",
+  "215": "football",
+  "216": "hockey",
+  "183050": "pokemon",
+  "183444": "soccer",
+};
+
+export function buildFallbackSearchQuery(query, categoryId = null) {
+  const normalized = simplifyQuery(query).replace(/-\S+/g, " ").replace(/\s+/g, " ").trim();
+  const categorySeed = CATEGORY_SEEDS[String(categoryId || "")] ||
+    (normalized.match(/\b(?:pokemon|pokémon|baseball|basketball|football|hockey|soccer|formula\s+1|f1|wwe|mma|golf|boxing|yu-gi-oh|yugioh|one piece|lorcana)\b/i)?.[0] ||
+      normalized.split(/\s+/).slice(0, 3).join(" ") ||
+      "trading card");
+  return [categorySeed, "PSA", HOT_EXCLUSIONS].filter(Boolean).join(" ");
 }
 
 export function buildHotSearchQuery(categoryTerm) {
