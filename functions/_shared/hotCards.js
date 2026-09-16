@@ -1,7 +1,47 @@
 export const HOT_CARD_MIN_PRICE = 25;
 export const HOT_MIN_SELLER_FEEDBACK = 500;
-export const SPORTS_QUERY_STACK = "(PSA OR BGS OR Auto OR Patch OR Refractor)";
-export const TCG_QUERY_STACK = '(PSA OR "Alt Art" OR "Illustration Rare" OR Holo)';
+
+export const HIGH_END_TERMS = [
+  "PSA", "PSA 10", "PSA 9", "BGS", "BGS 10", "BGS 9.5", "SGC", "CGC",
+  "Gem Mint", "Pristine", "Rookie", "RC", "Rookie Card", "RPA",
+  "Rookie Patch Auto", "Rookie Autograph", "Auto", "Autograph",
+  "On-Card Auto", "On Card Auto", "Patch Auto", "Patch Autograph",
+  "Serial Numbered", "Numbered", "1/1", "1 of 1", "/1", "/2", "/3", "/5",
+  "/10", "/15", "/20", "/25", "/50", "/75", "/99", "/100", "Gold",
+  "Gold Refractor", "Gold Vinyl", "Superfractor", "Black", "Black Refractor",
+  "Red", "Red Refractor", "Orange", "Orange Refractor", "Blue",
+  "Blue Refractor", "Green", "Green Refractor", "Purple", "Purple Refractor",
+  "Atomic", "Mojo", "Shimmer", "Wave", "Cracked Ice", "Prizm", "Prizm Gold",
+  "Prizm Black", "Select", "Select Gold", "Flawless", "National Treasures",
+  "Immaculate", "Impeccable", "Topps Chrome", "Bowman Chrome", "Topps Finest",
+  "Topps Dynasty", "Topps Transcendent", "Museum Collection", "Chrome Sapphire",
+  "Sapphire", "Super Short Print", "SSP", "Short Print", "SP", "Case Hit",
+  "Color Blast", "Downtown", "Kaboom", "Stained Glass", "Color Wheel",
+  "Logoman", "Logo Patch", "Shield", "Laundry Tag", "Tag", "Game Used",
+  "Game-Used", "Game Worn", "Game-Worn",
+];
+
+const TCG_ONLY_TERMS = ["Alt Art", "Illustration Rare", "Holo"];
+const QUERY_STACK_SIZE = 8;
+
+function quoteQueryTerm(term) {
+  return /\s|\/|-/.test(term) ? `"${term}"` : term;
+}
+
+function queryStacks(terms) {
+  const uniqueTerms = [...new Set(terms)];
+  const stacks = [];
+  for (let index = 0; index < uniqueTerms.length; index += QUERY_STACK_SIZE) {
+    stacks.push(`(${uniqueTerms.slice(index, index + QUERY_STACK_SIZE).map(quoteQueryTerm).join(" OR ")})`);
+  }
+  return stacks;
+}
+
+export const SPORTS_QUERY_STACKS = queryStacks(HIGH_END_TERMS);
+export const TCG_QUERY_STACKS = queryStacks([...TCG_ONLY_TERMS, ...HIGH_END_TERMS]);
+// Kept as the first short stack for callers that need one query string.
+export const SPORTS_QUERY_STACK = SPORTS_QUERY_STACKS[0];
+export const TCG_QUERY_STACK = TCG_QUERY_STACKS[0];
 
 export const FALLBACK_CATEGORIES = [
   "Football", "Basketball", "Baseball", "Hockey", "Soccer",
@@ -31,13 +71,21 @@ function simplifyQuery(query) {
 }
 
 export function highValueQueryStack(query, categoryId = null) {
-  return isTcgQuery(query, categoryId) ? TCG_QUERY_STACK : SPORTS_QUERY_STACK;
+  return highValueQueryStacks(query, categoryId)[0];
+}
+
+export function highValueQueryStacks(query, categoryId = null) {
+  return isTcgQuery(query, categoryId) ? TCG_QUERY_STACKS : SPORTS_QUERY_STACKS;
 }
 
 export function buildStrictSearchQuery(query, categoryId = null) {
+  return buildStrictSearchQueries(query, categoryId)[0];
+}
+
+export function buildStrictSearchQueries(query, categoryId = null) {
   const baseQuery = simplifyQuery(query);
-  const qualityStack = highValueQueryStack(baseQuery, categoryId);
-  return [baseQuery, qualityStack, HOT_EXCLUSIONS].filter(Boolean).join(" ");
+  return highValueQueryStacks(baseQuery, categoryId)
+    .map((qualityStack) => [baseQuery, qualityStack, HOT_EXCLUSIONS].filter(Boolean).join(" "));
 }
 
 const CATEGORY_SEEDS = {
@@ -55,7 +103,7 @@ export function buildFallbackSearchQuery(query, categoryId = null) {
     (normalized.match(/\b(?:pokemon|pokémon|baseball|basketball|football|hockey|soccer|formula\s+1|f1|wwe|mma|golf|boxing|yu-gi-oh|yugioh|one piece|lorcana)\b/i)?.[0] ||
       normalized.split(/\s+/).slice(0, 3).join(" ") ||
       "trading card");
-  return [categorySeed, "PSA", HOT_EXCLUSIONS].filter(Boolean).join(" ");
+  return [categorySeed, SPORTS_QUERY_STACKS[0], HOT_EXCLUSIONS].filter(Boolean).join(" ");
 }
 
 export function buildHotSearchQuery(categoryTerm) {
@@ -107,6 +155,9 @@ export function hotQualityScore(item) {
   const isPsa9OrBetter = /\bpsa\s*9\b|\bbgs\s*9\.5\b|\bsgc\s*9\.5\b|\bcgc\s*9\.5\b/.test(`${title} ${grade}`);
   const isOneOfOne = /\b1\/1\b|\bone\s*of\s*one\b/.test(title);
   const isRpa = /\brpa\b|\bre(?:d|deemed)\s+patch\s+auto\b/.test(title);
+  const hasHighEndSignal = HIGH_END_TERMS.some((term) =>
+    new RegExp(`(?:^|\\W)${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`, "i").test(title)
+  );
 
   return (
     hotEngagementScore(item) +
@@ -114,7 +165,8 @@ export function hotQualityScore(item) {
     (isOneOfOne ? 30 : 0) +
     (isRpa ? 25 : 0) +
     (isAuto ? 8 : 0) +
-    (isNumbered ? 8 : 0)
+    (isNumbered ? 8 : 0) +
+    (hasHighEndSignal ? 5 : 0)
   );
 }
 
