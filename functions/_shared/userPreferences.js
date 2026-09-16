@@ -1,6 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
 import { jsonResponse } from "./ebay.js";
-import { swipeWeightDeltas } from "./recommendationEngine.js";
 
 function config(env) {
   const node = typeof process !== "undefined" ? process.env : {};
@@ -21,13 +20,6 @@ export async function authenticatedClient(env, request, requestedUserId) {
   return { client, userId: data.user.id };
 }
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-const applyDeltas = (weights, deltas) => {
-  const next = { ...object(weights) };
-  for (const [key, delta] of Object.entries(object(deltas))) {
-    next[key] = Math.max(-10, Math.min(10, (Number(next[key]) || 0) + (Number(delta) || 0)));
-  }
-  return next;
-};
 async function persistCompatibilitySwipe(client, userId, event, preferences, tagWeights) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { data: stored, error: readError } = await client.from("user_preferences")
@@ -43,7 +35,9 @@ async function persistCompatibilitySwipe(client, userId, event, preferences, tag
       preferences,
       tag_weights: tagWeights,
       swipes: [...byId.values()],
-      weights: duplicate ? object(stored?.weights) : applyDeltas(stored?.weights, swipeWeightDeltas(event)),
+      // Swipes are history only.  Do not alter learned weights while the app
+      // is operating in category-only hot-card mode.
+      weights: object(stored?.weights),
       updated_at: timestamp,
     };
     if (!stored) {
@@ -73,7 +67,9 @@ export async function saveUserData(env, request, body, includeSwipe = false) {
     ? canonical : legacy;
   const preferences = { ...object(existing?.preferences), ...object(body.preferences) };
   if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
-  const tagWeights = { ...object(existing?.tag_weights), ...object(body.tagWeights), ...object(body.tag_weights) };
+  const tagWeights = includeSwipe
+    ? object(existing?.tag_weights)
+    : { ...object(existing?.tag_weights), ...object(body.tagWeights), ...object(body.tag_weights) };
   let normalizedEvent = null;
   if (includeSwipe && body.event && typeof body.event === "object") {
     normalizedEvent = {
@@ -81,23 +77,8 @@ export async function saveUserData(env, request, body, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    const { error: rpcError } = await auth.client.rpc("record_swipe_with_preference_adjust", {
-      p_user_id: auth.userId,
-      p_event: normalizedEvent,
-      p_preferences: preferences,
-      p_tag_weights: tagWeights,
-      p_deltas: swipeWeightDeltas(normalizedEvent),
-    });
-    if (!rpcError) {
-      return jsonResponse({
-        saved: true, guest: false, status: "persisted_atomic",
-        preferences, tag_weights: tagWeights,
-      });
-    }
-    // Older environments can keep working until the migration is applied.
-    if (rpcError.code !== "PGRST202") {
-      return jsonResponse({ saved: false, guest: false, status: "write_failed", error: rpcError.message }, 500);
-    }
+    // Do not call the legacy preference-adjusting RPC.  It intentionally
+    // changes weights, which is no longer part of feed selection.
   }
   if (!includeSwipe) {
     const { error: preferenceError } = await auth.client.rpc("merge_user_preferences", {

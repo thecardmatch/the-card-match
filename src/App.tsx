@@ -7,7 +7,7 @@ import { SwipeDeck }      from "@/components/SwipeDeck";
 import { PreferencesModal } from "@/components/PreferencesModal";
 import { AccountModal } from "@/components/AccountModal";
 import type { TradingCard } from "@/data/pokemon";
-import { COLLECTION_CATEGORIES, categoryTag } from "@/data/collectionCategories";
+import { COLLECTION_CATEGORIES } from "@/data/collectionCategories";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
 const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
@@ -18,7 +18,6 @@ const ONBOARDING_KEY   = "cardmatch:onboarding_done";
 const PREFS_KEY        = "cardmatch:preferences";
 const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
 const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
-const PRICE_PREFS_KEY  = "cardmatch:price_prefs";      // rolling array of last 20 liked prices
 const SWIPE_HISTORY_KEY_PREFIX = "cardmatch:swipe_history";
 const GUEST_SWIPE_HISTORY_KEY = "cardmatch:guest_swipe_history";
 const GUEST_PROFILE_PENDING_KEY = "cardmatch:guest_profile_pending";
@@ -238,36 +237,10 @@ function getInitialMode(): AppMode {
   } catch { return "onboarding"; }
 }
 
-/** Load the rolling array of last 20 liked card prices from localStorage. */
-function loadPricePrefs(): number[] {
-  try {
-    const raw = localStorage.getItem(PRICE_PREFS_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
-/** Persist liked prices (keep last 20). */
-function persistPricePrefs(prices: number[]) {
-  try { localStorage.setItem(PRICE_PREFS_KEY, JSON.stringify(prices.slice(-20))); }
-  catch { /* quota */ }
-}
-
-/** Compute median of an array of numbers. Returns 0 if empty. */
-function computeMedian(prices: number[]): number {
-  if (prices.length === 0) return 0;
-  const sorted = [...prices].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0
-    ? sorted[mid]
-    : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
 /**
  * Builds the /api/feed URL.
- * Active categories and proportions are derived server-side from tag_weights.
- * Top 40 tags by absolute weight are sent to keep the URL size manageable.
+ * The server fetches only the selected categories, or its curated fallback
+ * mix when onboarding was skipped.  Swipe weights are intentionally omitted.
  *
  * Passed IDs are given highest dedup priority in the `seen` param — they fill
  * their slots first (up to 200), then remaining slots go to recent seen IDs.
@@ -276,9 +249,7 @@ function computeMedian(prices: number[]): number {
 function buildFeedUrl(
   seenIds:     Set<string>,
   passedIds:   Set<string>,
-  tagWeights:  Record<string, number>,
   mode:        "for-you" | "ending-soonest",
-  priceMedian: number,
   preferences: Preferences | null,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
@@ -287,18 +258,12 @@ function buildFeedUrl(
   const remaining = Math.max(0, 200 - passedArr.length);
   const seenArr   = [...seenIds].filter((id) => !passedIds.has(id)).slice(-remaining);
   const seen  = [...passedArr, ...seenArr].join(",");
-  const topTW = Object.entries(tagWeights)
-    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-    .slice(0, 40);
-  const tw = JSON.stringify(Object.fromEntries(topTW));
   let url = (
     `/api/deck` +
     `?seen=${encodeURIComponent(seen)}` +
-    `&tag_weights=${encodeURIComponent(tw)}` +
     `&count=20` +
     `&mode=${mode}`
   );
-  if (priceMedian > 0) url += `&price_median=${priceMedian.toFixed(2)}`;
   const selectedCategories = preferences?.selectedCategories ?? [];
   if (selectedCategories.length > 0) {
     url += `&categories=${encodeURIComponent(selectedCategories.join(","))}`;
@@ -329,7 +294,6 @@ export default function App() {
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
   const feedModeRef            = useRef<"for-you" | "ending-soonest">("for-you");
-  const pricePrefsRef          = useRef<number[]>(loadPricePrefs());          // rolling liked prices
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
   // authenticated user ID.  At mount they're initialised with the anonymous
@@ -345,7 +309,6 @@ export default function App() {
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
-  const saveTagWeightsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -382,13 +345,10 @@ export default function App() {
     setFeedError(false);
 
     try {
-      const priceMedian = computeMedian(pricePrefsRef.current);
       const url  = buildFeedUrl(
         seenIds.current,
         passedIds.current,
-        tagWeightsRef.current,
         feedModeRef.current,
-        priceMedian,
         prefsRef.current,
       );
       let res  = await fetch(url);
@@ -406,9 +366,7 @@ export default function App() {
         res = await fetch(buildFeedUrl(
           seenIds.current,
           passedIds.current,
-          tagWeightsRef.current,
           feedModeRef.current,
-          priceMedian,
           prefsRef.current,
         ));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -508,7 +466,6 @@ export default function App() {
           body: JSON.stringify({
             event,
             userId,
-            tagWeights: tagWeightsRef.current,
             preferences: prefsRef.current,
           }),
         });
@@ -811,35 +768,6 @@ export default function App() {
     if (sent !== null) {
       sent.forEach((e) => pendingPassedIds.current.delete(e.id));
     }
-  }
-
-  // ── Tag-weight scoring ──────────────────────────────────────────────────────
-
-  /** Debounce-persist tag_weights only (called on every live-feed swipe). */
-  function debounceSaveTagWeights(weights: Record<string, number>) {
-    if (saveTagWeightsTimerRef.current) clearTimeout(saveTagWeightsTimerRef.current);
-    saveTagWeightsTimerRef.current = setTimeout(async () => {
-      const userId = currentUserIdRef.current;
-      if (!userId) return;
-      await flushProfileToSupabase(userId, prefsRef.current, weights);
-    }, 3000);
-  }
-
-  /**
-   * Update tag weights on every feed swipe.
-   * Right swipe → +1 to all card tags.
-   * Left swipe  → −0.5 to all card tags.
-   * The category tag (e.g. "football") drives which eBay categories are fetched next refresh.
-   */
-  function updateTagWeights(card: TradingCard, delta: number) {
-    const tags = card.tags;
-    if (!tags?.length) return;
-    const updated = { ...tagWeightsRef.current };
-    for (const tag of tags) {
-      updated[tag] = +(((updated[tag] ?? 0) + delta).toFixed(2));
-    }
-    tagWeightsRef.current = updated;
-    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(updated));
   }
 
   // ── Mount: initialise preferences from Supabase, then start feed ───────────
@@ -1355,7 +1283,6 @@ export default function App() {
 
   async function savePreferencesToApi(
     nextPreferences: Preferences,
-    nextTagWeights: Record<string, number>,
   ) {
     const userId = currentUserIdRef.current;
     let accessToken: string | null = null;
@@ -1374,7 +1301,6 @@ export default function App() {
         body: JSON.stringify({
           userId,
           preferences: nextPreferences,
-          tagWeights: nextTagWeights,
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1391,12 +1317,9 @@ export default function App() {
       topCategories: [],
     };
     const categoryScores = { ...existing.categoryScores };
-    const nextTagWeights = { ...tagWeightsRef.current };
 
     for (const category of selectedCategories) {
       categoryScores[category] = Math.max(categoryScores[category] ?? 0, 2);
-      const tag = categoryTag(category);
-      nextTagWeights[tag] = Math.max(nextTagWeights[tag] ?? 0, 2);
     }
 
     const nextPreferences: Preferences = {
@@ -1409,10 +1332,8 @@ export default function App() {
     };
 
     prefsRef.current = nextPreferences;
-    tagWeightsRef.current = nextTagWeights;
     setPrefs(nextPreferences);
     localStorage.setItem(PREFS_KEY, JSON.stringify(nextPreferences));
-    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(nextTagWeights));
     localStorage.setItem(ONBOARDING_KEY, "1");
     setPreferencesOpen(false);
     setCards([]);
@@ -1422,37 +1343,12 @@ export default function App() {
     setAppMode("feed-loading");
 
     const userId = currentUserIdRef.current;
-    if (userId) void flushProfileToSupabase(userId, nextPreferences, nextTagWeights);
-    void savePreferencesToApi(nextPreferences, nextTagWeights);
+    if (userId) void flushProfileToSupabase(userId, nextPreferences);
+    void savePreferencesToApi(nextPreferences);
     void loadFeed(false);
   }
 
   // ── Swipe handlers ──────────────────────────────────────────────────────────
-
-  /** Track per-category scores in prefs state (for local UI, not the feed fetch). */
-  function updatePrefsOnSwipe(card: TradingCard, action: "LIKE" | "PASS") {
-    setPrefs((prev) => {
-      const base: Preferences = prev ?? {
-        categoryScores: {}, eraScores: {}, styleScores: {}, topCategories: [],
-      };
-      const delta   = action === "LIKE" ? 1 : -1;
-      const updated = {
-        ...base,
-        categoryScores: {
-          ...base.categoryScores,
-          [card.category]: (base.categoryScores[card.category] || 0) + delta,
-        },
-      };
-      updated.topCategories = Object.entries(updated.categoryScores)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([cat]) => cat);
-
-      localStorage.setItem(PREFS_KEY, JSON.stringify(updated));
-      prefsRef.current = updated;
-      return updated;
-    });
-  }
 
   function handleLike(card: TradingCard) {
     setLiked((prev) => {
@@ -1461,19 +1357,6 @@ export default function App() {
       return next;
     });
 
-    // Adaptive price learning: record this card's price → update rolling median
-    if (card.currentBid && card.currentBid > 0) {
-      const updated = [...pricePrefsRef.current, card.currentBid].slice(-20);
-      pricePrefsRef.current = updated;
-      persistPricePrefs(updated);
-      const median = computeMedian(updated);
-      if (median > 0) {
-        console.log(`[price] liked $${card.currentBid.toFixed(2)} → median now $${median.toFixed(2)}`);
-      }
-    }
-
-    updatePrefsOnSwipe(card, "LIKE");
-    updateTagWeights(card, 1);       // +1 to all tags — boosts this category/type in next fetch
     recordFeedSwipe(card, "LIKE");
   }
 
@@ -1491,14 +1374,10 @@ export default function App() {
     persistSeenIds(seenIds.current);
     debounceSavePassedIds();  // debounce-fires the RPC with only the pending delta
 
-    updatePrefsOnSwipe(card, "PASS");
-    updateTagWeights(card, -0.5);    // −0.5 to all tags — deprioritises this category/type
     recordFeedSwipe(card, "PASS");
   }
 
   function handleBuy(card: TradingCard) {
-    updatePrefsOnSwipe(card, "LIKE");
-    updateTagWeights(card, 1.5);
     recordFeedSwipe(card, "BUY");
     const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
     if (!url) return;

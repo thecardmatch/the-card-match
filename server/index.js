@@ -4,7 +4,11 @@ import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
-import { cardFeatures, chaseSearchQueries, expandWeightAliases, isJunk, recommendCards, swipeWeightDeltas } from "./recommendationEngine.js";
+import { cardFeatures, isJunk } from "./recommendationEngine.js";
+import {
+  FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter,
+  hotTermsForCategory, meetsHotCardFloor, sortHotCards,
+} from "../functions/_shared/hotCards.js";
 
 if (!globalThis.WebSocket) {
   globalThis.WebSocket = WebSocket;
@@ -1204,8 +1208,8 @@ app.post("/api/onboarding/complete", async (req, res) => {
         return res.status(500).json({ preferences: null, cards: [], error: err.message });
       }
     });
-// ─── GET /api/feed — tag-weight-driven proportional feed ─────────────────────
-// Mirrors functions/api/feed.js exactly (tag_weights-only, no cats/scores params).
+// ─── GET /api/feed and /api/deck — category-only hot-card feed ────────────────
+// Mirrors functions/api/feed.js and intentionally ignores learned weights.
 const CAT_TAG_TO_CONFIG_FEED = {
   football:   "Football",
   basketball: "Basketball",
@@ -1218,211 +1222,66 @@ const CAT_TAG_TO_CONFIG_FEED = {
   boxing: "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", yugioh: "Yu-Gi-Oh!",
   "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
 };
-const FEED_DEFAULT_CATS = ["Football", "Baseball", "Basketball"];
-
-function dotScore(tags, tagWeights) {
-  if (!tags?.length || !tagWeights) return 0;
-  return tags.reduce((sum, tag) => sum + (tagWeights[tag] ?? 0), 0);
-}
-
-function rankAndExplore(items, tagWeights, returnCount) {
-  const n = Math.min(items.length, returnCount);
-  if (n === 0) return [];
-  const scored = items.map((item) => ({
-    ...item,
-    _tagScore: dotScore(item.tags, tagWeights) + item.engagementScore,
-  }));
-  scored.sort((a, b) => b._tagScore - a._tagScore);
-  const topN = Math.ceil(n * 0.8);
-  const top  = scored.slice(0, topN);
-  const pool = scored.slice(topN);
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  const exploration = pool.slice(0, n - topN);
-  const result = [...top];
-  let slot = 4;
-  for (const card of exploration) { result.splice(Math.min(slot, result.length), 0, card); slot += 5; }
-  return result;
-}
-
-// Attribute tag keys → eBay keyword modifiers (mirrors functions/api/feed.js)
-const ATTR_TAG_KEYWORDS_FEED = {
-  rookie:    "rookie rc",
-  auto:      "auto autograph",
-  patch:     "patch",
-  vintage:   "vintage",
-  grail:     "psa 10 bgs 9.5",
-  "psa-10":  "psa 10",
-  "bgs-9.5": "bgs 9.5",
-  "1/1":     "1/1",
-  refractor: "refractor",
-  prizm:     "prizm",
-};
-
-function buildSearchQueryFeed(catTerm, tagWeights) {
-  const attrs = [];
-  for (const [tag, keyword] of Object.entries(ATTR_TAG_KEYWORDS_FEED)) {
-    if ((tagWeights[tag] ?? 0) > 0.5) attrs.push(keyword);
-  }
-  return attrs.length ? `${catTerm} ${attrs.slice(0, 3).join(" ")}` : catTerm;
-}
-
-function buildPriceFilterFeed(priceMedian, isWildcard = false, minimum = 0.99) {
-  if (isWildcard || !priceMedian || priceMedian <= 0) return `price:[${minimum.toFixed(2)}..],priceCurrency:USD`;
-  const low  = Math.max(minimum, priceMedian * 0.15).toFixed(2);
-  const high = Math.max(minimum * 4, priceMedian * 8).toFixed(2);
-  return `price:[${low}..${high}],priceCurrency:USD`;
-}
-
 app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
       seen = "", count = "20",
-      tag_weights: twRaw = "{}",
-      mode       = "for-you",
-      price_median: priceRaw = "", categories = "", trending = "false",
+      mode = "for-you", categories = "",
     } = req.query;
 
-    const seenSet        = new Set(seen ? seen.split(",").filter(Boolean) : []);
-    const returnCount    = Math.min(parseInt(count) || 20, 40);
-    const priceMedian    = parseFloat(priceRaw) || 0;
+    const seenSet = new Set(seen ? seen.split(",").filter(Boolean) : []);
+    const returnCount = Math.min(Math.max(parseInt(count) || 20, 1), 40);
     const isEndingSoonest = mode === "ending-soonest";
-
-    let tagWeights = {};
-    try { tagWeights = expandWeightAliases(JSON.parse(twRaw)); } catch { /* use empty */ }
-    // A signed-in profile takes precedence over query-string guest weights.  Keep
-    // the legacy quiz row as a compatibility fallback while the new table rolls out.
-    const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-    let engineWeights = {};
-    if (bearer && SUPABASE_URL && SUPABASE_KEY) {
-      try {
-        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY,
-          SUPABASE_KEY === process.env.SUPABASE_SERVICE_ROLE_KEY ? undefined : { global: { headers: { Authorization: `Bearer ${bearer}` } } });
-        const { data: auth } = await supabase.auth.getUser(bearer);
-        if (auth?.user) {
-          const { data: profile } = await supabase.from("user_preferences").select("weights").eq("user_id", auth.user.id).maybeSingle();
-          const { data: quiz } = await supabase.from("user_quiz_results").select("tag_weights").eq("user_id", auth.user.id).maybeSingle();
-          tagWeights = expandWeightAliases(
-            profile?.weights && Object.keys(profile.weights).length ? profile.weights : (quiz?.tag_weights || tagWeights),
-          );
-          engineWeights = profile?.weights?.recommendation_weights || {};
-        }
-      } catch (error) { console.warn("[feed] profile unavailable:", error.message); }
-    }
-
-    // STRICT: only positive-weight categories are fetched
-    const catWeights = {};
-    for (const [key, weight] of Object.entries(tagWeights)) {
-      const configKey = CAT_TAG_TO_CONFIG_FEED[key];
-      if (configKey && weight > 0 && CATEGORY_FEED_CONFIG[configKey]) {
-        catWeights[configKey] = (catWeights[configKey] || 0) + weight;
-      }
-    }
-    const requestedCats = categories.split(",").map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")]).filter(Boolean);
-    if (requestedCats.length) {
-      requestedCats.forEach((cat) => { catWeights[cat] = Math.max(1, catWeights[cat] || 0); });
-      Object.keys(catWeights).forEach((cat) => { if (!requestedCats.includes(cat)) delete catWeights[cat]; });
-    } else if (trending === "true") {
-      Object.keys(CATEGORY_FEED_CONFIG).forEach((cat) => { catWeights[cat] = Math.max(1, catWeights[cat] || 0); });
-    } else if (Object.keys(catWeights).length === 0) FEED_DEFAULT_CATS.forEach((cat) => { catWeights[cat] = 1; });
-
-    const allCategoryTrending = trending === "true" && requestedCats.length === 0;
-    const totalWeight = Object.values(catWeights).reduce((s, w) => s + w, 0);
-    const fetchPool   = returnCount * 4;
-    const fetchPlan   = Object.entries(catWeights)
-      .map(([cat, weight]) => ({ cat, proportion: weight / totalWeight, budget: allCategoryTrending ? 4 : Math.max(20, Math.ceil(fetchPool * weight / totalWeight)) }))
-      .sort((a, b) => b.proportion - a.proportion);
-
-    console.log(
-      `[feed] mode:${mode} cats:${fetchPlan.map((p) => `${p.cat}(${Math.round(p.proportion * 100)}%)`).join(",")}` +
-      (trending === "true" ? " [trending-all]" : "") +
-      (priceMedian ? ` price_median:$${priceMedian}` : "")
-    );
+    const requestedCats = categories.split(",")
+      .map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")] || value.trim())
+      .filter((value) => CATEGORY_FEED_CONFIG[value]);
+    const selectedCats = [...new Set(requestedCats.length ? requestedCats : FALLBACK_CATEGORIES)];
+    const termSeed = seenSet.size;
+    console.log(`[feed] hot-card mode:${mode} cats:${selectedCats.join(",")}${requestedCats.length ? "" : " [curated-fallback]"}`);
 
     const token    = await getEbayToken();
     const allItems = [];
 
     await Promise.all(
-      fetchPlan.map(async ({ cat, budget }) => {
+      selectedCats.map(async (cat) => {
         const cfg = CATEGORY_FEED_CONFIG[cat];
         if (!cfg) return;
         const { catTerm, categoryId } = cfg;
-        const searchQuery    = buildSearchQueryFeed(catTerm, tagWeights);
-        if (allCategoryTrending) {
-          const result = await ebaySearch(token, searchQuery, "bestMatch", "price:[20.00..],priceCurrency:USD", null, categoryId, budget, 0);
-          const eligible = (result.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
-          eligible.forEach((raw, index) => allItems.push({
-            ...mapFeedItem(raw, [cat]),
-            ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
-          }));
-          return;
-        }
-        const bracketBudget  = Math.ceil(budget * 0.8);
-        const wildcardBudget = budget - bracketBudget;
-        const minimum         = 20;
-        const bracketFilter  = buildPriceFilterFeed(priceMedian, false, minimum);
-        const wildcardFilter = buildPriceFilterFeed(0, true, minimum);
-
-        let searches;
-        if (isEndingSoonest) {
-          searches = [
-            ebaySearch(token, searchQuery, "endingSoonest", `${bracketFilter},buyingOptions:{AUCTION}`,  null, categoryId, bracketBudget,  0),
-            ebaySearch(token, searchQuery, "endingSoonest", `${wildcardFilter},buyingOptions:{AUCTION}`, null, categoryId, wildcardBudget, 0),
-          ];
-        } else {
-          const [gradedQuery, rookieQuery, numberedQuery] = chaseSearchQueries(searchQuery, cat);
-          const broadAuction = Math.max(1, Math.ceil(budget * .35));
-          const gradedBin = Math.max(1, Math.ceil(budget * .25));
-          const rookieAuction = Math.max(1, Math.ceil(budget * .20));
-          const numberedBin = Math.max(1, budget - broadAuction - gradedBin - rookieAuction);
-          searches = [
-            ebaySearch(token, searchQuery,    "bestMatch", `${bracketFilter},buyingOptions:{AUCTION}`,      null, categoryId, broadAuction, 0),
-            ebaySearch(token, gradedQuery,    "bestMatch", `${bracketFilter},buyingOptions:{FIXED_PRICE}`,  null, categoryId, gradedBin, 0),
-            ebaySearch(token, rookieQuery,    "bestMatch", `${wildcardFilter},buyingOptions:{AUCTION}`,     null, categoryId, rookieAuction, 0),
-            ebaySearch(token, numberedQuery,  "bestMatch", `${wildcardFilter},buyingOptions:{FIXED_PRICE}`, null, categoryId, numberedBin, 0),
-          ];
-        }
+        const searches = hotTermsForCategory(cat, termSeed).map((keyword) =>
+          ebaySearch(token, buildHotSearchQuery(catTerm, keyword), isEndingSoonest ? "endingSoonest" : "bestMatch",
+            `${hotPriceFilter()}${isEndingSoonest ? ",buyingOptions:{AUCTION}" : ""}`,
+            null, categoryId, Math.max(3, Math.ceil(returnCount / selectedCats.length)), 0)
+        );
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
           const eligible = (r.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
           eligible.forEach((raw, index) => allItems.push({
-            ...mapFeedItem(raw, [cat]),
-            ebayBestMatchScore: isEndingSoonest ? 0 : eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+            ...canonicalFeedItem(mapFeedItem(raw, [cat])),
+            ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
           }));
         }
       })
     );
 
     const unique = new Set();
-    const fresh  = allItems.filter((i) => {
-      if (isJunk(i)) return false;
+    const fresh = allItems.filter((i) => {
+      if (!meetsHotCardFloor(i) || isJunk(i)) return false;
       if (seenSet.has(i.id) || unique.has(i.id)) return false;
       unique.add(i.id);
       return true;
     });
-
+    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(returnCount * 2, 40)));
     if (isEndingSoonest) {
-      fresh.sort((a, b) => new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000));
-      return res.json({ items: fresh.slice(0, returnCount) });
+      enriched.sort((a, b) =>
+        new Date(a.endTime || 8640000000000000) - new Date(b.endTime || 8640000000000000) ||
+        sortHotCards(a, b)
+      );
+    } else {
+      enriched.sort(sortHotCards);
     }
-    const shortlist = recommendCards(
-      { tag_weights: tagWeights, weights: engineWeights, price_median: priceMedian },
-      fresh,
-      { count: Math.min(40, Math.max(returnCount * 2, returnCount)) },
-    );
-    const boosted = await enrichFeedItemsWithEngagement(token, shortlist);
-    console.log(`[feed] pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
-    const items = recommendCards(
-      { tag_weights: tagWeights, weights: engineWeights, price_median: priceMedian },
-      boosted,
-      { count: returnCount },
-    );
-    items.forEach(({ id, card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, low_attention_penalty, final_score }) =>
-      console.log("[recommendation]", id, { card_desirability_score, personal_match_score, market_demand_score, momentum_score, price_fit_score, low_attention_penalty, final_score }));
-    return res.json({ items });
+    console.log(`[feed] hot pool: ${fresh.length} fresh → returning ${Math.min(fresh.length, returnCount)}`);
+    return res.json({ items: enriched.slice(0, returnCount).map(canonicalFeedItem) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });
@@ -1852,13 +1711,12 @@ async function persistCompatibilitySwipe(supabase, userId, event, preferences, t
       .map((value, index) => [value.eventId || `legacy:${index}`, value]));
     const duplicate = byId.has(event.eventId);
     byId.set(event.eventId, event);
-    const weights = { ...(stored?.weights || {}) };
-    if (!duplicate) for (const [key, delta] of Object.entries(swipeWeightDeltas(event))) {
-      weights[key] = Math.max(-10, Math.min(10, (Number(weights[key]) || 0) + (Number(delta) || 0)));
-    }
     const payload = {
       user_id: userId, preferences, tag_weights: tagWeights,
-      swipes: [...byId.values()], weights, updated_at: new Date().toISOString(),
+      swipes: [...byId.values()],
+      // Swipes are history only; hot-card selection no longer learns weights.
+      weights: { ...(stored?.weights || {}) },
+      updated_at: new Date().toISOString(),
     };
     if (!stored) {
       const { error } = await supabase.from("user_preferences").insert(payload);
@@ -1893,7 +1751,9 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
     ? canonical : legacy;
   const preferences = { ...(old?.preferences || {}), ...(body.preferences || {}) };
   if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
-  const tag_weights = { ...(old?.tag_weights || {}), ...(body.tagWeights || {}), ...(body.tag_weights || {}) };
+  const tag_weights = includeSwipe
+    ? { ...(old?.tag_weights || {}) }
+    : { ...(old?.tag_weights || {}), ...(body.tagWeights || {}), ...(body.tag_weights || {}) };
   let normalizedEvent = null;
   if (includeSwipe && body.event && typeof body.event === "object") {
     normalizedEvent = {
@@ -1901,23 +1761,8 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    const { error: rpcError } = await supabase.rpc("record_swipe_with_preference_adjust", {
-      p_user_id: auth.user.id,
-      p_event: normalizedEvent,
-      p_preferences: preferences,
-      p_tag_weights: tag_weights,
-      p_deltas: swipeWeightDeltas(normalizedEvent),
-    });
-    if (!rpcError) {
-      return res.json({
-        saved: true, guest: false, status: "persisted_atomic",
-        preferences, tag_weights,
-      });
-    }
-    // Preserve compatibility until the corresponding migration reaches this database.
-    if (rpcError.code !== "PGRST202") {
-      return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: rpcError.message });
-    }
+    // Do not call the legacy preference-adjusting RPC.  It changes weights,
+    // which is intentionally disabled for category-only hot-card mode.
   }
   if (!includeSwipe) {
     const { error: preferenceError } = await supabase.rpc("merge_user_preferences", {

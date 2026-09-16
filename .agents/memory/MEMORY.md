@@ -4,3 +4,4 @@
 - [CF Pages Functions architecture](cf-pages-functions.md) — production API lives in functions/; server/index.js is local-dev only; btoa not Buffer, context.env not process.env.
 - [eBay engagement availability](ebay-engagement-signals.md) — Browse may omit bid/watch/view counters; distinguish missing metrics from explicit zeros before using a ranking proxy.
 - [User quiz profile uniqueness](user-quiz-results-constraint.md) — Existing Supabase projects may lack the user_id uniqueness required by conflict-safe profile RPCs.
+- [Hot-card feed strategy](hot-card-feed.md) — Feed selection is category-only with a $25 floor and engagement ordering; swipe history must not change weights.
