@@ -140,14 +140,14 @@ export async function ebaySearch(
     : [""];
   for (const primaryQuery of primaryQueries) {
     const data = await requestSearch(primaryQuery);
-    if (data?.rateLimited) return { itemSummaries: [], total: 0 };
+    if (data?.rateLimited) return { itemSummaries: [], total: 0, rateLimited: true };
     if (data?.itemSummaries?.length) return data;
   }
   if (q?.trim()) {
     const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
     console.log("[ebay] high-end terms empty; retrying broad category query");
     const fallback = await requestSearch(fallbackQuery);
-    if (fallback?.rateLimited) return { itemSummaries: [], total: 0 };
+    if (fallback?.rateLimited) return { itemSummaries: [], total: 0, rateLimited: true };
     return fallback || { itemSummaries: [], total: 0 };
   }
   return { itemSummaries: [], total: 0 };

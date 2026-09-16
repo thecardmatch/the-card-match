@@ -381,17 +381,6 @@ export default function App() {
       let incoming: TradingCard[] = (data.items ?? []).filter(
         (c: TradingCard) => !passedIds.current.has(c.id)
       );
-      // A page can contain only zero-bid auctions after server-side quality
-      // filtering. Advance through at most two empty pages so the UI does not
-      // stop at a false empty state.
-      for (let emptyPage = 0; incoming.length === 0 && emptyPage < 2; emptyPage += 1) {
-        requestOffset += 20;
-        data = await fetchPage(requestOffset);
-        incoming = (data.items ?? []).filter(
-          (c: TradingCard) => !passedIds.current.has(c.id)
-        );
-      }
-
       incoming.forEach((c) => seenIds.current.add(c.id));
       persistSeenIds(seenIds.current);   // keep across sessions
 
@@ -402,6 +391,7 @@ export default function App() {
         });
       } else {
         setCards(incoming);
+        if (incoming.length === 0) setFeedError(true);
         setDeckResetKey((k) => k + 1);
         setAppMode("feed");
       }

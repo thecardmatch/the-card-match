@@ -152,7 +152,7 @@ export async function onRequestPost(context) {
           token,
            cfg.catTerm,
           "endingSoonest",
-          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+          hotPriceFilter(),
           null,
           cfg.categoryId,
           Math.max(20, Math.ceil(40 / fetchCategories.length)),

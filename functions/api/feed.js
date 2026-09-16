@@ -37,6 +37,7 @@ export async function onRequestGet({ env, request }) {
   try {
     const token = await getEbayToken(env);
     const all = [];
+    let rateLimited = false;
     await Promise.all(selected.map(async (category) => {
       const cfg = CATEGORY_FEED_CONFIG[category];
       if (!cfg) return;
@@ -44,7 +45,7 @@ export async function onRequestGet({ env, request }) {
           token,
           cfg.catTerm,
           "endingSoonest",
-          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+          hotPriceFilter(),
           null,
           cfg.categoryId,
           Math.max(20, Math.ceil(count / selected.length)),
@@ -52,6 +53,10 @@ export async function onRequestGet({ env, request }) {
         )];
       for (const result of await Promise.allSettled(searches)) {
         if (result.status !== "fulfilled") continue;
+        if (result.value?.rateLimited) {
+          rateLimited = true;
+          continue;
+        }
         const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
         eligible.forEach((raw, index) => all.push({
           ...canonicalFeedItem(mapFeedItem(raw, [category])),
@@ -59,6 +64,13 @@ export async function onRequestGet({ env, request }) {
         }));
       }
     }));
+    if (rateLimited && all.length === 0) {
+      return jsonResponse({
+        items: [],
+        error: "eBay is temporarily rate-limited. Please retry shortly.",
+        retryable: true,
+      }, 503);
+    }
 
     const ids = new Set();
     const fresh = all.filter((item) =>

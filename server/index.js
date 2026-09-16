@@ -584,14 +584,14 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
     : [""];
   for (const primaryQuery of primaryQueries) {
     const data = await requestSearch(primaryQuery);
-    if (data?.rateLimited) return { itemSummaries: [], total: 0 };
+    if (data?.rateLimited) return { itemSummaries: [], total: 0, rateLimited: true };
     if (data?.itemSummaries?.length) return data;
   }
   if (q?.trim()) {
     const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
     console.log("[ebay] high-end terms empty; retrying broad category query");
     const fallback = await requestSearch(fallbackQuery);
-    if (fallback?.rateLimited) return { itemSummaries: [], total: 0 };
+    if (fallback?.rateLimited) return { itemSummaries: [], total: 0, rateLimited: true };
     return fallback || { itemSummaries: [], total: 0 };
   }
   return { itemSummaries: [], total: 0 };
@@ -1160,7 +1160,7 @@ app.post("/api/onboarding/complete", async (req, res) => {
               token,
               buildHotSearchQuery(cfg.catTerm),
               "endingSoonest",
-              `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+              hotPriceFilter(),
               null,
               cfg.categoryId,
               Math.max(20, Math.ceil(40 / fetchCategories.length)),
@@ -1247,6 +1247,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
 
     const token    = await getEbayToken();
     const allItems = [];
+    let rateLimited = false;
 
     await Promise.all(
       selectedCats.map(async (cat) => {
@@ -1257,7 +1258,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
           token,
            catTerm,
           "endingSoonest",
-          `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+           hotPriceFilter(),
           null,
           categoryId,
           Math.max(20, Math.ceil(returnCount / selectedCats.length)),
@@ -1266,6 +1267,10 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
+          if (r.value?.rateLimited) {
+            rateLimited = true;
+            continue;
+          }
           const eligible = (r.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
           eligible.forEach((raw, index) => allItems.push({
             ...canonicalFeedItem(mapFeedItem(raw, [cat])),
@@ -1274,6 +1279,13 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         }
       })
     );
+    if (rateLimited && allItems.length === 0) {
+      return res.status(503).json({
+        items: [],
+        error: "eBay is temporarily rate-limited. Please retry shortly.",
+        retryable: true,
+      });
+    }
 
     const unique = new Set();
     const fresh = allItems.filter((i) => {
