@@ -103,7 +103,9 @@ export function buildFallbackSearchQuery(query, categoryId = null) {
     (normalized.match(/\b(?:pokemon|pokémon|baseball|basketball|football|hockey|soccer|formula\s+1|f1|wwe|mma|golf|boxing|yu-gi-oh|yugioh|one piece|lorcana)\b/i)?.[0] ||
       normalized.split(/\s+/).slice(0, 3).join(" ") ||
       "trading card");
-  return [categorySeed, SPORTS_QUERY_STACKS[0], HOT_EXCLUSIONS].filter(Boolean).join(" ");
+  return [categorySeed, highValueQueryStack(categorySeed, categoryId), HOT_EXCLUSIONS]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function buildHotSearchQuery(categoryTerm) {

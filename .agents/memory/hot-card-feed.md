@@ -3,7 +3,7 @@ name: Hot-card feed strategy
 description: Product decision for selecting and ranking live eBay card listings.
 ---
 
-The feed should source directly from selected categories, or a curated sports/TCG fallback when no categories are selected. eBay searches enforce a $25 minimum, seller feedback of 500+, category-specific slab/chase keyword stacks, and strict raw/bulk/reproduction exclusions. Results rank by engagement plus grading-tier bonuses, with ending time as a tie-breaker.
+The feed should source directly from selected categories, or a curated sports/TCG fallback when no categories are selected. eBay searches enforce a $25 minimum, seller feedback of 500+, category-specific high-end keyword stacks split into short OR groups, and strict raw/bulk/reproduction exclusions. Results rank by engagement plus grading-tier bonuses, with ending time as a tie-breaker.
 
 **Why:** Personalized weight learning and sparse keyword gates were replaced by explicit quality controls so affordable slabs and high-tier hits can compete with active bidding wars without raw junk dominating the deck.
 
