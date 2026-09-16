@@ -46,8 +46,7 @@ export const SPORTS_QUERY_STACK = SPORTS_LIVE_QUERY_TERMS[0];
 export const TCG_QUERY_STACK = TCG_LIVE_QUERY_TERMS[0];
 
 export const FALLBACK_CATEGORIES = [
-  "Football", "Basketball", "Baseball", "Hockey", "Soccer",
-  "Pokemon", "Magic: The Gathering",
+  "Football", "Basketball", "Pokemon",
 ];
 
 export const HOT_EXCLUSION_TERMS = [
@@ -149,6 +148,17 @@ function titleText(item) {
   return String(item?.title || item?.name || "").toLowerCase();
 }
 
+const HIGH_END_TERM_PATTERNS = HIGH_END_TERMS.map((term) =>
+  new RegExp(`(?:^|\\W)${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`, "i")
+);
+
+export function hasHighEndSignal(item) {
+  const searchable = `${titleText(item)} ${String(item?.grade || item?.condition || "").toLowerCase()} ${
+    Array.isArray(item?.tags) ? item.tags.join(" ") : ""
+  }`;
+  return HIGH_END_TERM_PATTERNS.some((pattern) => pattern.test(searchable));
+}
+
 export function hotQualityScore(item) {
   const title = titleText(item);
   const grade = String(item?.grade || item?.condition || "").toLowerCase();
@@ -165,9 +175,7 @@ export function hotQualityScore(item) {
   const isPsa9OrBetter = /\bpsa\s*9\b|\bbgs\s*9\.5\b|\bsgc\s*9\.5\b|\bcgc\s*9\.5\b/.test(`${title} ${grade}`);
   const isOneOfOne = /\b1\/1\b|\bone\s*of\s*one\b/.test(title);
   const isRpa = /\brpa\b|\bre(?:d|deemed)\s+patch\s+auto\b/.test(title);
-  const hasHighEndSignal = HIGH_END_TERMS.some((term) =>
-    new RegExp(`(?:^|\\W)${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|\\W)`, "i").test(title)
-  );
+  const hasHighEnd = hasHighEndSignal(item);
 
   return (
     hotEngagementScore(item) +
@@ -176,7 +184,7 @@ export function hotQualityScore(item) {
     (isRpa ? 25 : 0) +
     (isAuto ? 8 : 0) +
     (isNumbered ? 8 : 0) +
-    (hasHighEndSignal ? 5 : 0)
+    (hasHighEnd ? 5 : 0)
   );
 }
 

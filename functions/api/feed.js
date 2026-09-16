@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
-  meetsHotCardFloor, passesHotEngagement, sortHotCards,
+  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -63,6 +63,7 @@ export async function onRequestGet({ env, request }) {
     const ids = new Set();
     const fresh = all.filter((item) =>
       meetsHotCardFloor(item) &&
+      hasHighEndSignal(item) &&
       !isJunk(item) &&
       !seen.has(item.id) &&
       !ids.has(item.id) &&

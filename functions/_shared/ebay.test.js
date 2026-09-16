@@ -96,3 +96,29 @@ test("primary high-end terms use separate eBay searches and retry broadly", asyn
   assert.match(requestedQueries[4], /^football trading card /);
   assert.doesNotMatch(requestedQueries[4], /National Treasures/);
 });
+
+test("rate limits stop retries instead of creating a request storm", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response(JSON.stringify({ errors: [{ errorId: 2001 }] }), { status: 429 });
+  };
+
+  try {
+    const result = await ebaySearch(
+      "test-token",
+      "football trading card",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      "215",
+      5,
+    );
+    assert.deepEqual(result.itemSummaries, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestCount, 1);
+});

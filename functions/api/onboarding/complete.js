@@ -15,7 +15,7 @@ import {
   isSuppliesCategory,
   CATEGORY_FEED_CONFIG,
 } from "../../_shared/ebay.js";
-import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, sortHotCards } from "../../_shared/hotCards.js";
+import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hasHighEndSignal, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, sortHotCards } from "../../_shared/hotCards.js";
 import { isJunk } from "../../_shared/recommendationEngine.js";
 
 export { _cors as onRequestOptions };
@@ -174,7 +174,7 @@ export async function onRequestPost(context) {
     const unique = allItems.filter((item) => {
       if (seen.has(item.id)) return false;
       seen.add(item.id);
-      return meetsHotCardFloor(item) && !isJunk(item);
+      return meetsHotCardFloor(item) && hasHighEndSignal(item) && !isJunk(item);
     });
     const enriched = await enrichFeedItemsWithEngagement(token, unique.slice(0, 120));
     const cards = enriched

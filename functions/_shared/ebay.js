@@ -128,7 +128,7 @@ export async function ebaySearch(
     });
     if (!res.ok) {
       console.error("[ebay] search error", res.status, (await res.text()).slice(0, 200));
-      return null;
+      return { itemSummaries: [], total: 0, rateLimited: res.status === 429 };
     }
     return res.json();
   }
@@ -138,29 +138,19 @@ export async function ebaySearch(
       .slice(0, 4)
       .map((query) => `${query} ${BULK_EXCLUSION}`)
     : [""];
-  const data = mergeSearchResponses(await Promise.all(primaryQueries.map(requestSearch)));
-  if (!data?.itemSummaries?.length && q?.trim()) {
+  for (const primaryQuery of primaryQueries) {
+    const data = await requestSearch(primaryQuery);
+    if (data?.rateLimited) return { itemSummaries: [], total: 0 };
+    if (data?.itemSummaries?.length) return data;
+  }
+  if (q?.trim()) {
     const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;
-    console.log("[ebay] primary search empty; retrying broadened query");
-    return (await requestSearch(fallbackQuery)) || { itemSummaries: [], total: 0 };
+    console.log("[ebay] high-end terms empty; retrying broad category query");
+    const fallback = await requestSearch(fallbackQuery);
+    if (fallback?.rateLimited) return { itemSummaries: [], total: 0 };
+    return fallback || { itemSummaries: [], total: 0 };
   }
-  return data || { itemSummaries: [], total: 0 };
-}
-
-function mergeSearchResponses(responses) {
-  const validResponses = responses.filter(Boolean);
-  const firstResponse = validResponses[0] || {};
-  const itemSummaries = [];
-  const seenIds = new Set();
-  for (const response of validResponses) {
-    for (const item of response.itemSummaries || []) {
-      const id = item.itemId || item.itemWebUrl || item.title;
-      if (!id || seenIds.has(id)) continue;
-      seenIds.add(id);
-      itemSummaries.push(item);
-    }
-  }
-  return { ...firstResponse, itemSummaries, total: itemSummaries.length };
+  return { itemSummaries: [], total: 0 };
 }
 
 const ENGAGEMENT_KEYS = ["viewCount", "watchCount", "bidCount"];

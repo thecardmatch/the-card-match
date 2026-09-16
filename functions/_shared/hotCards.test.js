@@ -11,6 +11,7 @@ import {
   buildFallbackSearchQuery,
   highValueQueryStack,
   hotEngagementScore,
+  hasHighEndSignal,
   hotQualityScore,
   hotPriceFilter,
   hotSellerFeedbackFilter,
@@ -51,15 +52,19 @@ test("all approved high-end terms are represented across short query stacks", ()
 test("fallback covers a curated mix of sports and TCG categories", () => {
   assert.ok(FALLBACK_CATEGORIES.includes("Football"));
   assert.ok(FALLBACK_CATEGORIES.includes("Basketball"));
-  assert.ok(FALLBACK_CATEGORIES.includes("Baseball"));
   assert.ok(FALLBACK_CATEGORIES.includes("Pokemon"));
-  assert.ok(FALLBACK_CATEGORIES.includes("Magic: The Gathering"));
+  assert.equal(FALLBACK_CATEGORIES.includes("Baseball"), false);
 });
 
 test("hot-card floor rejects sub-$25 and missing-price listings", () => {
   assert.equal(meetsHotCardFloor({ currentBid: HOT_CARD_MIN_PRICE }), true);
   assert.equal(meetsHotCardFloor({ currentBid: 24.99 }), false);
   assert.equal(meetsHotCardFloor({ currentBid: 0 }), false);
+});
+
+test("deck eligibility requires at least one high-end signal", () => {
+  assert.equal(hasHighEndSignal({ title: "2024 Rookie Patch Auto /25" }), true);
+  assert.equal(hasHighEndSignal({ title: "1987 Topps Baseball Card", currentBid: 250 }), false);
 });
 
 test("active auctions remain eligible when eBay omits bid counters", () => {
