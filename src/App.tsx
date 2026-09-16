@@ -16,7 +16,6 @@ const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || ""
 const WATCHLIST_KEY    = "cardmatch:watchlist";
 const ONBOARDING_KEY   = "cardmatch:onboarding_done";
 const PREFS_KEY        = "cardmatch:preferences";
-const TAG_WEIGHTS_KEY  = "cardmatch:tag_weights";
 const SEEN_KEY         = "cardmatch:seen_ids";         // persists seen card IDs across sessions
 const SWIPE_HISTORY_KEY_PREFIX = "cardmatch:swipe_history";
 const GUEST_SWIPE_HISTORY_KEY = "cardmatch:guest_swipe_history";
@@ -45,11 +44,7 @@ type PassedEntry = { id: string; passedAt: string }; // passedAt is ISO-8601
 const PASSED_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000;
 
 type Preferences = {
-  categoryScores: Record<string, number>;
-  eraScores:      Record<string, number>;
-  styleScores:    Record<string, number>;
-  topCategories:  string[];
-  selectedCategories?: string[];
+  selectedCategories: string[];
   preferenceMode?: "selected" | "trending";
   onboardingComplete?: boolean;
 };
@@ -88,13 +83,22 @@ function loadPrefs(): Preferences | null {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as Preferences;
+    return normalizePreferences(JSON.parse(raw));
   } catch { return null; }
 }
 
-function loadTagWeights(): Record<string, number> {
-  try { return JSON.parse(localStorage.getItem(TAG_WEIGHTS_KEY) || "{}"); }
-  catch { return {}; }
+function normalizePreferences(value: unknown): Preferences {
+  const parsed = (value && typeof value === "object" ? value : {}) as Partial<Preferences> & {
+    topCategories?: string[];
+  };
+  const selectedCategories = Array.isArray(parsed.selectedCategories)
+    ? parsed.selectedCategories
+    : (Array.isArray(parsed.topCategories) ? parsed.topCategories : []);
+  return {
+    selectedCategories,
+    preferenceMode: parsed.preferenceMode || (selectedCategories.length ? "selected" : "trending"),
+    onboardingComplete: parsed.onboardingComplete ?? true,
+  };
 }
 
 function swipeHistoryKey(userId: string): string {
@@ -229,6 +233,8 @@ function persistPassedIds(
 
 function getInitialMode(): AppMode {
   try {
+    // Remove the retired local learned-preference cache.
+    localStorage.removeItem("cardmatch:tag_weights");
     if (localStorage.getItem(ONBOARDING_KEY) || localStorage.getItem(PREFS_KEY)) return "feed-loading";
     // If Supabase is configured, hold in session-checking so initSession()
     // can decide whether to restore a cross-device profile or show the quiz.
@@ -239,8 +245,8 @@ function getInitialMode(): AppMode {
 
 /**
  * Builds the /api/feed URL.
- * The server fetches only the selected categories, or its curated fallback
- * mix when onboarding was skipped.  Swipe weights are intentionally omitted.
+ * The server fetches only the selected categories, or its curated high-end
+ * fallback mix when preferences are skipped.
  *
  * Passed IDs are given highest dedup priority in the `seen` param — they fill
  * their slots first (up to 200), then remaining slots go to recent seen IDs.
@@ -312,7 +318,6 @@ export default function App() {
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const currentOffsetRef       = useRef(0);
-  const tagWeightsRef          = useRef<Record<string, number>>(loadTagWeights());
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -333,12 +338,10 @@ export default function App() {
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
     // Guard: redirect to onboarding only when the user genuinely hasn't completed
-    // it yet.  Once ONBOARDING_KEY is set we must never send them back — even if
-    // tagWeights are temporarily absent (e.g. all-negative quiz, network error).
-    const hasWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
-    const hasPrefs   = !!prefsRef.current?.topCategories?.length;
+    // it yet. Empty selectedCategories intentionally means curated trending feed.
     const doneOnboarding = !!localStorage.getItem(ONBOARDING_KEY);
-    if (!hasWeights && !hasPrefs && !doneOnboarding) {
+    const hasSelectedCategories = !!prefsRef.current?.selectedCategories?.length;
+    if (!hasSelectedCategories && !doneOnboarding) {
       setAppMode("onboarding");
       return;
     }
@@ -421,7 +424,6 @@ export default function App() {
   function flushProfileToSupabase(
     userId: string,
     preferencesOverride?: Preferences | null,
-    tagWeightsOverride?: Record<string, number>,
   ): Promise<boolean> {
     if (!supabase) return Promise.resolve(false);
 
@@ -432,20 +434,18 @@ export default function App() {
           return false;
         }
 
-        const pendingSwipes = swipeHistoryRef.current;
-        const { error } = await supabase.rpc("merge_user_profile", {
-          p_user_id: userId,
-          p_swipes: pendingSwipes,
-          p_preferences: preferencesOverride ?? prefsRef.current ?? {},
-          p_tag_weights: tagWeightsOverride ?? tagWeightsRef.current ?? {},
-        });
+        const { error } = await supabase.from("user_preferences").upsert({
+          user_id: userId,
+          preferences: preferencesOverride ?? prefsRef.current ?? {},
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id" });
 
         if (error) {
           console.warn("[profile] Supabase write failed; retained locally for retry:", error.message);
           return false;
         }
 
-        console.log(`[profile] merged ${pendingSwipes.length} swipe events into Supabase`);
+        console.log("[profile] saved explicit preferences to Supabase");
         return true;
       } catch (error) {
         console.warn("[profile] Supabase write exception; retained locally for retry:", error);
@@ -531,17 +531,15 @@ export default function App() {
     if (!guestSwipes.length && !hasGuestPreferences) return;
 
     let remotePreferences: Preferences | null = null;
-    let remoteTagWeights: Record<string, number> = {};
     let remoteSwipes: SwipeRecord[] = [];
     if (supabase) {
       const { data, error } = await supabase
         .from("user_quiz_results")
-        .select("preferences,tag_weights,swipes")
+        .select("preferences,swipes")
         .eq("user_id", userId)
         .maybeSingle();
       if (error || currentUserIdRef.current !== userId) return;
-      remotePreferences = data?.preferences as Preferences | null;
-      remoteTagWeights = (data?.tag_weights as Record<string, number>) || {};
+      remotePreferences = data?.preferences ? normalizePreferences(data.preferences) : null;
       remoteSwipes = Array.isArray(data?.swipes) ? data.swipes as SwipeRecord[] : [];
     }
 
@@ -552,18 +550,13 @@ export default function App() {
     ]));
     const mergedPreferences: Preferences | null = remotePreferences || localPreferences
       ? {
-          ...(remotePreferences ?? {
-            categoryScores: {}, eraScores: {}, styleScores: {}, topCategories: [],
-          }),
+          preferenceMode: "trending",
+          onboardingComplete: true,
+          ...(remotePreferences ?? {}),
           ...(localPreferences ?? {}),
           selectedCategories,
-          topCategories: selectedCategories.slice(0, 3),
         }
       : null;
-    const mergedTagWeights = {
-      ...remoteTagWeights,
-      ...(hasGuestPreferences ? tagWeightsRef.current : {}),
-    };
 
     swipeHistoryRef.current = mergeSwipeHistory(
       remoteSwipes,
@@ -577,10 +570,7 @@ export default function App() {
       setPrefs(mergedPreferences);
       localStorage.setItem(PREFS_KEY, JSON.stringify(mergedPreferences));
     }
-    tagWeightsRef.current = mergedTagWeights;
-    localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(mergedTagWeights));
-
-    const saved = await flushProfileToSupabase(userId, mergedPreferences, mergedTagWeights);
+    const saved = await flushProfileToSupabase(userId, mergedPreferences);
     if (saved) {
       localStorage.removeItem(GUEST_SWIPE_HISTORY_KEY);
       localStorage.removeItem(GUEST_PROFILE_PENDING_KEY);
@@ -591,7 +581,6 @@ export default function App() {
     userId:      string,
     swipes:      SwipeRecord[],
     preferences: Preferences | null,
-    tagWeights:  Record<string, number>
   ): Promise<boolean> {
     const completedAt = new Date().toISOString();
     const onboardingEvents = swipes.map((swipe, index): SwipeRecord => ({
@@ -602,7 +591,7 @@ export default function App() {
     }));
     swipeHistoryRef.current = mergeSwipeHistory(swipeHistoryRef.current, onboardingEvents);
     persistSwipeHistory(userId, swipeHistoryRef.current);
-    return flushProfileToSupabase(userId, preferences, tagWeights);
+    return flushProfileToSupabase(userId, preferences);
   }
 
   // ── Passed-IDs: remote hydration + atomic RPC sync to Supabase ────────────
@@ -793,7 +782,7 @@ export default function App() {
 
     // ── Shared helper: fetch + restore profile from Supabase ──────────────────
     /**
-     * Pulls tag_weights and preferences from Supabase for userId, merges them
+     * Pulls explicit category preferences from Supabase for userId, merges them
      * into local state/refs, and — if the user completed onboarding on another
      * device — sets ONBOARDING_KEY, hydrates remote passed IDs, and calls
      * loadFeed() to skip the quiz.
@@ -816,7 +805,7 @@ export default function App() {
       try {
         const resp = await supabase
           .from("user_quiz_results")
-          .select("tag_weights, preferences, swipes")
+        .select("preferences, swipes")
           .eq("user_id", userId)
           .maybeSingle();
 
@@ -842,20 +831,9 @@ export default function App() {
           void flushProfileToSupabase(userId);
         }
 
-        // Restore tag_weights: Supabase is the source of truth for cross-device;
-        // local recent swipes win on key conflicts (they are newer).
-        if (data.tag_weights && typeof data.tag_weights === "object") {
-          const merged = {
-            ...(data.tag_weights as Record<string, number>),
-            ...tagWeightsRef.current,
-          };
-          tagWeightsRef.current = merged;
-          localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(merged));
-        }
-
         // Restore preferences if absent locally (new browser / new device).
         if (data.preferences && typeof data.preferences === "object" && !prefsRef.current) {
-          const p = data.preferences as Preferences;
+          const p = normalizePreferences(data.preferences);
           prefsRef.current = p;
           setPrefs(p);
           localStorage.setItem(PREFS_KEY, JSON.stringify(p));
@@ -863,25 +841,19 @@ export default function App() {
 
         // Cross-device recovery: user finished onboarding on another device.
         //
-        // Use swipes as the primary completion indicator — a non-empty swipes
-        // array is written by saveQuizToSupabase() at the end of onboarding and
-        // is reliable regardless of score sign.  A user who passed every card
-        // will have only negative tag_weights but still has a completed quiz.
-        //
-        // Positive tag_weights are kept as a secondary indicator to handle
-        // accounts whose quiz row predates the swipes column.
+        // Use swipes or the explicit preference record as the completion
+        // indicator. A trending profile is valid even with no categories.
         const restoredPreferences = data.preferences && typeof data.preferences === "object"
-          ? data.preferences as Preferences
+          ? normalizePreferences(data.preferences)
           : null;
         const hasCompletedQuiz = Array.isArray(data.swipes) && (data.swipes as unknown[]).length > 0;
-        const hasPositiveWeights = Object.values(tagWeightsRef.current).some((w) => w > 0);
         const hasSavedCategories = Boolean(
           restoredPreferences?.onboardingComplete ||
           restoredPreferences?.selectedCategories?.length ||
           restoredPreferences?.preferenceMode === "trending"
         );
 
-        if ((hasCompletedQuiz || hasPositiveWeights || hasSavedCategories) && !localStorage.getItem(ONBOARDING_KEY)) {
+        if ((hasCompletedQuiz || hasSavedCategories) && !localStorage.getItem(ONBOARDING_KEY)) {
           // Check signal before committing any side-effects; the caller's safety
           // timer may have already transitioned the UI to onboarding.
           if (signal?.aborted) return "error";
@@ -972,7 +944,7 @@ export default function App() {
               const savedPrefs = (() => {
                 try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
               })();
-              saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs, tagWeightsRef.current);
+              saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs);
               // Hydrate passed IDs in background.
               hydrateRemotePassedIds(userId).then(() => {
                 if (currentUserIdRef.current === userId) {
@@ -1029,7 +1001,7 @@ export default function App() {
 
     /**
      * For returning users: merge Supabase data BEFORE triggering the feed,
-     * so the first fetch is driven by up-to-date weights.
+     * so the first fetch uses the latest explicit categories.
      *
      * Also handles cross-device login: if a user has Supabase quiz data but
      * no ONBOARDING_KEY in this browser, we restore their profile and skip
@@ -1128,7 +1100,7 @@ export default function App() {
                 const savedPrefs = (() => {
                   try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
                 })();
-                saveQuizToSupabase(userId, pendingSwipes, savedPrefs, tagWeightsRef.current);
+                saveQuizToSupabase(userId, pendingSwipes, savedPrefs);
               }
             } catch { /* malformed pending_swipes — ignore */ }
 
@@ -1137,7 +1109,7 @@ export default function App() {
             if (signal.aborted) return;
           } else {
             // ── No pending swipes — normal cross-device recovery ──────────
-            // Restore profile (tag_weights + preferences) and handle cross-device
+            // Restore explicit category preferences and handle cross-device
             // recovery. Pass the shared signal so the helper can bail before calling
             // loadFeed() if the safety timer fires mid-query.
             const restoreResult = await restoreProfileFromSupabase(userId, signal);
@@ -1223,7 +1195,7 @@ export default function App() {
       if (userId) {
         // Stage the quiz before any network call. Failed writes remain in the
         // user-scoped local queue and retry during the next profile flush.
-        void saveQuizToSupabase(userId, swipes, prefsRef.current, tagWeightsRef.current);
+        void saveQuizToSupabase(userId, swipes, prefsRef.current);
       }
       const res = await fetch(`${API_BASE}/api/onboarding/complete`, {
         method:  "POST",
@@ -1242,27 +1214,8 @@ export default function App() {
         prefsRef.current = data.preferences;
         setPrefs(data.preferences);
 
-        // 2. Seed tag_weights from all quiz signal dimensions
-        const {
-          categoryScores = {} as Record<string, number>,
-          eraScores      = {} as Record<string, number>,
-          styleScores    = {} as Record<string, number>,
-        } = data.preferences;
-
-        const seedTW: Record<string, number> = { ...tagWeightsRef.current };
-        const addScore = (key: string, score: number) => {
-          const tag = key.toLowerCase().replace(/[\s_]+/g, "-");
-          seedTW[tag] = +(((seedTW[tag] ?? 0) + score).toFixed(2));
-        };
-        Object.entries(categoryScores as Record<string, number>).forEach(([k, v]) => addScore(k, v));
-        Object.entries(eraScores      as Record<string, number>).forEach(([k, v]) => addScore(k, v));
-        Object.entries(styleScores    as Record<string, number>).forEach(([k, v]) => addScore(k, v));
-
-        tagWeightsRef.current = seedTW;
-        localStorage.setItem(TAG_WEIGHTS_KEY, JSON.stringify(seedTW));
-
-        // 3. Persist everything to Supabase immediately (not debounced)
-        //    so cross-device login can restore the full profile later.
+        // 2. Persist explicit preferences to Supabase immediately so
+        // cross-device login can restore the same category feed.
         //
         //    Safety guard: only write if the profile check for this session
         //    confirmed the user has no existing remote profile ("absent") or
@@ -1271,7 +1224,7 @@ export default function App() {
         //    pending_swipes so a re-login can pick it up without risking an
         //    overwrite of data we couldn't verify doesn't exist.
         if (userId) {
-          const saved = await saveQuizToSupabase(userId, swipes, data.preferences, seedTW);
+          const saved = await saveQuizToSupabase(userId, swipes, data.preferences);
           if (!saved) {
             console.warn("[onboarding] quiz retained locally and will retry on the next authenticated write");
           } else {
@@ -1280,7 +1233,7 @@ export default function App() {
         }
       }
 
-      // 4. Show cards returned by onboarding/complete as the initial deck.
+      // 3. Show cards returned by onboarding/complete as the initial deck.
       // Do NOT pre-populate seenIds with these — the live feed draws from the
       // same eBay pool and would return 0 fresh cards if we marked them all seen.
       // Cards the user actually swipes will be added to seenIds individually via
@@ -1327,23 +1280,8 @@ export default function App() {
   }
 
   function applyCategoryPreferences(selectedCategories: string[], skipped: boolean) {
-    const existing = prefsRef.current ?? {
-      categoryScores: {},
-      eraScores: {},
-      styleScores: {},
-      topCategories: [],
-    };
-    const categoryScores = { ...existing.categoryScores };
-
-    for (const category of selectedCategories) {
-      categoryScores[category] = Math.max(categoryScores[category] ?? 0, 2);
-    }
-
     const nextPreferences: Preferences = {
-      ...existing,
-      categoryScores,
       selectedCategories,
-      topCategories: selectedCategories.slice(0, 3),
       preferenceMode: skipped ? "trending" : "selected",
       onboardingComplete: true,
     };

@@ -9,6 +9,7 @@ import {
   TCG_HOT_KEYWORDS,
   buildHotSearchQuery,
   hotEngagementScore,
+  hotQualityScore,
   hotPriceFilter,
   hotTermsForCategory,
   isAuctionListing,
@@ -53,9 +54,9 @@ test("hot-card floor rejects sub-$30 and missing-price listings", () => {
   assert.equal(meetsHotCardFloor({ currentBid: 0 }), false);
 });
 
-test("active-auction gate rejects listings without a bid", () => {
+test("active auctions remain eligible when eBay omits bid counters", () => {
   assert.equal(isAuctionListing({ listingType: "Auction" }), true);
-  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 100 }), false);
+  assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 0, watchCount: 100 }), true);
   assert.equal(passesHotEngagement({ listingType: "Auction", bidCount: 1, watchCount: 0 }), true);
 });
 
@@ -68,4 +69,26 @@ test("candidate ordering uses bids and watchers with the weighted score", () => 
   assert.equal(hotEngagementScore(cards[0]), 9);
   cards.sort(sortHotCards);
   assert.deepEqual(cards.map(({ id }) => id), ["bids", "watchers", "quiet"]);
+});
+
+test("high-end quality signals outrank a quiet raw listing", () => {
+  const premiumAuction = {
+    id: "premium",
+    listingType: "Auction",
+    bidCount: 2,
+    watchCount: 0,
+    grade: "PSA 10",
+    title: "2024 Rookie Auto 1/1",
+  };
+  const rawBuyItNow = {
+    id: "raw",
+    listingType: "Buy It Now",
+    bidCount: 0,
+    watchCount: 0,
+    grade: "Raw",
+    title: "2024 Base Card",
+  };
+
+  assert.ok(hotQualityScore(premiumAuction) > hotQualityScore(rawBuyItNow));
+  assert.equal([rawBuyItNow, premiumAuction].sort(sortHotCards)[0].id, "premium");
 });

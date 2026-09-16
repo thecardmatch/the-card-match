@@ -95,6 +95,7 @@ export function isJunk(card) {
   ) || [];
   const vague = meaningful.length === 0;
   const bulkOrSealed = /\b(repack|digital|custom|lot|lots|base set|complete set|team set|mystery pack|case break)\b/.test(value) ||
+    /\b(?:pack|packs|box|boxes|case|cases|bundle|bundles|blaster|booster|break|breaks|sealed)\b/.test(value) ||
     /\b(?:(?:factory\s+)?sealed|hobby|blaster|booster)\s+(?:box|case|pack)\b|\b(?:box|case|pack)\s+of\s+\d+\b/.test(value);
   const cardRelicContext = /\b(?:card|rpa)\b/.test(value) && /\b(?:patch|relic|rpa|numbered)\b|\/\d{1,3}\b/.test(value);
   const memorabilia = !cardRelicContext && (

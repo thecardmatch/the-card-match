@@ -951,8 +951,8 @@ app.get("/api/onboarding", (_req, res) => {
 });
 
 // ─── Category → eBay search config (used by /api/onboarding/complete + /api/feed) ──
-// catTerm is the base query; feed layer enriches with attribute tags from tag_weights.
-// Feed searches have a quality floor; adaptive price learning handles bracketing.
+// catTerm is the base query; feed selection uses explicit categories plus fixed
+// high-end card quality signals. It does not learn from feed swipes.
 const CATEGORY_FEED_CONFIG = {
   Football: { categoryId: "215", catTerm: "football trading card", minPrice: 20 },
   Basketball: { categoryId: "214", catTerm: "basketball trading card", minPrice: 20 },
@@ -1033,6 +1033,8 @@ const CAT_TAG_TO_CONFIG_OB = {
   hockey:     "Hockey",    soccer:     "Soccer",      pokemon:    "Pokemon",
   mtg:        "MTG",       racing:     "Racing",      popculture: "PopCulture",
 };
+const canonicalOnboardingCategory = (category) =>
+  ({ MTG: "Magic: The Gathering", Racing: "F1" }[String(category)] || String(category));
 
 app.post("/api/onboarding/complete", async (req, res) => {
       try {
@@ -1048,21 +1050,19 @@ app.post("/api/onboarding/complete", async (req, res) => {
           swipeCount: Array.isArray(onboardingSwipes) ? onboardingSwipes.length : 0,
         });
 
-        // 1. Compute preference scores
-        const categoryScores = {};
-        const eraScores      = {};
-        const styleScores    = {};
-        for (const s of onboardingSwipes) {
-          if (!s) continue;
-          const delta = s.action === "LIKE" ? 1 : -1;
-          if (s.category) categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
-          if (s.attributes?.era)   eraScores[s.attributes.era]     = (eraScores[s.attributes.era]     || 0) + delta;
-          if (s.attributes?.style) styleScores[s.attributes.style] = (styleScores[s.attributes.style] || 0) + delta;
-        }
-
-        const rankedCats    = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
-        const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
-        const preferences   = { categoryScores, eraScores, styleScores, topCategories };
+        // Onboarding only captures explicit category preferences. Feed swipes
+        // never update these preferences or influence later ranking.
+        const selectedCategories = [...new Set(
+          onboardingSwipes
+            .filter((swipe) => swipe?.action === "LIKE" && swipe.category)
+            .map((swipe) => canonicalOnboardingCategory(swipe.category))
+            .filter((category) => CATEGORY_FEED_CONFIG[category])
+        )];
+        const preferences = {
+          selectedCategories,
+          preferenceMode: selectedCategories.length > 0 ? "selected" : "trending",
+          onboardingComplete: true,
+        };
         const completedAt   = new Date().toISOString();
         const persistedSwipes = onboardingSwipes.map((swipe, index) => ({
           ...swipe,
@@ -1109,7 +1109,6 @@ app.post("/api/onboarding/complete", async (req, res) => {
                 user_id: authenticatedUserId,
                 preferences,
                 swipes: mergedSwipes,
-                tag_weights: categoryScores,
                 updated_at: new Date().toISOString(),
               }, { onConflict: "user_id" });
               if (quizErr) {
@@ -1131,66 +1130,51 @@ app.post("/api/onboarding/complete", async (req, res) => {
           persistence = { saved: false, reason: "missing_supabase_config" };
         }
 
-        // 2. Only fetch from positively-scored categories (proportionally)
-        const positiveCats = rankedCats.filter(([, score]) => score > 0)
-          .filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
-
-        const fetchSource = positiveCats.length > 0
-          ? positiveCats
-          : rankedCats.slice(0, 2).filter(([cat]) => { const k = cat.toLowerCase().replace(/[\s_]+/g, "-"); return CAT_TAG_TO_CONFIG_OB[k] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG_OB[k]]; });
-
-        if (fetchSource.length === 0) return res.json({ preferences, cards: [], persistence });
-
-        const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
-        const TARGET     = 60;
-        const fetchPlan  = fetchSource.map(([cat, score]) => {
-          const configKey  = CAT_TAG_TO_CONFIG_OB[cat.toLowerCase().replace(/[\s_]+/g, "-")] || cat;
-          const proportion = score / totalScore;
-          return { configKey, proportion, budget: Math.max(15, Math.ceil(TARGET * proportion)) };
-        });
-
-        console.log(`[onboarding/complete] plan: ${fetchPlan.map((p) => `${p.configKey}(${Math.round(p.proportion * 100)}%)`).join(", ")}`);
-
-        // 3. Proportional parallel fetch — uses catTerm (no hardcoded player names)
+        // 2. Fetch selected categories or the curated high-end fallback.
+        const fetchCategories = selectedCategories.length > 0 ? selectedCategories : FALLBACK_CATEGORIES;
         const token    = await getEbayToken();
         const allItems = [];
+        const desirableTerms = selectDesirableTerms();
 
         await Promise.all(
-          fetchPlan.map(async ({ configKey, budget }) => {
-            const cfg = CATEGORY_FEED_CONFIG[configKey];
+          fetchCategories.map(async (category) => {
+            const cfg = CATEGORY_FEED_CONFIG[category];
             if (!cfg) return;
-            const { catTerm, categoryId } = cfg;
-            const pf      = "price:[0.99..],priceCurrency:USD";
-            const perHalf = Math.ceil(budget / 2);
-            const searches = [
-              ebaySearch(token, catTerm, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perHalf * 0.65), 0),
-              ebaySearch(token, catTerm, "bestMatch",      `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perHalf * 0.35), 0),
-            ];
+            const searches = desirableTerms.map((keyword) =>
+              ebaySearch(
+                token,
+                buildHotSearchQuery(cfg.catTerm, keyword),
+                "endingSoonest",
+                `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+                null,
+                cfg.categoryId,
+                Math.max(4, Math.ceil(40 / fetchCategories.length)),
+                0,
+              )
+            );
             const settled = await Promise.allSettled(searches);
             for (const r of settled) {
               if (r.status !== "fulfilled") continue;
               for (const raw of (r.value.itemSummaries || [])) {
-                if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [configKey]));
+                if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [category]));
               }
             }
           })
         );
 
-        // 4. Deduplicate, score, sort
+        // 3. Filter and rank using fixed high-end card signals.
         const seen = new Set();
-        const now  = Date.now();
-        const unique = allItems.filter((i) => { if (seen.has(i.id)) return false; seen.add(i.id); return true; });
-        const scored = unique.map((item) => {
-          let urgency = 1;
-          if (item.endTime) {
-            const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
-            if (hrs > 0 && hrs < 2) urgency = 3; else if (hrs < 12) urgency = 2;
-          }
-          const catScore = categoryScores[item.category] ?? 0;
-          return { ...item, rankScore: (item.engagementScore + Math.max(catScore, 0) * 5) * urgency };
+        const unique = allItems.filter((item) => {
+          if (seen.has(item.id)) return false;
+          seen.add(item.id);
+          return meetsHotCardFloor(item) && !isJunk(item);
         });
-        scored.sort((a, b) => b.rankScore - a.rankScore);
-        const cards = scored.slice(0, 40);
+        const enriched = await enrichFeedItemsWithEngagement(token, unique.slice(0, 120));
+        const cards = enriched
+          .filter(passesHotEngagement)
+          .sort(sortHotCards)
+          .slice(0, 40)
+          .map(canonicalFeedItem);
 
         console.log(`[onboarding/complete] returning ${cards.length} cards`);
         return res.json({ preferences, cards, persistence });
@@ -1200,7 +1184,8 @@ app.post("/api/onboarding/complete", async (req, res) => {
       }
     });
 // ─── GET /api/feed and /api/deck — category-only hot-card feed ────────────────
-// Mirrors functions/api/feed.js and intentionally ignores learned weights.
+// Mirrors functions/api/feed.js and uses only explicit categories plus fixed
+// high-end card quality signals.
 const CAT_TAG_TO_CONFIG_FEED = {
   football:   "Football",
   basketball: "Basketball",
@@ -1687,20 +1672,18 @@ app.get("/api/auth/google/callback", async (req, res) => {
 });
 
 // Shared authenticated preference persistence used by swipe and settings routes.
-async function persistCompatibilitySwipe(supabase, userId, event, preferences, tagWeights) {
+async function persistCompatibilitySwipe(supabase, userId, event, preferences) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { data: stored, error: readError } = await supabase.from("user_preferences")
-      .select("weights,swipes,updated_at").eq("user_id", userId).maybeSingle();
+      .select("swipes,updated_at").eq("user_id", userId).maybeSingle();
     if (readError) return { error: readError };
     const byId = new Map((Array.isArray(stored?.swipes) ? stored.swipes : [])
       .map((value, index) => [value.eventId || `legacy:${index}`, value]));
     const duplicate = byId.has(event.eventId);
     byId.set(event.eventId, event);
     const payload = {
-      user_id: userId, preferences, tag_weights: tagWeights,
+      user_id: userId, preferences,
       swipes: [...byId.values()],
-      // Swipes are history only; hot-card selection no longer learns weights.
-      weights: { ...(stored?.weights || {}) },
       updated_at: new Date().toISOString(),
     };
     if (!stored) {
@@ -1728,17 +1711,14 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
   if (authError || !auth.user) return res.status(401).json({ saved: false, guest: false, status: "invalid_session" });
   if (body.userId && body.userId !== auth.user.id) return res.status(403).json({ saved: false, guest: false, status: "ownership_mismatch" });
   const [{ data: legacy, error: legacyError }, { data: canonical, error: canonicalError }] = await Promise.all([
-    supabase.from("user_quiz_results").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
-    supabase.from("user_preferences").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_quiz_results").select("preferences,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_preferences").select("preferences,swipes,updated_at").eq("user_id", auth.user.id).maybeSingle(),
   ]);
   if (legacyError || canonicalError) return res.status(500).json({ saved: false, status: "read_failed", error: (legacyError || canonicalError).message });
   const old = canonical && (!legacy || Date.parse(canonical.updated_at || 0) >= Date.parse(legacy.updated_at || 0))
     ? canonical : legacy;
   const preferences = { ...(old?.preferences || {}), ...(body.preferences || {}) };
   if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
-  const tag_weights = includeSwipe
-    ? { ...(old?.tag_weights || {}) }
-    : { ...(old?.tag_weights || {}), ...(body.tagWeights || {}), ...(body.tag_weights || {}) };
   let normalizedEvent = null;
   if (includeSwipe && body.event && typeof body.event === "object") {
     normalizedEvent = {
@@ -1746,43 +1726,32 @@ async function savePreferencePayload(req, res, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    // Do not call the legacy preference-adjusting RPC.  It changes weights,
-    // which is intentionally disabled for category-only hot-card mode.
+    // Feed swipes are history only and never change explicit preferences.
   }
   if (!includeSwipe) {
-    const { error: preferenceError } = await supabase.rpc("merge_user_preferences", {
-      p_user_id: auth.user.id,
-      p_preferences: preferences,
-      p_tag_weights: tag_weights,
-    });
-    if (preferenceError && preferenceError.code !== "PGRST202") {
-      return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: preferenceError.message });
-    }
     const { error: canonicalError } = await supabase.from("user_preferences").upsert({
-      user_id: auth.user.id, preferences, tag_weights, updated_at: new Date().toISOString(),
+      user_id: auth.user.id, preferences, updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     if (canonicalError) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: canonicalError.message });
-    return res.json({ saved: true, guest: false, status: preferenceError ? "persisted_canonical" : "persisted_atomic", preferences, tag_weights });
+    return res.json({ saved: true, guest: false, status: "persisted_canonical", preferences });
   }
   if (!normalizedEvent) return res.status(400).json({ saved: false, error: "event is required" });
-  const compat = await persistCompatibilitySwipe(supabase, auth.user.id, normalizedEvent, preferences, tag_weights);
+  const compat = await persistCompatibilitySwipe(supabase, auth.user.id, normalizedEvent, preferences);
   if (compat.error) return res.status(500).json({ saved: false, guest: false, status: "write_failed", error: compat.error.message });
-  // user_preferences is the canonical compatibility store. Avoid mirroring a
-  // stale swipe snapshot into the legacy quiz row during concurrent requests.
-  return res.json({ saved: true, guest: false, status: compat.duplicate ? "persisted_duplicate" : "persisted_compat_weights", preferences, tag_weights });
+  return res.json({ saved: true, guest: false, status: compat.duplicate ? "persisted_duplicate" : "persisted_history", preferences });
 }
 app.post("/api/swipe", (req, res) => savePreferencePayload(req, res, true));
 app.get("/api/preferences", async (req, res) => {
   const token = (req.get("authorization") || "").match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token) return res.json({ authenticated: false, guest: true, preferences: {}, tag_weights: {} });
+  if (!token) return res.json({ authenticated: false, guest: true, preferences: {} });
   if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(503).json({ authenticated: false, error: "missing_supabase_config" });
   const service = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, service ? undefined : { global: { headers: { Authorization: `Bearer ${token}` } } });
   const { data: auth, error: authError } = await supabase.auth.getUser(token);
   if (authError || !auth.user) return res.status(401).json({ authenticated: false, error: "invalid_session" });
   const [{ data: legacy, error }, { data: learned, error: learnedError }] = await Promise.all([
-    supabase.from("user_quiz_results").select("preferences,tag_weights,updated_at").eq("user_id", auth.user.id).maybeSingle(),
-    supabase.from("user_preferences").select("preferences,tag_weights,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_quiz_results").select("preferences,updated_at").eq("user_id", auth.user.id).maybeSingle(),
+    supabase.from("user_preferences").select("preferences,updated_at").eq("user_id", auth.user.id).maybeSingle(),
   ]);
   if (error || learnedError) return res.status(500).json({ error: (error || learnedError).message });
   const canonicalIsNewest = learned && (!legacy ||
@@ -1791,7 +1760,6 @@ app.get("/api/preferences", async (req, res) => {
   return res.json({
     authenticated: true,
     preferences: current?.preferences || {},
-    tag_weights: current?.tag_weights || {},
   });
 });
 app.put("/api/preferences", (req, res) => savePreferencePayload(req, res));

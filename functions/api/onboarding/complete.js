@@ -11,24 +11,18 @@ import {
   getEbayToken,
   ebaySearch,
   mapFeedItem,
+  enrichFeedItemsWithEngagement,
   isSuppliesCategory,
   CATEGORY_FEED_CONFIG,
 } from "../../_shared/ebay.js";
+import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, selectDesirableTerms, sortHotCards } from "../../_shared/hotCards.js";
+import { isJunk } from "../../_shared/recommendationEngine.js";
 
 export { _cors as onRequestOptions };
 
-// Maps lowercase tag-weight key → CATEGORY_FEED_CONFIG key (matches feed.js)
-const CAT_TAG_TO_CONFIG = {
-  football:   "Football",
-  basketball: "Basketball",
-  baseball:   "Baseball",
-  hockey:     "Hockey",
-  soccer:     "Soccer",
-  pokemon:    "Pokemon",
-  mtg:        "MTG",
-  racing:     "Racing",
-  popculture: "PopCulture",
-};
+function canonicalCategory(category) {
+  return { MTG: "Magic: The Gathering", Racing: "F1" }[String(category)] || String(category);
+}
 
 export async function onRequestPost(context) {
   // Fall back to process.env if context.env is undefined (Replit / Node runtime)
@@ -56,26 +50,19 @@ export async function onRequestPost(context) {
   });
 
   try {
-    // ── 1. Compute preference scores from quiz swipes ─────────────────────────
-    const categoryScores = {};
-    const eraScores      = {};
-    const styleScores    = {};
-
-    for (const s of onboardingSwipes) {
-      if (!s || !s.category) continue;
-      const delta = s.action === "LIKE" ? 1 : -1;
-      categoryScores[s.category] = (categoryScores[s.category] || 0) + delta;
-
-      const era   = s.attributes?.era;
-      const style = s.attributes?.style;
-      if (era)   eraScores[era]     = (eraScores[era]     || 0) + delta;
-      if (style) styleScores[style] = (styleScores[style] || 0) + delta;
-    }
-
-    // topCategories: top 3 by score
-    const rankedCats = Object.entries(categoryScores).sort((a, b) => b[1] - a[1]);
-    const topCategories = rankedCats.slice(0, 3).map(([cat]) => cat);
-    const preferences   = { categoryScores, eraScores, styleScores, topCategories };
+    // The quiz is only a one-time category picker. Feed swipes never change
+    // these preferences or the feed ranking.
+    const selectedCategories = [...new Set(
+      onboardingSwipes
+        .filter((swipe) => swipe?.action === "LIKE" && swipe.category)
+        .map((swipe) => canonicalCategory(swipe.category))
+        .filter((category) => CATEGORY_FEED_CONFIG[category])
+    )];
+    const preferences = {
+      selectedCategories,
+      preferenceMode: selectedCategories.length > 0 ? "selected" : "trending",
+      onboardingComplete: true,
+    };
     const completedAt   = new Date().toISOString();
     const persistedSwipes = onboardingSwipes.map((swipe, index) => ({
       ...swipe,
@@ -130,7 +117,6 @@ export async function onRequestPost(context) {
             user_id: authenticatedUserId,
             preferences,
             swipes: mergedSwipes,
-            tag_weights: categoryScores,
             updated_at: new Date().toISOString(),
           }, { onConflict: "user_id" });
           if (quizErr) {
@@ -152,91 +138,54 @@ export async function onRequestPost(context) {
       console.warn("[onboarding/complete] Supabase environment variables missing; skipping DB write.");
     }
 
-    // ── 3. Build proportional fetch plan from positively-scored categories ────
-    const positiveCats = rankedCats
-      .filter(([, score]) => score > 0)
-      .filter(([cat]) => {
-        const key = cat.toLowerCase().replace(/[\s_]+/g, "-");
-        return CAT_TAG_TO_CONFIG[key] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG[key]];
-      });
-
-    const fetchSource = positiveCats.length > 0
-      ? positiveCats
-      : rankedCats.slice(0, 2).filter(([cat]) => {
-          const key = cat.toLowerCase().replace(/[\s_]+/g, "-");
-          return CAT_TAG_TO_CONFIG[key] && CATEGORY_FEED_CONFIG[CAT_TAG_TO_CONFIG[key]];
-        });
-
-    if (fetchSource.length === 0) {
-      console.warn("[onboarding/complete] no fetchable categories — returning empty cards");
-      return jsonResponse({ preferences, cards: [], persistence });
-    }
-
-    const totalScore = fetchSource.reduce((sum, [, s]) => sum + s, 0);
-    const TARGET     = 60;
-
-    const fetchPlan = fetchSource.map(([cat, score]) => {
-      const configKey  = CAT_TAG_TO_CONFIG[cat.toLowerCase().replace(/[\s_]+/g, "-")] || cat;
-      const proportion = score / totalScore;
-      const budget     = Math.max(15, Math.ceil(TARGET * proportion));
-      return { configKey, cat, score, proportion, budget };
-    });
-
-    // ── 4. Proportional parallel eBay fetch ───────────────────────────────────
+    // ── 3. Fetch selected categories or the curated high-end fallback ────────
+    const fetchCategories = selectedCategories.length > 0
+      ? selectedCategories
+      : FALLBACK_CATEGORIES;
     const token    = await getEbayToken(env);
     const allItems = [];
+    const desirableTerms = selectDesirableTerms();
 
     await Promise.all(
-      fetchPlan.map(async ({ configKey, proportion, budget }) => {
-        const cfg = CATEGORY_FEED_CONFIG[configKey];
+      fetchCategories.map(async (category) => {
+        const cfg = CATEGORY_FEED_CONFIG[category];
         if (!cfg) return;
-        const { terms, categoryId, minPrice } = cfg;
-        const pf = `price:[${minPrice}..],priceCurrency:USD`;
-
-        const termCount = proportion >= 0.45 ? Math.min(2, terms.length) : 1;
-        const perTerm   = Math.ceil(budget / termCount);
-
-        const searches = terms.slice(0, termCount).flatMap((term) => [
-          ebaySearch(token, term, "endingSoonest", `${pf},buyingOptions:{AUCTION}`,     null, categoryId, Math.ceil(perTerm * 0.65), 0),
-          ebaySearch(token, term, "bestMatch",      `${pf},buyingOptions:{FIXED_PRICE}`, null, categoryId, Math.ceil(perTerm * 0.35), 0),
-        ]);
+        const searches = desirableTerms.map((keyword) =>
+          ebaySearch(
+            token,
+            buildHotSearchQuery(cfg.catTerm, keyword),
+            "endingSoonest",
+            `${hotPriceFilter()},buyingOptions:{AUCTION}`,
+            null,
+            cfg.categoryId,
+            Math.max(4, Math.ceil(40 / fetchCategories.length)),
+            0,
+          )
+        );
 
         const settled = await Promise.allSettled(searches);
         for (const r of settled) {
           if (r.status !== "fulfilled") continue;
           for (const raw of (r.value.itemSummaries || [])) {
-            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [configKey]));
+            if (!isSuppliesCategory(raw)) allItems.push(mapFeedItem(raw, [category]));
           }
         }
       })
     );
 
-    // ── 5. Deduplicate, score by category affinity, sort, slice ──────────────
+    // ── 4. Filter and rank by fixed high-end card signals ────────────────────
     const seen = new Set();
-    const now  = Date.now();
-
     const unique = allItems.filter((item) => {
       if (seen.has(item.id)) return false;
       seen.add(item.id);
-      return true;
+      return meetsHotCardFloor(item) && !isJunk(item);
     });
-
-    const scored = unique.map((item) => {
-      let urgency = 1;
-      if (item.endTime) {
-        const hrs = (new Date(item.endTime).getTime() - now) / 3_600_000;
-        if (hrs > 0 && hrs < 2)      urgency = 3;
-        else if (hrs < 12)         urgency = 2;
-      }
-      const catScore = categoryScores[item.category] ?? 0;
-      return {
-        ...item,
-        rankScore: (item.engagementScore + Math.max(catScore, 0) * 5) * urgency,
-      };
-    });
-
-    scored.sort((a, b) => b.rankScore - a.rankScore);
-    const cards = scored.slice(0, 40);
+    const enriched = await enrichFeedItemsWithEngagement(token, unique.slice(0, 120));
+    const cards = enriched
+      .filter(passesHotEngagement)
+      .sort(sortHotCards)
+      .slice(0, 40)
+      .map(canonicalFeedItem);
 
     return jsonResponse({ preferences, cards, persistence });
 

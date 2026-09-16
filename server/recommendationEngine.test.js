@@ -18,6 +18,8 @@ test("rejects vague listings, sealed product, lots, and autographed memorabilia"
     "2024 NFL Football Card",
     "Football Card Lot", "Factory Sealed Hobby Box", "Case of 12 Baseball Boxes",
     "2024 Topps Chrome Sealed Box",
+    "2025 Football Trading Card Packs",
+    "2025 Basketball Card Break Bundle",
     "Patrick Mahomes Signed Football", "Shohei Ohtani Autographed Jersey",
     "Tom Brady Signed Mini Helmet",
     "Michael Jordan Autographed Photograph",

@@ -20,10 +20,10 @@ export async function authenticatedClient(env, request, requestedUserId) {
   return { client, userId: data.user.id };
 }
 const object = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-async function persistCompatibilitySwipe(client, userId, event, preferences, tagWeights) {
+async function persistCompatibilitySwipe(client, userId, event, preferences) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const { data: stored, error: readError } = await client.from("user_preferences")
-      .select("weights,swipes,updated_at").eq("user_id", userId).maybeSingle();
+      .select("swipes,updated_at").eq("user_id", userId).maybeSingle();
     if (readError) return { error: readError };
     const priorSwipes = Array.isArray(stored?.swipes) ? stored.swipes : [];
     const byId = new Map(priorSwipes.map((value, index) => [value.eventId || `legacy:${index}`, value]));
@@ -33,11 +33,7 @@ async function persistCompatibilitySwipe(client, userId, event, preferences, tag
     const payload = {
       user_id: userId,
       preferences,
-      tag_weights: tagWeights,
       swipes: [...byId.values()],
-      // Swipes are history only.  Do not alter learned weights while the app
-      // is operating in category-only hot-card mode.
-      weights: object(stored?.weights),
       updated_at: timestamp,
     };
     if (!stored) {
@@ -59,17 +55,14 @@ export async function saveUserData(env, request, body, includeSwipe = false) {
   if (auth.guest) return jsonResponse({ saved: false, guest: true, status: "not_authenticated" });
   if (auth.error) return jsonResponse({ saved: false, guest: false, status: auth.error, error: auth.error }, auth.status);
   const [{ data: legacy, error }, { data: canonical, error: canonicalError }] = await Promise.all([
-    auth.client.from("user_quiz_results").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.userId).maybeSingle(),
-    auth.client.from("user_preferences").select("preferences,tag_weights,swipes,updated_at").eq("user_id", auth.userId).maybeSingle(),
+    auth.client.from("user_quiz_results").select("preferences,swipes,updated_at").eq("user_id", auth.userId).maybeSingle(),
+    auth.client.from("user_preferences").select("preferences,swipes,updated_at").eq("user_id", auth.userId).maybeSingle(),
   ]);
   if (error || canonicalError) return jsonResponse({ saved: false, guest: false, status: "read_failed", error: (error || canonicalError).message }, 500);
   const existing = canonical && (!legacy || Date.parse(canonical.updated_at || 0) >= Date.parse(legacy.updated_at || 0))
     ? canonical : legacy;
   const preferences = { ...object(existing?.preferences), ...object(body.preferences) };
   if (Array.isArray(body.categories)) preferences.selectedCategories = body.categories;
-  const tagWeights = includeSwipe
-    ? object(existing?.tag_weights)
-    : { ...object(existing?.tag_weights), ...object(body.tagWeights), ...object(body.tag_weights) };
   let normalizedEvent = null;
   if (includeSwipe && body.event && typeof body.event === "object") {
     normalizedEvent = {
@@ -77,27 +70,16 @@ export async function saveUserData(env, request, body, includeSwipe = false) {
       eventId: body.event.eventId ||
         `${body.event.cardId || "unknown"}:${body.event.action || "event"}:${body.event.occurredAt || Date.now()}`,
     };
-    // Do not call the legacy preference-adjusting RPC.  It intentionally
-    // changes weights, which is no longer part of feed selection.
+    // Feed swipes are history only; they never change explicit preferences.
   }
   if (!includeSwipe) {
-    const { error: preferenceError } = await auth.client.rpc("merge_user_preferences", {
-      p_user_id: auth.userId,
-      p_preferences: preferences,
-      p_tag_weights: tagWeights,
-    });
-    if (preferenceError && preferenceError.code !== "PGRST202") {
-      return jsonResponse({ saved: false, guest: false, status: "write_failed", error: preferenceError.message }, 500);
-    }
     const { error: canonicalError } = await auth.client.from("user_preferences").upsert({
-      user_id: auth.userId, preferences, tag_weights: tagWeights, updated_at: new Date().toISOString(),
+      user_id: auth.userId, preferences, updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
     if (canonicalError) return jsonResponse({ saved: false, guest: false, status: "write_failed", error: canonicalError.message }, 500);
-    return jsonResponse({ saved: true, guest: false, status: preferenceError ? "persisted_canonical" : "persisted_atomic", preferences, tag_weights: tagWeights });
+    return jsonResponse({ saved: true, guest: false, status: "persisted_canonical", preferences });
   }
-  const compat = await persistCompatibilitySwipe(auth.client, auth.userId, normalizedEvent, preferences, tagWeights);
+  const compat = await persistCompatibilitySwipe(auth.client, auth.userId, normalizedEvent, preferences);
   if (compat.error) return jsonResponse({ saved: false, guest: false, status: "write_failed", error: compat.error.message }, 500);
-  // user_preferences is the canonical compatibility store. Avoid mirroring a
-  // stale swipe snapshot into the legacy quiz row during concurrent requests.
-  return jsonResponse({ saved: true, guest: false, status: compat.duplicate ? "persisted_duplicate" : "persisted_compat_weights", preferences, tag_weights: tagWeights });
+  return jsonResponse({ saved: true, guest: false, status: compat.duplicate ? "persisted_duplicate" : "persisted_history", preferences });
 }

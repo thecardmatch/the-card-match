@@ -1,8 +1,8 @@
 export const HOT_CARD_MIN_PRICE = 30;
 
 export const DESIRABLE_TERMS = [
-  "PSA 10", "BGS 9.5", "Auto Patch", "Refractor", "Rookie RPA",
-  "Kaboom", "Downtown", "Alt Art", "1/1",
+  "PSA 10", "BGS 9.5", "Auto", "Auto Patch", "Refractor", "Rookie RPA",
+  "Kaboom", "Downtown", "Alt Art", "1/1", "/5", "/10", "/15", "/20",
 ];
 
 export const FALLBACK_CATEGORIES = [
@@ -76,8 +76,38 @@ export function hotEngagementScore(item) {
   return (Number(item?.bidCount) || 0) * 3 + (Number(item?.watchCount) || 0) * 2;
 }
 
+function titleText(item) {
+  return String(item?.title || item?.name || "").toLowerCase();
+}
+
+export function hotQualityScore(item) {
+  const title = titleText(item);
+  const grade = String(item?.grade || item?.condition || "").toLowerCase();
+  const tags = Array.isArray(item?.tags) ? item.tags.map((tag) => String(tag).toLowerCase()) : [];
+  const isGraded = /^(?:psa|bgs|sgc|cgc|hga|ags|gma|csg)\s*\d/i.test(grade) ||
+    /\bgraded\b|\bslab\b/i.test(grade) ||
+    tags.includes("graded") || tags.includes("graded_slab");
+  const isAuto = /\bauto(?:graph(?:ed)?|matic)?\b|\bsigned\b/.test(title) ||
+    tags.some((tag) => tag === "auto" || tag === "autograph" || tag === "autographed");
+  const isNumbered = /\b\d+\s*\/\s*(?:\d+|1)\b/.test(title) ||
+    /(?:1\/1|\/(?:5|10|15|20|25|50|99)\b)/.test(title) ||
+    tags.includes("numbered");
+  const isAuction = isAuctionListing(item);
+
+  return (
+    (isAuction ? 40 : 0) +
+    (isGraded ? 24 : 0) +
+    (isAuto ? 22 : 0) +
+    (isNumbered ? 22 : 0) +
+    hotEngagementScore(item)
+  );
+}
+
 export function passesHotEngagement(item) {
-  return !isAuctionListing(item) || (Number(item?.bidCount) || 0) >= 1;
+  // Bid count is a ranking signal, not an eligibility gate. eBay Browse often
+  // omits bid counters even for active auctions, and dropping those cards can
+  // turn an otherwise valid high-end page into an empty deck.
+  return Boolean(item);
 }
 
 export function canonicalFeedItem(item) {
@@ -104,11 +134,12 @@ export function canonicalFeedItem(item) {
 }
 
 export function hotKeywordScore(item) {
-  const text = String(item?.title || item?.name || "").toLowerCase();
+  const text = titleText(item);
   const keywords = isTcgCategory(item?.category) ? TCG_HOT_KEYWORDS : SPORTS_HOT_KEYWORDS;
   return keywords.reduce((score, keyword) => score + (text.includes(keyword.toLowerCase()) ? 1 : 0), 0);
 }
 
 export function sortHotCards(a, b) {
-  return hotEngagementScore(b) - hotEngagementScore(a);
+  return hotQualityScore(b) - hotQualityScore(a) ||
+    hotEngagementScore(b) - hotEngagementScore(a);
 }
