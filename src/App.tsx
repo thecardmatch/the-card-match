@@ -49,8 +49,6 @@ type Preferences = {
   onboardingComplete?: boolean;
 };
 
-type FeedListingType = "Ending Soonest" | "Buy It Now";
-
 type SwipeRecord = {
   cardId:     string;
   action:     "LIKE" | "PASS" | "BUY";
@@ -259,7 +257,6 @@ function buildFeedUrl(
   passedIds:   Set<string>,
   swipedIds:   Set<string>,
   preferences: Preferences | null,
-  listingType:  FeedListingType,
   offset:      number,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
@@ -273,8 +270,7 @@ function buildFeedUrl(
     `?seen=${encodeURIComponent(seen)}` +
     `&swipedIds=${encodeURIComponent(JSON.stringify([...swipedIds].slice(-300)))}` +
     `&count=20` +
-    `&offset=${Math.max(0, offset)}` +
-    `&listingType=${encodeURIComponent(listingType)}`
+    `&offset=${Math.max(0, offset)}`
   );
   const selectedCategories = preferences?.selectedCategories ?? [];
   if (selectedCategories.length > 0) {
@@ -293,7 +289,6 @@ export default function App() {
   const [prefs,         setPrefs]         = useState<Preferences | null>(loadPrefs);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
-  const [listingType, setListingType] = useState<FeedListingType>("Ending Soonest");
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
@@ -323,7 +318,6 @@ export default function App() {
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const currentOffsetRef       = useRef(0);
-  const listingTypeRef         = useRef<FeedListingType>("Ending Soonest");
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -364,7 +358,6 @@ export default function App() {
           passedIds.current,
           new Set([...swipedIds, ...swipedIdsRef.current]),
           prefsRef.current,
-          listingTypeRef.current,
           pageOffset,
         ));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1352,18 +1345,6 @@ export default function App() {
     });
   }
 
-  function changeFeedListingType(next: FeedListingType) {
-    if (next === listingTypeRef.current || isLoadingMoreRef.current) return;
-    listingTypeRef.current = next;
-    setListingType(next);
-    currentOffsetRef.current = 0;
-    setCurrentOffset(0);
-    setCards([]);
-    setDeckResetKey((key) => key + 1);
-    setFeedError(false);
-    void loadFeed(false);
-  }
-
   const handleNeedMore = useCallback(() => { loadFeed(true); }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -1443,38 +1424,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            {appMode === "feed" && (
-              <div
-                role="group"
-                aria-label="Listing type"
-                className="flex items-center rounded-full border border-border bg-card p-0.5"
-              >
-                <button
-                  type="button"
-                  aria-pressed={listingType === "Ending Soonest"}
-                  onClick={() => changeFeedListingType("Ending Soonest")}
-                  className={`rounded-full px-2.5 py-1.5 text-[10px] font-black transition-colors ${
-                    listingType === "Ending Soonest"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Ending Soonest
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={listingType === "Buy It Now"}
-                  onClick={() => changeFeedListingType("Buy It Now")}
-                  className={`rounded-full px-2.5 py-1.5 text-[10px] font-black transition-colors ${
-                    listingType === "Buy It Now"
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  Buy It Now
-                </button>
-              </div>
-            )}
             {/* Preferences */}
             {appMode === "feed" && (
               <div className="flex items-center rounded-full border border-border bg-card p-0.5">

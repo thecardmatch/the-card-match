@@ -8,7 +8,7 @@ import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
-  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortEndingSoonest, sortHotCards,
+  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../functions/_shared/hotCards.js";
 
 if (!globalThis.WebSocket) {
@@ -1260,7 +1260,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
       seen = "", seenIds = "", swipedIds = "", count = "20",
-       categories = "", offset = "0", listingType = "Ending Soonest",
+       categories = "", offset = "0",
     } = req.query;
 
     const seenSet = new Set([
@@ -1270,10 +1270,6 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
     ]);
     const returnCount = Math.min(Math.max(parseInt(count) || 20, 1), 40);
     const ebayOffset = Math.max(0, parseInt(offset, 10) || 0);
-    const feedListingType = listingType === "Buy It Now" ? "Buy It Now" : "Ending Soonest";
-    const listingFilter = feedListingType === "Buy It Now"
-      ? "buyingOptions:{FIXED_PRICE}"
-      : "buyingOptions:{AUCTION}";
     const requestedCats = categories.split(",")
       .map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")] || value.trim())
       .filter((value) => CATEGORY_FEED_CONFIG[value]);
@@ -1292,8 +1288,8 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         const searches = [ebaySearch(
           token,
            catTerm,
-          "endingSoonest",
-           [hotPriceFilter(), listingFilter].join(","),
+           "bestMatch",
+           hotPriceFilter(),
           null,
           categoryId,
           Math.max(20, Math.ceil(returnCount / selectedCats.length)),
@@ -1330,7 +1326,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       return true;
     });
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(returnCount * 2, 40)));
-    const engaged = enriched.filter(passesHotEngagement).sort(sortEndingSoonest);
+    const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
     return res.json({ items: engaged.slice(0, returnCount).map(canonicalFeedItem) });
   } catch (err) {

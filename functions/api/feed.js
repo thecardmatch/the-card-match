@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
-  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortEndingSoonest,
+  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -32,10 +32,6 @@ export async function onRequestGet({ env, request }) {
   ]);
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
-  const listingType = params.get("listingType") === "Buy It Now" ? "Buy It Now" : "Ending Soonest";
-  const listingFilter = listingType === "Buy It Now"
-    ? "buyingOptions:{FIXED_PRICE}"
-    : "buyingOptions:{AUCTION}";
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
   try {
@@ -48,8 +44,8 @@ export async function onRequestGet({ env, request }) {
         const searches = [ebaySearch(
           token,
           cfg.catTerm,
-          "endingSoonest",
-           [hotPriceFilter(), listingFilter].join(","),
+          "bestMatch",
+          hotPriceFilter(),
           null,
           cfg.categoryId,
           Math.max(20, Math.ceil(count / selected.length)),
@@ -86,7 +82,7 @@ export async function onRequestGet({ env, request }) {
       ids.add(item.id)
     );
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(count * 2, 40)));
-    const engaged = enriched.filter(passesHotEngagement).sort(sortEndingSoonest);
+    const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     return jsonResponse({ items: engaged.slice(0, count).map(canonicalFeedItem) });
   } catch (error) {
     console.error("[feed]", error.message);
