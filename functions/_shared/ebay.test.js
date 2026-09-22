@@ -134,6 +134,49 @@ test("separate high-end term results are merged with OR semantics", async () => 
   assert.ok(requestedQueries.every((query) => !/\bOR\b/.test(query)));
 });
 
+test("targeted player searches use the compact modifier set", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedQueries = [];
+  globalThis.fetch = async (url) => {
+    requestedQueries.push(new URL(String(url)).searchParams.get("q") || "");
+    return new Response(JSON.stringify({ itemSummaries: [] }), { status: 200 });
+  };
+
+  try {
+    await ebaySearch(
+      "test-token",
+      "Josh Allen",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      null,
+      20,
+      0,
+      ["PSA", "BGS", "Auto", "Patch", "Refractor"],
+    );
+    await ebaySearch(
+      "test-token",
+      "Josh Allen",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      null,
+      20,
+      20,
+      ["PSA", "BGS", "Auto", "Patch", "Refractor"],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedQueries.length, 12); // five modifiers + fallback, twice
+  assert.ok(requestedQueries.every((query) => query.startsWith("Josh Allen ")));
+  for (const modifier of ["PSA", "BGS", "Auto", "Patch", "Refractor"]) {
+    assert.ok(requestedQueries.some((query) => query.includes(`Josh Allen ${modifier}`)));
+  }
+  assert.ok(requestedQueries.every((query) => !/\bOR\b/.test(query)));
+});
+
 test("rate limits stop retries instead of creating a request storm", async () => {
   const originalFetch = globalThis.fetch;
   let requestCount = 0;

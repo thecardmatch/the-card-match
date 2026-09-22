@@ -12,6 +12,7 @@
 import {
   buildFallbackSearchQuery,
   buildStrictSearchQueries,
+  HOT_EXCLUSIONS,
   hotSellerFeedbackFilter,
 } from "./hotCards.js";
 
@@ -99,7 +100,8 @@ const BULK_EXCLUSION =
   CARD_ONLY;
 
 export async function ebaySearch(
-  token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0
+  token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0,
+  queryTerms = null,
 ) {
   const strictFilter = filterStr?.includes("sellerFeedbackScore:")
     ? filterStr
@@ -133,11 +135,16 @@ export async function ebaySearch(
     return res.json();
   }
 
+  const targetedQueries = Array.isArray(queryTerms) && queryTerms.length
+    ? queryTerms.map((term) => [q?.trim(), String(term).trim(), HOT_EXCLUSIONS].filter(Boolean).join(" "))
+    : null;
   const allPrimaryQueries = q?.trim()
-    ? buildStrictSearchQueries(q, categoryId)
+    ? (targetedQueries || buildStrictSearchQueries(q, categoryId))
       .map((query) => `${query} ${BULK_EXCLUSION}`)
     : [""];
-  const queryWindowSize = Math.min(3, allPrimaryQueries.length);
+  const queryWindowSize = Array.isArray(queryTerms) && queryTerms.length
+    ? Math.min(queryTerms.length, allPrimaryQueries.length)
+    : Math.min(3, allPrimaryQueries.length);
   const queryGroup = Math.floor(Math.max(0, offset) / Math.max(1, limit));
   const queryStart = allPrimaryQueries.length
     ? (queryGroup * queryWindowSize) % allPrimaryQueries.length

@@ -29,6 +29,9 @@ const QUERY_STACK_SIZE = 8;
 // through the complete high-end vocabulary below.
 export const SPORTS_LIVE_QUERY_TERMS = [...new Set(["PSA 10", "Auto", "1/1", ...HIGH_END_TERMS])];
 export const TCG_LIVE_QUERY_TERMS = [...new Set(["PSA 10", "Alt Art", "Illustration Rare", ...TCG_ONLY_TERMS, ...HIGH_END_TERMS])];
+// Targeted player feeds use a compact, predictable modifier set. These are
+// sent as separate Browse requests because Browse does not reliably honor OR.
+export const PLAYER_QUERY_TERMS = ["PSA", "BGS", "Auto", "Patch", "Refractor"];
 
 function quoteQueryTerm(term) {
   return /\s|\/|-/.test(term) ? `"${term}"` : term;

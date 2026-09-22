@@ -8,7 +8,7 @@ import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
-  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards,
+  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards, PLAYER_QUERY_TERMS, HOT_EXCLUSIONS,
 } from "../functions/_shared/hotCards.js";
 
 if (!globalThis.WebSocket) {
@@ -543,7 +543,7 @@ function passesGradeFilter(gradeStr, filter) {
 }
 
 // ─── Core eBay Browse API Call Engine ─────────────────────────────────────────
-async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0) {
+async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId, limit = 100, offset = 0, queryTerms = null) {
   const strictFilter = filterStr?.includes("sellerFeedbackScore:")
     ? filterStr
     : [filterStr, hotSellerFeedbackFilter()].filter(Boolean).join(",");
@@ -577,11 +577,16 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
     return res.json();
   }
 
+  const targetedQueries = Array.isArray(queryTerms) && queryTerms.length
+    ? queryTerms.map((term) => [q?.trim(), String(term).trim(), HOT_EXCLUSIONS].filter(Boolean).join(" "))
+    : null;
   const allPrimaryQueries = q?.trim()
-    ? buildStrictSearchQueries(q, categoryId)
+    ? (targetedQueries || buildStrictSearchQueries(q, categoryId))
       .map((query) => `${query} ${BULK_EXCLUSION}`)
     : [""];
-  const queryWindowSize = Math.min(3, allPrimaryQueries.length);
+  const queryWindowSize = Array.isArray(queryTerms) && queryTerms.length
+    ? Math.min(queryTerms.length, allPrimaryQueries.length)
+    : Math.min(3, allPrimaryQueries.length);
   const queryGroup = Math.floor(Math.max(0, offset) / Math.max(1, limit));
   const queryStart = allPrimaryQueries.length
     ? (queryGroup * queryWindowSize) % allPrimaryQueries.length
@@ -1262,6 +1267,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       seen = "", seenIds = "", swipedIds = "", count = "20",
        categories = "", offset = "0",
     } = req.query;
+    const searchQuery = String(req.query.q || req.query.player || "").trim();
 
     const seenSet = new Set([
       ...parseFeedIds(seen),
@@ -1274,42 +1280,69 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       .map((value) => CAT_TAG_TO_CONFIG_FEED[value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")] || value.trim())
       .filter((value) => CATEGORY_FEED_CONFIG[value]);
     const selectedCats = [...new Set(requestedCats.length ? requestedCats : FALLBACK_CATEGORIES)];
-    console.log(`[feed] hot-card cats:${selectedCats.join(",")}${requestedCats.length ? "" : " [curated-fallback]"}`);
+    console.log(searchQuery
+      ? `[feed] targeted deck search:${searchQuery}`
+      : `[feed] hot-card cats:${selectedCats.join(",")}${requestedCats.length ? "" : " [curated-fallback]"}`);
 
     const token    = await getEbayToken();
     const allItems = [];
     let rateLimited = false;
 
-    await Promise.all(
-      selectedCats.map(async (cat) => {
-        const cfg = CATEGORY_FEED_CONFIG[cat];
-        if (!cfg) return;
-        const { catTerm, categoryId } = cfg;
-        const searches = [ebaySearch(
-          token,
-           catTerm,
-           "bestMatch",
-           hotPriceFilter(),
-          null,
-          categoryId,
-          Math.max(20, Math.ceil(returnCount / selectedCats.length)),
-          ebayOffset,
-        )];
-        const settled = await Promise.allSettled(searches);
-        for (const r of settled) {
-          if (r.status !== "fulfilled") continue;
-          if (r.value?.rateLimited) {
-            rateLimited = true;
-            continue;
+    if (searchQuery) {
+      // ebaySearch expands this exact player term into separate high-end
+      // modifier searches because Browse does not reliably honor literal OR.
+      const result = await ebaySearch(
+        token,
+        searchQuery,
+        "bestMatch",
+        hotPriceFilter(),
+        null,
+        null,
+        20,
+        ebayOffset,
+        PLAYER_QUERY_TERMS,
+      );
+      if (result?.rateLimited) {
+        rateLimited = true;
+      } else {
+        const eligible = (result.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+        eligible.forEach((raw, index) => allItems.push({
+          ...canonicalFeedItem(mapFeedItem(raw, [])),
+          ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+        }));
+      }
+    } else {
+      await Promise.all(
+        selectedCats.map(async (cat) => {
+          const cfg = CATEGORY_FEED_CONFIG[cat];
+          if (!cfg) return;
+          const { catTerm, categoryId } = cfg;
+          const searches = [ebaySearch(
+            token,
+             catTerm,
+             "bestMatch",
+             hotPriceFilter(),
+            null,
+            categoryId,
+            Math.max(20, Math.ceil(returnCount / selectedCats.length)),
+            ebayOffset,
+          )];
+          const settled = await Promise.allSettled(searches);
+          for (const r of settled) {
+            if (r.status !== "fulfilled") continue;
+            if (r.value?.rateLimited) {
+              rateLimited = true;
+              continue;
+            }
+            const eligible = (r.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+            eligible.forEach((raw, index) => allItems.push({
+              ...canonicalFeedItem(mapFeedItem(raw, [cat])),
+              ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+            }));
           }
-          const eligible = (r.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
-          eligible.forEach((raw, index) => allItems.push({
-            ...canonicalFeedItem(mapFeedItem(raw, [cat])),
-            ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
-          }));
-        }
-      })
-    );
+        })
+      );
+    }
     if (rateLimited && allItems.length === 0) {
       return res.status(503).json({
         items: [],

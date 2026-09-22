@@ -234,12 +234,21 @@ function getInitialMode(): AppMode {
   try {
     // Remove the retired local learned-preference cache.
     localStorage.removeItem("cardmatch:tag_weights");
+    // A URL deep link is itself a valid feed selection and must not force
+    // first-time visitors through the broad category onboarding flow.
+    if (getUrlSearchTerm()) return "feed-loading";
     if (localStorage.getItem(ONBOARDING_KEY) || localStorage.getItem(PREFS_KEY)) return "feed-loading";
     // If Supabase is configured, hold in session-checking so initSession()
     // can decide whether to restore a cross-device profile or show the quiz.
     // Without Supabase there is no remote profile to check — go straight to onboarding.
     return isSupabaseReady ? "session-checking" : "onboarding";
   } catch { return "onboarding"; }
+}
+
+function getUrlSearchTerm(): string {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  return (params.get("q") || params.get("player") || "").trim();
 }
 
 /**
@@ -258,6 +267,7 @@ function buildFeedUrl(
   swipedIds:   Set<string>,
   preferences: Preferences | null,
   offset:      number,
+  searchQuery: string,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -272,11 +282,16 @@ function buildFeedUrl(
     `&count=20` +
     `&offset=${Math.max(0, offset)}`
   );
-  const selectedCategories = preferences?.selectedCategories ?? [];
-  if (selectedCategories.length > 0) {
-    url += `&categories=${encodeURIComponent(selectedCategories.join(","))}`;
-  } else if (preferences?.preferenceMode === "trending" || preferences?.onboardingComplete) {
-    url += "&trending=true";
+  const activeSearchQuery = searchQuery.trim();
+  if (activeSearchQuery) {
+    url += `&q=${encodeURIComponent(activeSearchQuery)}`;
+  } else {
+    const selectedCategories = preferences?.selectedCategories ?? [];
+    if (selectedCategories.length > 0) {
+      url += `&categories=${encodeURIComponent(selectedCategories.join(","))}`;
+    } else if (preferences?.preferenceMode === "trending" || preferences?.onboardingComplete) {
+      url += "&trending=true";
+    }
   }
   return url;
 }
@@ -287,6 +302,7 @@ export default function App() {
   const [cards,         setCards]         = useState<TradingCard[]>([]);
   const [liked,         setLiked]         = useState<TradingCard[]>(loadLocalWatchlist);
   const [prefs,         setPrefs]         = useState<Preferences | null>(loadPrefs);
+  const [searchTerm,    setSearchTerm]    = useState(getUrlSearchTerm);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
@@ -302,6 +318,7 @@ export default function App() {
 
   // Refs — always hold the latest value so async callbacks don't close over stale state
   const prefsRef               = useRef<Preferences | null>(prefs);
+  const searchTermRef          = useRef(searchTerm);
   const seenIds                = useRef<Set<string>>(loadSeenIds());          // restored from localStorage
   const swipedIdsRef           = useRef<Set<string>>(new Set());               // current browser session only
   // passedIds, passedIdsTimestamps and pendingPassedIds are scoped to the
@@ -333,6 +350,11 @@ export default function App() {
   const profileCheckResultRef  = useRef<"unchecked" | RestoreResult>("unchecked");
 
   useEffect(() => { prefsRef.current = prefs; }, [prefs]);
+  useEffect(() => {
+    document.title = searchTerm
+      ? `Trending Deck: ${searchTerm} | The Card Match`
+      : "The Card Match";
+  }, [searchTerm]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
   async function loadFeed(append = false) {
@@ -340,7 +362,8 @@ export default function App() {
     // it yet. Empty selectedCategories intentionally means curated trending feed.
     const doneOnboarding = !!localStorage.getItem(ONBOARDING_KEY);
     const hasSelectedCategories = !!prefsRef.current?.selectedCategories?.length;
-    if (!hasSelectedCategories && !doneOnboarding) {
+    const hasDeepLinkedSearch = Boolean(searchTermRef.current.trim());
+    if (!hasSelectedCategories && !doneOnboarding && !hasDeepLinkedSearch) {
       setAppMode("onboarding");
       return;
     }
@@ -359,6 +382,7 @@ export default function App() {
           new Set([...swipedIds, ...swipedIdsRef.current]),
           prefsRef.current,
           pageOffset,
+           searchTermRef.current,
         ));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
@@ -408,6 +432,36 @@ export default function App() {
       setIsLoadingMore(false);
     }
   }
+
+  function resetSearchFromUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("q");
+    url.searchParams.delete("player");
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    searchTermRef.current = "";
+    setSearchTerm("");
+    currentOffsetRef.current = 0;
+    setCurrentOffset(0);
+    void loadFeed(false);
+  }
+
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const nextSearchTerm = getUrlSearchTerm();
+      if (nextSearchTerm === searchTermRef.current) return;
+      searchTermRef.current = nextSearchTerm;
+      setSearchTerm(nextSearchTerm);
+      currentOffsetRef.current = 0;
+      setCurrentOffset(0);
+      setFeedError(false);
+      void loadFeed(false);
+    };
+
+    window.addEventListener("popstate", handleUrlChange);
+    return () => window.removeEventListener("popstate", handleUrlChange);
+    // loadFeed reads mutable refs, so this listener intentionally mounts once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Supabase: durable, serialized profile + swipe persistence ─────────────
   function flushProfileToSupabase(
@@ -998,24 +1052,29 @@ export default function App() {
      * While this runs, appMode is "session-checking" (spinner shown) so the
      * user never sees a flash of the onboarding quiz before we know their status.
      *
-     * A 7-second safety timeout guarantees the session-checking state always
-     * resolves — even when Supabase is unreachable or the query stalls.
+      * A 7-second safety timeout guarantees the session-checking/feed-loading
+      * state always resolves — even when Supabase is unreachable or the query stalls.
      * An `aborted` flag prevents a late-resolving query from overriding the
      * fallback after the timer has already transitioned us to onboarding.
      */
     async function initSession() {
-      // Safety net: never leave the user stuck on the session-checking spinner.
-      // If this function doesn't complete within 7 s, fall back to onboarding.
+      // Safety net: never leave the user stuck on the session or feed spinner.
+      // If this function doesn't complete within 7 s, continue with the feed
+      // already selected by local state or the URL.
       // `signal` is shared with restoreProfileFromSupabase so it can bail out
       // before calling loadFeed() when the timeout has already fired.
       const signal = { aborted: false };
       let safetyTimer: ReturnType<typeof setTimeout> | null = null;
-      if (appMode === "session-checking") {
+      if (appMode === "session-checking" || appMode === "feed-loading") {
         safetyTimer = setTimeout(() => {
           signal.aborted = true;
           profileCheckResultRef.current = "error";
-          console.warn("[session] profile check timed out — falling back to onboarding");
-          setAppMode((m) => m === "session-checking" ? "onboarding" : m);
+          console.warn("[session] profile check timed out — loading the selected feed");
+          if (appMode === "feed-loading") {
+            loadFeed(false);
+          } else {
+            setAppMode((m) => m === "session-checking" ? "onboarding" : m);
+          }
         }, 7000);
       }
 
@@ -1418,7 +1477,20 @@ export default function App() {
                 THE CARD MATCH
               </h1>
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
-                 Live high-end cards
+                {searchTerm ? (
+                  <span className="inline-flex items-center gap-1.5 max-w-[34vw] sm:max-w-none">
+                    <span className="truncate">Trending Deck: {searchTerm}</span>
+                    <button
+                      type="button"
+                      onClick={resetSearchFromUrl}
+                      className="text-muted-foreground hover:text-foreground text-sm leading-none"
+                      aria-label="Clear player search"
+                      title="Back to your categories"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ) : "Live high-end cards"}
               </p>
             </div>
           </div>

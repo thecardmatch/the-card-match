@@ -5,7 +5,7 @@ import {
 import { isJunk } from "../_shared/recommendationEngine.js";
 import {
   FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
-  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards,
+  hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards, PLAYER_QUERY_TERMS,
 } from "../_shared/hotCards.js";
 
 export { _cors as onRequestOptions };
@@ -32,38 +32,62 @@ export async function onRequestGet({ env, request }) {
   ]);
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
+  const searchQuery = (params.get("q") || params.get("player") || "").trim();
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
   try {
     const token = await getEbayToken(env);
     const all = [];
     let rateLimited = false;
-    await Promise.all(selected.map(async (category) => {
-      const cfg = CATEGORY_FEED_CONFIG[category];
-      if (!cfg) return;
-        const searches = [ebaySearch(
-          token,
-          cfg.catTerm,
-          "bestMatch",
-          hotPriceFilter(),
-          null,
-          cfg.categoryId,
-          Math.max(20, Math.ceil(count / selected.length)),
-          offset,
-        )];
-      for (const result of await Promise.allSettled(searches)) {
-        if (result.status !== "fulfilled") continue;
-        if (result.value?.rateLimited) {
-          rateLimited = true;
-          continue;
-        }
-        const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+    if (searchQuery) {
+      const result = await ebaySearch(
+        token,
+        searchQuery,
+        "bestMatch",
+        hotPriceFilter(),
+        null,
+        null,
+        20,
+        offset,
+        PLAYER_QUERY_TERMS,
+      );
+      if (result?.rateLimited) {
+        rateLimited = true;
+      } else {
+        const eligible = (result.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
         eligible.forEach((raw, index) => all.push({
-          ...canonicalFeedItem(mapFeedItem(raw, [category])),
+          ...canonicalFeedItem(mapFeedItem(raw, [])),
           ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
         }));
       }
-    }));
+    } else {
+      await Promise.all(selected.map(async (category) => {
+        const cfg = CATEGORY_FEED_CONFIG[category];
+        if (!cfg) return;
+          const searches = [ebaySearch(
+            token,
+            cfg.catTerm,
+            "bestMatch",
+            hotPriceFilter(),
+            null,
+            cfg.categoryId,
+            Math.max(20, Math.ceil(count / selected.length)),
+            offset,
+          )];
+        for (const result of await Promise.allSettled(searches)) {
+          if (result.status !== "fulfilled") continue;
+          if (result.value?.rateLimited) {
+            rateLimited = true;
+            continue;
+          }
+          const eligible = (result.value.itemSummaries || []).filter((raw) => !isSuppliesCategory(raw));
+          eligible.forEach((raw, index) => all.push({
+            ...canonicalFeedItem(mapFeedItem(raw, [category])),
+            ebayBestMatchScore: eligible.length > 1 ? 1 - index / (eligible.length - 1) : 1,
+          }));
+        }
+      }));
+    }
     if (rateLimited && all.length === 0) {
       return jsonResponse({
         items: [],
