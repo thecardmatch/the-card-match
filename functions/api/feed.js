@@ -32,7 +32,10 @@ export async function onRequestGet({ env, request }) {
   ]);
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
-  const listingType = params.get("listingType") === "Buy It Now" ? "Buy It Now" : "All";
+  const listingType = params.get("listingType") === "Buy It Now" ? "Buy It Now" : "Ending Soonest";
+  const listingFilter = listingType === "Buy It Now"
+    ? "buyingOptions:{FIXED_PRICE}"
+    : "buyingOptions:{AUCTION}";
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
   try {
@@ -46,8 +49,7 @@ export async function onRequestGet({ env, request }) {
           token,
           cfg.catTerm,
           "endingSoonest",
-           [hotPriceFilter(), listingType === "Buy It Now" ? "buyingOptions:{FIXED_PRICE}" : ""]
-             .filter(Boolean).join(","),
+           [hotPriceFilter(), listingFilter].join(","),
           null,
           cfg.categoryId,
           Math.max(20, Math.ceil(count / selected.length)),

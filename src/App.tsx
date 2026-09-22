@@ -49,7 +49,7 @@ type Preferences = {
   onboardingComplete?: boolean;
 };
 
-type FeedListingType = "All" | "Buy It Now";
+type FeedListingType = "Ending Soonest" | "Buy It Now";
 
 type SwipeRecord = {
   cardId:     string;
@@ -293,7 +293,7 @@ export default function App() {
   const [prefs,         setPrefs]         = useState<Preferences | null>(loadPrefs);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [currentOffset, setCurrentOffset] = useState(0);
-  const [listingType, setListingType] = useState<FeedListingType>("All");
+  const [listingType, setListingType] = useState<FeedListingType>("Ending Soonest");
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [deckResetKey,  setDeckResetKey]  = useState(0);
   const [feedError,     setFeedError]     = useState(false);
@@ -323,7 +323,7 @@ export default function App() {
   const pendingPassedIds       = useRef<Set<string>>(new Set());               // IDs not yet synced
   const isLoadingMoreRef       = useRef(false);
   const currentOffsetRef       = useRef(0);
-  const listingTypeRef         = useRef<FeedListingType>("All");
+  const listingTypeRef         = useRef<FeedListingType>("Ending Soonest");
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
@@ -1451,15 +1451,15 @@ export default function App() {
               >
                 <button
                   type="button"
-                  aria-pressed={listingType === "All"}
-                  onClick={() => changeFeedListingType("All")}
+                  aria-pressed={listingType === "Ending Soonest"}
+                  onClick={() => changeFeedListingType("Ending Soonest")}
                   className={`rounded-full px-2.5 py-1.5 text-[10px] font-black transition-colors ${
-                    listingType === "All"
+                    listingType === "Ending Soonest"
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  All
+                  Ending Soonest
                 </button>
                 <button
                   type="button"

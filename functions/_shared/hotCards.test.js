@@ -151,6 +151,13 @@ test("main feed ordering prioritizes the earliest ending listing", () => {
   ]);
 });
 
+test("main feed listing modes remain mutually exclusive", () => {
+  const auction = { listingType: "Auction", buyingOptions: ["AUCTION"] };
+  const buyItNow = { listingType: "Buy It Now", buyingOptions: ["FIXED_PRICE"] };
+  assert.equal(isAuctionListing(auction), true);
+  assert.equal(isAuctionListing(buyItNow), false);
+});
+
 test("graded cards outrank raw one-of-one listings when engagement is comparable", () => {
   const graded = {
     id: "graded",
