@@ -25,8 +25,10 @@ const TCG_ONLY_TERMS = ["Alt Art", "Illustration Rare", "Holo"];
 const QUERY_STACK_SIZE = 8;
 // eBay Browse does not reliably honor a literal OR expression. These are
 // intentionally separate searches that are merged server-side as OR logic.
-export const SPORTS_LIVE_QUERY_TERMS = ["PSA 10", "Auto", "1/1"];
-export const TCG_LIVE_QUERY_TERMS = ["PSA 10", "Alt Art", "Illustration Rare"];
+// The first three are the strongest initial branches; later feed pages rotate
+// through the complete high-end vocabulary below.
+export const SPORTS_LIVE_QUERY_TERMS = [...new Set(["PSA 10", "Auto", "1/1", ...HIGH_END_TERMS])];
+export const TCG_LIVE_QUERY_TERMS = [...new Set(["PSA 10", "Alt Art", "Illustration Rare", ...TCG_ONLY_TERMS, ...HIGH_END_TERMS])];
 
 function quoteQueryTerm(term) {
   return /\s|\/|-/.test(term) ? `"${term}"` : term;
@@ -165,7 +167,7 @@ export function hotQualityScore(item) {
   const title = titleText(item);
   const grade = String(item?.grade || item?.condition || "").toLowerCase();
   const tags = Array.isArray(item?.tags) ? item.tags.map((tag) => String(tag).toLowerCase()) : [];
-  const isGraded = /^(?:psa|bgs|sgc|cgc|hga|ags|gma|csg)\s*\d/i.test(grade) ||
+  const isGraded = /^(?:psa|bgs|sgc|cgc|tag|hga|ags|gma|csg)\s*\d/i.test(grade) ||
     /\bgraded\b|\bslab\b/i.test(grade) ||
     tags.includes("graded") || tags.includes("graded_slab");
   const isAuto = /\bauto(?:graph(?:ed)?|matic)?\b|\bsigned\b/.test(title) ||
@@ -173,8 +175,8 @@ export function hotQualityScore(item) {
   const isNumbered = /\b\d+\s*\/\s*(?:\d+|1)\b/.test(title) ||
     /(?:1\/1|\/(?:5|10|15|20|25|50|99)\b)/.test(title) ||
     tags.includes("numbered");
-  const isPsa10 = /\bpsa\s*10\b|\bbgs\s*10\b|\bsgc\s*10\b|\bcgc\s*10\b/.test(`${title} ${grade}`);
-  const isPsa9OrBetter = /\bpsa\s*9\b|\bbgs\s*9\.5\b|\bsgc\s*9\.5\b|\bcgc\s*9\.5\b/.test(`${title} ${grade}`);
+  const isPsa10 = /\bpsa\s*10\b|\bbgs\s*10\b|\bsgc\s*10\b|\bcgc\s*10\b|\btag\s*10\b/.test(`${title} ${grade}`);
+  const isPsa9OrBetter = /\bpsa\s*9\b|\bbgs\s*9\.5\b|\bsgc\s*9\.5\b|\bcgc\s*9\.5\b|\btag\s*9(?:\.5)?\b/.test(`${title} ${grade}`);
   const isOneOfOne = /\b1\/1\b|\bone\s*of\s*one\b/.test(title);
   const isRpa = /\brpa\b|\bre(?:d|deemed)\s+patch\s+auto\b/.test(title);
   const hasHighEnd = hasHighEndSignal(item);

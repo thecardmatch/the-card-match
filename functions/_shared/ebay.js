@@ -133,11 +133,19 @@ export async function ebaySearch(
     return res.json();
   }
 
-  const primaryQueries = q?.trim()
+  const allPrimaryQueries = q?.trim()
     ? buildStrictSearchQueries(q, categoryId)
-      .slice(0, 3)
       .map((query) => `${query} ${BULK_EXCLUSION}`)
     : [""];
+  const queryWindowSize = Math.min(3, allPrimaryQueries.length);
+  const queryGroup = Math.floor(Math.max(0, offset) / Math.max(1, limit));
+  const queryStart = allPrimaryQueries.length
+    ? (queryGroup * queryWindowSize) % allPrimaryQueries.length
+    : 0;
+  const primaryQueries = allPrimaryQueries.length <= queryWindowSize
+    ? allPrimaryQueries
+    : Array.from({ length: queryWindowSize }, (_, index) =>
+      allPrimaryQueries[(queryStart + index) % allPrimaryQueries.length]);
   const mergedItems = [];
   const mergedIds = new Set();
   let firstResponse = null;
