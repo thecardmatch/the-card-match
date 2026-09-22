@@ -229,3 +229,9 @@ export function sortHotCards(a, b) {
   const bEnd = b?.endTime ? new Date(b.endTime).getTime() : Number.POSITIVE_INFINITY;
   return scoreDifference || aEnd - bEnd;
 }
+
+export function sortEndingSoonest(a, b) {
+  const aEnd = a?.endTime ? new Date(a.endTime).getTime() : Number.POSITIVE_INFINITY;
+  const bEnd = b?.endTime ? new Date(b.endTime).getTime() : Number.POSITIVE_INFINITY;
+  return aEnd - bEnd || hotQualityScore(b) - hotQualityScore(a);
+}

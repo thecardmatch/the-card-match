@@ -18,6 +18,7 @@ import {
   isAuctionListing,
   meetsHotCardFloor,
   passesHotEngagement,
+  sortEndingSoonest,
   sortHotCards,
 } from "./hotCards.js";
 
@@ -125,6 +126,28 @@ test("feed ordering prioritizes engagement and top-tier quality before ending ti
   assert.deepEqual([laterPremium, soonerRaw].sort(sortHotCards).map(({ id }) => id), [
     "later-premium",
     "sooner-raw",
+  ]);
+});
+
+test("main feed ordering prioritizes the earliest ending listing", () => {
+  const laterPremium = {
+    id: "later-premium",
+    title: "PSA 10 Auto 1/1",
+    listingType: "Auction",
+    bidCount: 20,
+    endTime: "2030-01-01T12:00:00.000Z",
+  };
+  const soonerRaw = {
+    id: "sooner-raw",
+    title: "Raw trading card",
+    listingType: "Buy It Now",
+    bidCount: 0,
+    endTime: "2030-01-01T11:00:00.000Z",
+  };
+
+  assert.deepEqual([laterPremium, soonerRaw].sort(sortEndingSoonest).map(({ id }) => id), [
+    "sooner-raw",
+    "later-premium",
   ]);
 });
 
