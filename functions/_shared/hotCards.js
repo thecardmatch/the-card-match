@@ -23,8 +23,10 @@ export const HIGH_END_TERMS = [
 
 const TCG_ONLY_TERMS = ["Alt Art", "Illustration Rare", "Holo"];
 const QUERY_STACK_SIZE = 8;
-export const SPORTS_LIVE_QUERY_TERMS = ["PSA", "Auto", "Patch", "Rookie"];
-export const TCG_LIVE_QUERY_TERMS = ["PSA", "Alt Art", "Illustration Rare", "Holo"];
+// eBay Browse does not reliably honor a literal OR expression. These are
+// intentionally separate searches that are merged server-side as OR logic.
+export const SPORTS_LIVE_QUERY_TERMS = ["PSA 10", "Auto", "1/1"];
+export const TCG_LIVE_QUERY_TERMS = ["PSA 10", "Alt Art", "Illustration Rare"];
 
 function quoteQueryTerm(term) {
   return /\s|\/|-/.test(term) ? `"${term}"` : term;
@@ -180,6 +182,7 @@ export function hotQualityScore(item) {
   return (
     hotEngagementScore(item) +
     (isPsa10 ? 35 : isPsa9OrBetter ? 20 : isGraded ? 10 : 0) +
+    (isGraded ? 35 : 0) +
     (isOneOfOne ? 30 : 0) +
     (isRpa ? 25 : 0) +
     (isAuto ? 8 : 0) +

@@ -579,13 +579,36 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
 
   const primaryQueries = q?.trim()
     ? buildStrictSearchQueries(q, categoryId)
-      .slice(0, 4)
+      .slice(0, 3)
       .map((query) => `${query} ${BULK_EXCLUSION}`)
     : [""];
+  const mergedItems = [];
+  const mergedIds = new Set();
+  let firstResponse = null;
+  let wasRateLimited = false;
   for (const primaryQuery of primaryQueries) {
     const data = await requestSearch(primaryQuery);
-    if (data?.rateLimited) return { itemSummaries: [], total: 0, rateLimited: true };
-    if (data?.itemSummaries?.length) return data;
+    if (data?.rateLimited) {
+      wasRateLimited = true;
+      break;
+    }
+    if (!firstResponse) firstResponse = data;
+    for (const item of data?.itemSummaries || []) {
+      const id = item.itemId || item.itemWebUrl || item.title;
+      if (!id || mergedIds.has(id)) continue;
+      mergedIds.add(id);
+      mergedItems.push(item);
+    }
+  }
+  if (mergedItems.length) {
+    return {
+      ...(firstResponse || {}),
+      itemSummaries: mergedItems,
+      total: mergedItems.length,
+    };
+  }
+  if (wasRateLimited) {
+    return { itemSummaries: [], total: 0, rateLimited: true };
   }
   if (q?.trim()) {
     const fallbackQuery = `${buildFallbackSearchQuery(q, categoryId)} ${BULK_EXCLUSION}`;

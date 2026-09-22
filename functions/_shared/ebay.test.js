@@ -67,7 +67,7 @@ test("primary high-end terms use separate eBay searches and retry broadly", asyn
   const requestedQueries = [];
   globalThis.fetch = async (url) => {
     requestedQueries.push(new URL(String(url)).searchParams.get("q") || "");
-    const items = requestedQueries.length === 5
+    const items = requestedQueries.length === 4
       ? [{ itemId: "v1|1|fallback" }]
       : [];
     return new Response(JSON.stringify({ itemSummaries: items }), { status: 200 });
@@ -88,13 +88,50 @@ test("primary high-end terms use separate eBay searches and retry broadly", asyn
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(requestedQueries.length, 5);
-  assert.deepEqual(requestedQueries.slice(0, 4).map((query) => query.split(" ")[3]), [
-    "PSA", "Auto", "Patch", "Rookie",
-  ]);
-  assert.ok(requestedQueries.slice(0, 4).every((query) => !/\bOR\b/.test(query)));
-  assert.match(requestedQueries[4], /^football trading card /);
-  assert.doesNotMatch(requestedQueries[4], /National Treasures/);
+  assert.equal(requestedQueries.length, 4);
+  assert.ok(requestedQueries[0].includes('"PSA 10"'));
+  assert.ok(requestedQueries[1].includes("Auto"));
+  assert.ok(requestedQueries[2].includes("1/1"));
+  assert.ok(requestedQueries.slice(0, 3).every((query) => !/\bOR\b/.test(query)));
+  assert.match(requestedQueries[3], /^football trading card /);
+  assert.doesNotMatch(requestedQueries[3], /National Treasures/);
+});
+
+test("separate high-end term results are merged with OR semantics", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedQueries = [];
+  globalThis.fetch = async (url) => {
+    const query = new URL(String(url)).searchParams.get("q") || "";
+    requestedQueries.push(query);
+    const itemId = query.includes('"PSA 10"')
+      ? "v1|1|psa"
+      : query.includes("Auto")
+        ? "v1|1|auto"
+        : "v1|1|one-of-one";
+    return new Response(JSON.stringify({ itemSummaries: [{ itemId, title: itemId }] }), { status: 200 });
+  };
+
+  try {
+    const result = await ebaySearch(
+      "test-token",
+      "football trading card",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      "215",
+      5,
+    );
+    assert.deepEqual(result.itemSummaries.map((item) => item.itemId), [
+      "v1|1|psa",
+      "v1|1|auto",
+      "v1|1|one-of-one",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedQueries.length, 3);
+  assert.ok(requestedQueries.every((query) => !/\bOR\b/.test(query)));
 });
 
 test("rate limits stop retries instead of creating a request storm", async () => {

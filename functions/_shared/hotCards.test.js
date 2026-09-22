@@ -127,3 +127,22 @@ test("feed ordering prioritizes engagement and top-tier quality before ending ti
     "sooner-raw",
   ]);
 });
+
+test("graded cards outrank raw one-of-one listings when engagement is comparable", () => {
+  const graded = {
+    id: "graded",
+    title: "PSA 10 Rookie Card",
+    grade: "PSA 10",
+    bidCount: 0,
+    endTime: "2030-01-01T12:00:00.000Z",
+  };
+  const rawOneOfOne = {
+    id: "raw-one-of-one",
+    title: "Rookie Auto 1/1",
+    grade: "Raw",
+    bidCount: 0,
+    endTime: "2030-01-01T11:00:00.000Z",
+  };
+
+  assert.equal([rawOneOfOne, graded].sort(sortHotCards)[0].id, "graded");
+});
