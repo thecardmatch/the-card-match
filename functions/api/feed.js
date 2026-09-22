@@ -105,7 +105,8 @@ export async function onRequestGet({ env, request }) {
       !ids.has(item.id) &&
       ids.add(item.id)
     );
-    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(count * 2, 40)));
+    const enrichmentLimit = searchQuery ? Math.min(fresh.length, 20) : Math.max(count * 2, 40);
+    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     return jsonResponse({ items: engaged.slice(0, count).map(canonicalFeedItem) });
   } catch (error) {

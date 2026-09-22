@@ -562,19 +562,29 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
 
     console.log("[EBAY API QUERY]:", targetQuery || "(no query)", "| category:", categoryId ?? "any", "| filter:", strictFilter ?? "none");
     const url = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization:              `Bearer ${token}`,
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-        "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
-      },
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error("[ebay] search error", res.status, body.slice(0, 200));
-      return { itemSummaries: [], total: 0, rateLimited: res.status === 429 };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization:              `Bearer ${token}`,
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+          "X-EBAY-C-ENDUSERCTX":     `affiliateCampaignId=${EPN_CAMP_ID},affiliateReferenceId=thecardmatch`,
+        },
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error("[ebay] search error", res.status, body.slice(0, 200));
+        return { itemSummaries: [], total: 0, rateLimited: res.status === 429 };
+      }
+      return res.json();
+    } catch (error) {
+      console.error("[ebay] search failed", error?.name === "AbortError" ? "timeout" : error?.message);
+      return { itemSummaries: [], total: 0 };
+    } finally {
+      clearTimeout(timeout);
     }
-    return res.json();
   }
 
   const targetedQueries = Array.isArray(queryTerms) && queryTerms.length
@@ -599,13 +609,19 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   const mergedIds = new Set();
   let firstResponse = null;
   let wasRateLimited = false;
-  for (const primaryQuery of primaryQueries) {
-    const data = await requestSearch(primaryQuery);
-    if (data?.rateLimited) {
-      wasRateLimited = true;
-      break;
+  const responses = Array.isArray(queryTerms) && queryTerms.length
+    ? await Promise.all(primaryQueries.map((primaryQuery) => requestSearch(primaryQuery)))
+    : [];
+  if (!responses.length) {
+    for (const primaryQuery of primaryQueries) {
+      const data = await requestSearch(primaryQuery);
+      responses.push(data);
+      if (data?.rateLimited) break;
     }
-    if (!firstResponse) firstResponse = data;
+  }
+  for (const data of responses) {
+    if (data?.rateLimited) wasRateLimited = true;
+    if (!firstResponse && data) firstResponse = data;
     for (const item of data?.itemSummaries || []) {
       const id = item.itemId || item.itemWebUrl || item.title;
       if (!id || mergedIds.has(id)) continue;
@@ -1358,7 +1374,8 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       unique.add(i.id);
       return true;
     });
-    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, Math.max(returnCount * 2, 40)));
+    const enrichmentLimit = searchQuery ? Math.min(fresh.length, 20) : Math.max(returnCount * 2, 40);
+    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
     return res.json({ items: engaged.slice(0, returnCount).map(canonicalFeedItem) });

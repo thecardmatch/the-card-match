@@ -376,16 +376,25 @@ export default function App() {
 
     try {
       const fetchPage = async (pageOffset: number) => {
-        const response = await fetch(buildFeedUrl(
-          seenIds.current,
-          passedIds.current,
-          new Set([...swipedIds, ...swipedIdsRef.current]),
-          prefsRef.current,
-          pageOffset,
-           searchTermRef.current,
-        ));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
+        const controller = new AbortController();
+        const timeout = window.setTimeout(
+          () => controller.abort(),
+          searchTermRef.current.trim() ? 30000 : 45000,
+        );
+        try {
+          const response = await fetch(buildFeedUrl(
+            seenIds.current,
+            passedIds.current,
+            new Set([...swipedIds, ...swipedIdsRef.current]),
+            prefsRef.current,
+            pageOffset,
+            searchTermRef.current,
+          ), { signal: controller.signal });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        } finally {
+          window.clearTimeout(timeout);
+        }
       };
 
       let data = await fetchPage(requestOffset);
