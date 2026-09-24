@@ -18,6 +18,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     const pointerStart = useRef<{ x: number; y: number; time: number } | null>(null);
     const touchStart = useRef<{ x: number; y: number; time: number } | null>(null);
     const handledUpSwipe = useRef(false);
+    const touchGestureActive = useRef(false);
     const rotate = useTransform(x, [-200, 0, 200], [-15, 0, 15]);
     const saveOpacity = useTransform(x, [0, 80], [0, 1]);
     const passOpacity = useTransform(x, [-80, 0], [1, 0]);
@@ -49,7 +50,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       const threshold         = 100;
       const velocityThreshold = 500;
       const isUpSwipe = info.offset.y < -threshold || info.velocity.y < -velocityThreshold;
-      if (event?.pointerType === "touch" && isUpSwipe) {
+      if ((touchGestureActive.current || event?.pointerType === "touch") && isUpSwipe) {
         // iOS Safari applies stricter popup activation rules to drag-end
         // callbacks. Let the trusted touchend handler open eBay instead.
         return;
@@ -66,6 +67,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     const handlePointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
       if (!isTop) return;
       handledUpSwipe.current = false;
+      touchGestureActive.current = event.pointerType === "touch";
       pointerStart.current = {
         x: event.clientX,
         y: event.clientY,
@@ -95,6 +97,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       const touch = event.touches[0];
       if (!touch) return;
       handledUpSwipe.current = false;
+      touchGestureActive.current = true;
       touchStart.current = {
         x: touch.clientX,
         y: touch.clientY,
@@ -105,6 +108,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     const handleTouchEndCapture = (event: React.TouchEvent<HTMLDivElement>) => {
       const start = touchStart.current;
       touchStart.current = null;
+      touchGestureActive.current = false;
       if (!isTop || !start) return;
 
       const touch = event.changedTouches[0];
