@@ -9,18 +9,19 @@ export type SortOption = "bestMatch" | "endingSoonest";
 
 export type TradingCard = {
   id: string;
-  name: string;
+  title: string;
+  price: number;
   category: Category;
-  image: string;
+  imageUrl: string;
+  itemWebUrl: string;
+  endingSoon: boolean;
   images?: string[];
-  currentBid: number;
   currency?: string;
   grade: string;
-  ebayUrl: string;
   endTime?: string | null;
   condition?: string;
   listingType?: "Auction" | "Buy It Now";
-  watchCount?: number;
+  watchCount: number;
   // ── Multi-attribute scoring metadata ──────────────────────────────────────
   /** All attribute tags on this card, e.g. ['baseball', 'vintage', 'rookie', 'graded', 'psa10'] */
   tags?: string[];
@@ -31,6 +32,48 @@ export type TradingCard = {
   /** Best-effort player name extracted from the listing title */
   player?: string | null;
 };
+
+/**
+ * Normalize feed results and older browser-stored cards to the canonical UI
+ * contract. Legacy names are accepted only at this boundary and are not kept
+ * on the returned card.
+ */
+export function normalizeTradingCard(value: unknown): TradingCard {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid card returned by the card service.");
+  }
+
+  const raw = value as Record<string, unknown>;
+  const {
+    name: _legacyName,
+    currentBid: _legacyPrice,
+    image: _legacyImage,
+    ebayUrl: _legacyUrl,
+    ...metadata
+  } = raw;
+  const id = String(raw.id ?? "");
+  if (!id) throw new Error("Card is missing its id.");
+
+  const endTime = typeof raw.endTime === "string" ? raw.endTime : null;
+  const endTimestamp = endTime ? new Date(endTime).getTime() : Number.NaN;
+  const priceValue = Number(raw.price ?? raw.currentBid ?? 0);
+  const watchCountValue = Number(raw.watchCount ?? 0);
+
+  return {
+    ...metadata,
+    id,
+    title: String(raw.title ?? raw.name ?? "Trading card"),
+    price: Number.isFinite(priceValue) ? priceValue : 0,
+    category: String(raw.category ?? ""),
+    imageUrl: String(raw.imageUrl ?? raw.image ?? ""),
+    itemWebUrl: String(raw.itemWebUrl ?? raw.ebayUrl ?? ""),
+    endingSoon: typeof raw.endingSoon === "boolean"
+      ? raw.endingSoon
+      : Number.isFinite(endTimestamp) && endTimestamp - Date.now() <= 24 * 60 * 60 * 1000,
+    endTime,
+    watchCount: Number.isFinite(watchCountValue) ? watchCountValue : 0,
+  } as TradingCard;
+}
 
 export const CATEGORIES: Category[] = ["Pokemon", "Basketball", "Baseball", "Football", "Hockey", "Soccer", "Formula 1", "WWE"];
 export const CONDITION_FILTERS: ConditionFilter[] = ["Raw", "Grade 7", "Grade 8", "Grade 9", "Grade 10"];

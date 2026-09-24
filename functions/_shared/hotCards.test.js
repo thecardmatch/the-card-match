@@ -9,6 +9,7 @@ import {
   TCG_QUERY_STACK,
   buildHotSearchQuery,
   buildFallbackSearchQuery,
+  canonicalFeedItem,
   highValueQueryStack,
   hotEngagementScore,
   hasHighEndSignal,
@@ -82,6 +83,45 @@ test("candidate ordering uses bids and watchers with the weighted score", () => 
   assert.equal(hotEngagementScore(cards[0]), 9);
   cards.sort(sortHotCards);
   assert.deepEqual(cards.map(({ id }) => id), ["bids", "watchers", "quiet"]);
+});
+
+test("feed API card contract exposes canonical fields without legacy aliases", () => {
+  const card = canonicalFeedItem({
+    id: "listing-1",
+    name: "PSA 10 Rookie",
+    currentBid: 125,
+    image: "https://example.com/card.jpg",
+    ebayUrl: "https://example.com/item/1",
+    category: "Baseball",
+    watchCount: 8,
+    endTime: "2030-01-01T12:00:00.000Z",
+  });
+
+  assert.deepEqual(
+    {
+      id: card.id,
+      title: card.title,
+      price: card.price,
+      imageUrl: card.imageUrl,
+      itemWebUrl: card.itemWebUrl,
+      category: card.category,
+      watchCount: card.watchCount,
+      endingSoon: card.endingSoon,
+    },
+    {
+      id: "listing-1",
+      title: "PSA 10 Rookie",
+      price: 125,
+      imageUrl: "https://example.com/card.jpg",
+      itemWebUrl: "https://example.com/item/1",
+      category: "Baseball",
+      watchCount: 8,
+      endingSoon: false,
+    },
+  );
+  for (const alias of ["name", "currentBid", "image", "ebayUrl"]) {
+    assert.equal(Object.hasOwn(card, alias), false, `response must not include ${alias}`);
+  }
 });
 
 test("high-end quality signals outrank a quiet raw listing", () => {

@@ -204,24 +204,28 @@ export function passesHotEngagement(item) {
 }
 
 export function canonicalFeedItem(item) {
-  const title = item.name || item.title || "Trading card";
-  const price = itemPrice(item);
-  const imageUrl = item.image || item.imageUrl || "";
-  const itemWebUrl = item.ebayUrl || item.itemWebUrl || "";
+  const {
+    name: _legacyName,
+    currentBid: _legacyPrice,
+    image: _legacyImage,
+    ebayUrl: _legacyUrl,
+    ...metadata
+  } = item || {};
+  const title = item?.title || _legacyName || "Trading card";
+  const price = Number(item?.price ?? _legacyPrice ?? itemPrice(item)) || 0;
+  const imageUrl = item?.imageUrl || _legacyImage || "";
+  const itemWebUrl = item?.itemWebUrl || _legacyUrl || "";
   const endTime = item.endTime || null;
   return {
-    ...item,
+    ...metadata,
     id: item.id,
     title,
     price,
     imageUrl,
     itemWebUrl,
+    category: item.category || "",
+    watchCount: Number(item.watchCount) || 0,
     endingSoon: Boolean(endTime && new Date(endTime).getTime() - Date.now() <= 24 * 60 * 60 * 1000),
-    // Preserve the established frontend names during the contract transition.
-    name: title,
-    currentBid: price,
-    image: imageUrl,
-    ebayUrl: itemWebUrl,
     endTime,
   };
 }

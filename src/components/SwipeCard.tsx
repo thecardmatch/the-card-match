@@ -25,7 +25,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
 
     // DEDUPLICATE IMAGES: Ensure primary image is uniquely locked to Index 0
     const allImages = (() => {
-      const base = card.image ? [card.image] : [];
+      const base = card.imageUrl ? [card.imageUrl] : [];
       const extras = card.images?.length ? card.images : [];
       const combined = [...base, ...extras];
       return combined.filter((url, index) => url && combined.indexOf(url) === index);
@@ -92,7 +92,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
             {/* Crisp foreground trading card image */}
             <img
               src={currentImageUrl}
-              alt={card.name}
+              alt={card.title}
               className="relative z-10 w-full h-full object-contain p-1.5 drop-shadow-[0_10px_15px_rgba(0,0,0,0.6)] select-none"
               draggable={false}
               loading="eager"
@@ -126,16 +126,24 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
               <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">
                 {card.category === "Pokemon" ? "Pokémon TCG" : card.category}
               </span>
+              {card.endingSoon && (
+                <span className="text-[9px] font-black px-2 py-0.5 rounded bg-red-500/10 text-red-600 uppercase">
+                  Ending soon
+                </span>
+              )}
               <span className="text-[9px] font-black px-2 py-0.5 rounded bg-primary/10 text-primary uppercase">{card.grade}</span>
               <span className="text-[9px] font-black px-2 py-0.5 rounded bg-muted text-muted-foreground uppercase">{card.listingType}</span>
             </div>
 
-            <h2 className="text-base font-black text-card-foreground leading-tight line-clamp-1 mb-2">{card.name}</h2>
+            <h2 className="text-base font-black text-card-foreground leading-tight line-clamp-1 mb-2">{card.title}</h2>
 
             <div className="flex justify-between items-end">
               <div>
                 <p className="text-[9px] uppercase text-muted-foreground font-bold tracking-tight">Current Bid</p>
-                <span className="text-xl font-black text-primary">${card.currentBid.toFixed(2)}</span>
+                <span className="text-xl font-black text-primary">${card.price.toFixed(2)}</span>
+                {card.watchCount > 0 && (
+                  <p className="text-[9px] font-semibold text-muted-foreground">{card.watchCount} watching</p>
+                )}
               </div>
               {countdown && (
                 <div className="text-right">

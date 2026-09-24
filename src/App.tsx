@@ -6,7 +6,7 @@ import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
 import { PreferencesModal } from "@/components/PreferencesModal";
 import { AccountModal } from "@/components/AccountModal";
-import type { TradingCard } from "@/data/pokemon";
+import { normalizeTradingCard, type TradingCard } from "@/data/pokemon";
 import { COLLECTION_CATEGORIES, normalizeCollectionCategories } from "@/data/collectionCategories";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
@@ -74,7 +74,7 @@ function loadLocalWatchlist(): TradingCard[] {
     const raw = localStorage.getItem(WATCHLIST_KEY);
     if (!raw) return [];
     const p = JSON.parse(raw);
-    return Array.isArray(p) ? (p as TradingCard[]) : [];
+    return Array.isArray(p) ? p.map(normalizeTradingCard) : [];
   } catch { return []; }
 }
 
@@ -454,9 +454,9 @@ export default function App() {
       }
       // Client-side filter: remove anything in the permanent pass list that slipped
       // through the URL cap (passedIds can exceed the 200-ID seen param limit).
-      let incoming: TradingCard[] = (data.items ?? []).filter(
-        (c: TradingCard) => !passedIds.current.has(c.id)
-      );
+      let incoming: TradingCard[] = (data.items ?? [])
+        .map(normalizeTradingCard)
+        .filter((card) => !passedIds.current.has(card.id));
       incoming.forEach((c) => seenIds.current.add(c.id));
       persistSeenIds(seenIds.current);   // keep across sessions
 
@@ -630,8 +630,8 @@ export default function App() {
         condition: card.condition,
         listingType: card.listingType,
       },
-      title: card.name,
-      price: card.currentBid,
+      title: card.title,
+      price: card.price,
       tags: card.tags || [],
     };
     if (userId) {
@@ -1465,7 +1465,7 @@ export default function App() {
       // handlePass / the next loadFeed call.
       seenIds.current = new Set();
       persistSeenIds(seenIds.current);
-      const incoming: TradingCard[] = data.cards ?? [];
+      const incoming: TradingCard[] = (data.cards ?? []).map(normalizeTradingCard);
       setCards(incoming);
       setDeckResetKey((k) => k + 1);
       setAppMode("feed");
@@ -1572,7 +1572,7 @@ export default function App() {
   function handleBuy(card: TradingCard) {
     markCardSwiped(card.id);
     recordFeedSwipe(card, "BUY");
-    const url = card.ebayUrl || (card as any).itemWebUrl || (card as any).url;
+    const url = card.itemWebUrl;
     if (!url) return;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) { window.location.href = url; }

@@ -27,7 +27,7 @@ type Props = {
 
 function WatchlistItem({ card, onRemove }: { card: TradingCard; onRemove: (id: string) => void }) {
   const countdown = useCountdown(card.endTime);
-  const ebayLink = card.ebayUrl || getAffiliateUrl(card.name);
+  const ebayLink = card.itemWebUrl || getAffiliateUrl(card.title);
 
   return (
     <div className="flex items-center gap-2 p-2 rounded-xl bg-sidebar-accent/40">
@@ -40,17 +40,17 @@ function WatchlistItem({ card, onRemove }: { card: TradingCard; onRemove: (id: s
       >
         {/* Thumbnail */}
         <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden flex-shrink-0 border border-border">
-          <img src={card.image} alt={card.name} className="w-full h-full object-cover" />
+          <img src={card.imageUrl} alt={card.title} className="w-full h-full object-cover" />
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{card.name}</p>
+          <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{card.title}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{card.grade}</p>
 
           {/* Price + Timer row */}
           <div className="flex items-center justify-between mt-1.5 gap-2">
-            <span className="text-sm font-black text-primary">${card.currentBid.toFixed(2)}</span>
+            <span className="text-sm font-black text-primary">${card.price.toFixed(2)}</span>
             {countdown ? (
               <span
                 className={`inline-flex items-center gap-0.5 text-[10px] font-bold tabular-nums ${
@@ -77,7 +77,7 @@ function WatchlistItem({ card, onRemove }: { card: TradingCard; onRemove: (id: s
       <button
         onClick={() => onRemove(card.id)}
         className="w-9 h-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-50 active:bg-red-100 flex-shrink-0 transition-colors"
-        aria-label={`Remove ${card.name}`}
+        aria-label={`Remove ${card.title}`}
         title="Remove"
       >
         <X className="w-4 h-4" />
@@ -112,15 +112,15 @@ function WatchlistBody({
           return new Date(a.endTime).getTime() - new Date(b.endTime).getTime();
         });
       case "priceDesc":
-        return arr.sort((a, b) => b.currentBid - a.currentBid);
+        return arr.sort((a, b) => b.price - a.price);
       case "priceAsc":
-        return arr.sort((a, b) => a.currentBid - b.currentBid);
+        return arr.sort((a, b) => a.price - b.price);
       default:
         return arr;
     }
   }, [liked, sortBy]);
 
-  const total = liked.reduce((sum, c) => sum + c.currentBid, 0);
+  const total = liked.reduce((sum, c) => sum + c.price, 0);
 
   return (
     <>

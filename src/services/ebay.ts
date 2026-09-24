@@ -1,4 +1,4 @@
-import type { Preferences, TradingCard } from "@/data/pokemon";
+import { normalizeTradingCard, type Preferences, type TradingCard } from "@/data/pokemon";
 
 export async function searchCards(prefs: Preferences, offset: number): Promise<TradingCard[]> {
   const params = new URLSearchParams({
@@ -15,7 +15,7 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
     const response = await fetch(`/api/ebay/search?${params.toString()}`);
     if (!response.ok) return [];
     const data = await response.json();
-    return data.items || [];
+    return (data.items || []).map(normalizeTradingCard);
   } catch (err) {
     console.error("Search failed:", err);
     return [];

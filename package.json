@@ -7,6 +7,7 @@
     "dev": "node server/index.js & vite",
     "dev:server": "node server/index.js",
     "build": "tsc -b && vite build",
+    "test": "node --test",
     "preview": "vite preview",
     "clean": "rimraf dist"
   },

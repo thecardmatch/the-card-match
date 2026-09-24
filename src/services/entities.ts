@@ -1,4 +1,4 @@
-import type { TradingCard } from "@/data/pokemon";
+import { normalizeTradingCard, type TradingCard } from "@/data/pokemon";
 
 export type SearchableEntity = {
   id: string;
@@ -40,7 +40,7 @@ export async function fetchEntityCards(entityId: string): Promise<TradingCard[]>
   if (!res.ok) throw new Error(`Entity search failed: ${res.status}`);
   const data = (await res.json()) as { items: TradingCard[]; fromCache?: boolean };
   if (data.fromCache) console.log("[entities] ✓ cache hit");
-  return data.items ?? [];
+  return (data.items ?? []).map(normalizeTradingCard);
 }
 
 /**
@@ -56,8 +56,8 @@ export function filterEntityCards(
   const now = new Date();
   return cards.filter((c) => {
     if (c.listingType === "Auction" && c.endTime && new Date(c.endTime) <= now) return false;
-    if (c.currentBid < minPrice) return false;
-    if (maxPrice < 10000 && c.currentBid > maxPrice) return false;
+    if (c.price < minPrice) return false;
+    if (maxPrice < 10000 && c.price > maxPrice) return false;
     if (conditions.length === 0) return true;
     const wantRaw    = conditions.includes("Raw");
     const wantGrades = conditions.filter((x) => x.startsWith("Grade ")).map((x) => x.replace("Grade ", "").trim());
