@@ -16,6 +16,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
     const x = useMotionValue(0);
     const y = useMotionValue(0);
     const pointerStart = useRef<{ x: number; y: number; time: number } | null>(null);
+    const touchStart = useRef<{ x: number; y: number; time: number } | null>(null);
     const handledUpSwipe = useRef(false);
     const rotate = useTransform(x, [-200, 0, 200], [-15, 0, 15]);
     const saveOpacity = useTransform(x, [0, 80], [0, 1]);
@@ -39,7 +40,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       ? currentImageUrl.replace("s-l600", "s-l225") 
       : currentImageUrl;
 
-    const handleDragEnd = (_: any, info: PanInfo) => {
+    const handleDragEnd = (event: any, info: PanInfo) => {
       if (handledUpSwipe.current) {
         handledUpSwipe.current = false;
         return;
@@ -47,7 +48,13 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
 
       const threshold         = 100;
       const velocityThreshold = 500;
-      if (info.offset.y < -threshold || info.velocity.y < -velocityThreshold) {
+      const isUpSwipe = info.offset.y < -threshold || info.velocity.y < -velocityThreshold;
+      if (event?.pointerType === "touch" && isUpSwipe) {
+        // iOS Safari applies stricter popup activation rules to drag-end
+        // callbacks. Let the trusted touchend handler open eBay instead.
+        return;
+      }
+      if (isUpSwipe) {
         onSwipe("up");
       } else if (info.offset.x > threshold || info.velocity.x > velocityThreshold) {
         onSwipe("right");
@@ -70,6 +77,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       const start = pointerStart.current;
       pointerStart.current = null;
       if (!isTop || !start) return;
+      if (event.pointerType === "touch") return;
 
       const deltaY = event.clientY - start.y;
       const elapsedMs = Math.max(1, event.timeStamp - start.time);
@@ -77,6 +85,34 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       if (deltaY < -100 || velocityY < -500) {
         // Launch during the trusted pointer-up event. Framer Motion's drag-end
         // callback can run too late for mobile browsers to allow a new tab.
+        handledUpSwipe.current = true;
+        onSwipe("up");
+      }
+    };
+
+    const handleTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+      if (!isTop) return;
+      const touch = event.touches[0];
+      if (!touch) return;
+      handledUpSwipe.current = false;
+      touchStart.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        time: event.timeStamp,
+      };
+    };
+
+    const handleTouchEndCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+      const start = touchStart.current;
+      touchStart.current = null;
+      if (!isTop || !start) return;
+
+      const touch = event.changedTouches[0];
+      if (!touch) return;
+      const deltaY = touch.clientY - start.y;
+      const elapsedMs = Math.max(1, event.timeStamp - start.time);
+      const velocityY = (deltaY / elapsedMs) * 1000;
+      if (deltaY < -100 || velocityY < -500) {
         handledUpSwipe.current = true;
         onSwipe("up");
       }
@@ -111,6 +147,8 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
         dragElastic={0.15}
         onPointerDownCapture={handlePointerDownCapture}
         onPointerUpCapture={handlePointerUpCapture}
+        onTouchStartCapture={handleTouchStartCapture}
+        onTouchEndCapture={handleTouchEndCapture}
         onDragEnd={handleDragEnd}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
       >
