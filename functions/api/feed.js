@@ -4,6 +4,7 @@ import {
 } from "../_shared/ebay.js";
 import { isJunk } from "../_shared/recommendationEngine.js";
 import { selectCategoryTermBatches } from "../_shared/categorySearchTerms.js";
+import { interleaveDeck } from "../_shared/deckOrdering.js";
 import {
   FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
   hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards, PLAYER_QUERY_TERMS,
@@ -113,7 +114,8 @@ export async function onRequestGet({ env, request }) {
     const enrichmentLimit = searchQuery ? Math.min(fresh.length, 20) : Math.max(count * 2, 40);
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
-    return jsonResponse({ items: engaged.slice(0, count).map(canonicalFeedItem) });
+    const finalCards = engaged.slice(0, count).map(canonicalFeedItem);
+    return jsonResponse({ items: interleaveDeck(finalCards) });
   } catch (error) {
     console.error("[feed]", error.message);
     return jsonResponse({ items: [], error: error.message }, 500);

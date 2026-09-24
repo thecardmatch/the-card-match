@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import { extractPlayer } from "../functions/_shared/ebay.js";
+import { interleaveDeck } from "../functions/_shared/deckOrdering.js";
 import {
   FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
@@ -1310,45 +1311,6 @@ function parseFeedIds(value) {
     } catch { /* fall through to comma-separated legacy format */ }
     return entry.split(",");
   }).map(String).map((id) => id.trim()).filter(Boolean);
-}
-
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
-function getDeckSubject(card) {
-  const subject = [card?.playerName, card?.searchSubject, card?.player]
-    .find((value) => typeof value === "string" && value.trim());
-  return typeof subject === "string" ? subject.trim().toLocaleLowerCase() : "";
-}
-
-function interleaveDeck(cards) {
-  const shuffled = shuffleArray([...cards]);
-  const buckets = new Map();
-  shuffled.forEach((card, index) => {
-    const subject = getDeckSubject(card);
-    const key = subject ? `subject:${subject}` : `unknown:${index}`;
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push(card);
-  });
-
-  const result = [];
-  let previousKey = null;
-
-  while (result.length < shuffled.length) {
-    const remaining = [...buckets.entries()].filter(([, bucket]) => bucket.length > 0);
-    const available = remaining.filter(([key]) => key !== previousKey);
-    const candidates = available.length ? available : remaining;
-    candidates.sort((a, b) => b[1].length - a[1].length);
-    const [key, bucket] = candidates[0];
-    result.push(bucket.pop());
-    previousKey = key;
-  }
-  return result;
 }
 
 app.get(["/api/feed", "/api/deck"], async (req, res) => {
