@@ -15,6 +15,8 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
   ({ card, isTop, zIndex, offset, onSwipe }: Props, ref) => {
     const x = useMotionValue(0);
     const y = useMotionValue(0);
+    const pointerStart = useRef<{ x: number; y: number; time: number } | null>(null);
+    const handledUpSwipe = useRef(false);
     const rotate = useTransform(x, [-200, 0, 200], [-15, 0, 15]);
     const saveOpacity = useTransform(x, [0, 80], [0, 1]);
     const passOpacity = useTransform(x, [-80, 0], [1, 0]);
@@ -38,6 +40,11 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       : currentImageUrl;
 
     const handleDragEnd = (_: any, info: PanInfo) => {
+      if (handledUpSwipe.current) {
+        handledUpSwipe.current = false;
+        return;
+      }
+
       const threshold         = 100;
       const velocityThreshold = 500;
       if (info.offset.y < -threshold || info.velocity.y < -velocityThreshold) {
@@ -46,6 +53,32 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
         onSwipe("right");
       } else if (info.offset.x < -threshold || info.velocity.x < -velocityThreshold) {
         onSwipe("left");
+      }
+    };
+
+    const handlePointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isTop) return;
+      handledUpSwipe.current = false;
+      pointerStart.current = {
+        x: event.clientX,
+        y: event.clientY,
+        time: event.timeStamp,
+      };
+    };
+
+    const handlePointerUpCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+      const start = pointerStart.current;
+      pointerStart.current = null;
+      if (!isTop || !start) return;
+
+      const deltaY = event.clientY - start.y;
+      const elapsedMs = Math.max(1, event.timeStamp - start.time);
+      const velocityY = (deltaY / elapsedMs) * 1000;
+      if (deltaY < -100 || velocityY < -500) {
+        // Launch during the trusted pointer-up event. Framer Motion's drag-end
+        // callback can run too late for mobile browsers to allow a new tab.
+        handledUpSwipe.current = true;
+        onSwipe("up");
       }
     };
 
@@ -76,6 +109,8 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
         dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
         dragSnapToOrigin={true}
         dragElastic={0.15}
+        onPointerDownCapture={handlePointerDownCapture}
+        onPointerUpCapture={handlePointerUpCapture}
         onDragEnd={handleDragEnd}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
       >
