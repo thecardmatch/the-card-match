@@ -45,6 +45,12 @@ export function ensureEbayAffiliateUrl(url: string | null | undefined, fallbackN
 }
 
 export function openEbayInNewTab(url: string): void {
+  const openedWindow = window.open(url, "_blank");
+  if (openedWindow) {
+    openedWindow.opener = null;
+    return;
+  }
+
   const link = document.createElement("a");
   link.href = url;
   link.target = "_blank";
