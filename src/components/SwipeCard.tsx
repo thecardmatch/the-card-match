@@ -64,7 +64,13 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
       <motion.div
         ref={ref}
         className="absolute inset-0 select-none cursor-grab active:cursor-grabbing h-full w-full"
-        style={{ zIndex, x: isTop ? x : 0, y: isTop ? y : 0, rotate: isTop ? rotate : 0 }}
+        style={{
+          zIndex,
+          x: isTop ? x : 0,
+          y: isTop ? y : 0,
+          rotate: isTop ? rotate : 0,
+          touchAction: isTop ? "none" : "auto",
+        }}
         animate={{ scale: 1 - offset * 0.04, y: offset * 10 }}
         drag={isTop}
         dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
