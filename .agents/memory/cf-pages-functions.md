@@ -18,6 +18,12 @@ thecardmatch.com is hosted on **Cloudflare Pages** (pure static hosting). There 
 - Credentialed cross-origin requests require an explicit allowed origin; never combine `Access-Control-Allow-Credentials: true` with a wildcard origin.
 - The production frontend must call `/api` same-origin; any `VITE_API_URL` override is development-only and must not point a published build at `*.replit.dev`.
 
+The Cloudflare Pages project `the-card-match` is connected to GitHub's `main` branch and builds `dist` with `npx vite build`. Replit workspace edits are not live until that production branch deploys.
+
+**Why:** A production API can be healthy while the public static frontend is still serving an older bundle, so local verification alone does not establish that the custom domain is fixed.
+
+**How to apply:** For production-targeted fixes, verify the current asset on thecardmatch.com and verify a new Pages deployment after the branch update; state clearly when a workspace change still needs publishing.
+
 ## Key CF vs Node.js differences
 - `Buffer.from(x).toString('base64')` → `btoa(x)`
 - `process.env.X` → `context.env.X` (passed as param to helpers)

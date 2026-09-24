@@ -248,7 +248,9 @@ function getInitialMode(): AppMode {
 function getUrlSearchTerm(): string {
   if (typeof window === "undefined") return "";
   const params = new URLSearchParams(window.location.search);
-  return (params.get("q") || params.get("player") || "").trim();
+  return [params.get("q"), params.get("player"), params.get("")]
+    .find((value) => value?.trim())
+    ?.trim() ?? "";
 }
 
 /**
@@ -446,6 +448,7 @@ export default function App() {
     const url = new URL(window.location.href);
     url.searchParams.delete("q");
     url.searchParams.delete("player");
+    url.searchParams.delete("");
     window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
     searchTermRef.current = "";
     setSearchTerm("");
