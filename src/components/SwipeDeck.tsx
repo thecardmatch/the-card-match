@@ -21,7 +21,9 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
 
   useEffect(() => {
     const remainingCards = cards.length - currentIndex;
-    if (remainingCards < 8 && !isLoadingMore) onNeedMore();
+    // The deck is mounted while the first page is loading; do not request an
+    // append page from an empty list, or it can block the initial feed request.
+    if (cards.length > 0 && remainingCards < 8 && !isLoadingMore) onNeedMore();
   }, [currentIndex, cards.length, isLoadingMore, onNeedMore]);
 
   const handleSwipe = (direction: "left" | "right" | "up") => {
