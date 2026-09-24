@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getDeckSubject, interleaveDeck, shuffleArray } from "./deckOrdering.js";
+import {
+  getDeckSubject,
+  interleaveDeck,
+  selectDiverseCards,
+  shuffleArray,
+} from "./deckOrdering.js";
 
 function hasAdjacentDuplicateSubject(cards) {
   return cards.some((card, index) => {
@@ -101,4 +106,43 @@ test("interleaveDeck avoids repeating the previous page's last subject when poss
   ], previousCard);
 
   assert.notEqual(getDeckSubject(result[0]), getDeckSubject(previousCard));
+});
+
+test("selectDiverseCards caps each subject before selecting a second card", () => {
+  const subjects = ["Pikachu", "Josh Allen", "James Cook", "Charizard", "Drake Maye", "DJ Moore"];
+  const cards = subjects.flatMap((subject) =>
+    Array.from({ length: 5 }, (_, index) => ({
+      id: `${subject}-${index}`,
+      title: `${subject} PSA 10 trading card ${index}`,
+    }))
+  );
+
+  const selected = selectDiverseCards(cards, 12, 2);
+  const subjectCounts = new Map();
+  selected.forEach((card) => {
+    const subject = getDeckSubject(card);
+    subjectCounts.set(subject, (subjectCounts.get(subject) || 0) + 1);
+  });
+
+  assert.equal(selected.length, 12);
+  assert.equal(new Set(selected.map((card) => card.id)).size, 12);
+  assert.equal(subjectCounts.size, 6);
+  assert.deepEqual([...subjectCounts.values()], [2, 2, 2, 2, 2, 2]);
+});
+
+test("selectDiverseCards fills the page when only a few subjects are available", () => {
+  const cards = [
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `pikachu-${index}`,
+      title: `Pikachu PSA 10 ${index}`,
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `allen-${index}`,
+      title: `Josh Allen PSA 10 ${index}`,
+    })),
+  ];
+
+  const selected = selectDiverseCards(cards, 7, 2);
+  assert.equal(selected.length, 7);
+  assert.equal(new Set(selected.map((card) => card.id)).size, 7);
 });

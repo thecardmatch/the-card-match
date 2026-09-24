@@ -27,8 +27,8 @@ Category decks search their supplied player, character, and card terms individua
 
 **How to apply:** Keep the bounded OR-query behavior and the existing price, seller, high-end eligibility, junk, and physical-card filters when changing category discovery.
 
-Subject interleaving is constrained by its distribution: repeats are avoidable only when the largest subject group can be separated by the remaining cards. A simple “pick the next different subject” swap can still exhaust alternate groups too early.
+Subject interleaving and feed selection are both constrained by subject counts. Reordering cannot create variety if the page is already selected from only a few subjects; sample candidates across subjects before enrichment, then cap each subject in the final page before backfilling.
 
-**Why:** Randomized stress tests found adjacent duplicates in otherwise feasible decks with a naive swap-next-distinct pass.
+**Why:** Randomized stress tests found adjacent duplicates with a naive swap-next-distinct pass, and sorting before slicing let a few high-volume subjects crowd out the rest of the feed.
 
-**How to apply:** After shuffling, select the largest remaining subject group other than the previous one; match known category search terms against titles before trusting fallback name extraction, use unknown-subject cards as distinct separators, and carry the previous page's last card into the next page's ordering. Accept a repeat only when no alternative remains.
+**How to apply:** For category feeds, select the enrichment shortlist across subjects, then choose at most two cards per subject for the page before backfilling if alternatives run out. After shuffling, select the largest remaining subject group other than the previous one; match known category search terms against titles before trusting fallback name extraction, use unknown-subject cards as distinct separators, and carry the previous page's last card into the next page's ordering.

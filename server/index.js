@@ -6,7 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import { extractPlayer } from "../functions/_shared/ebay.js";
-import { interleaveDeck } from "../functions/_shared/deckOrdering.js";
+import { interleaveDeck, selectDiverseCards } from "../functions/_shared/deckOrdering.js";
 import {
   FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
@@ -1419,10 +1419,16 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
       return true;
     });
     const enrichmentLimit = searchQuery ? Math.min(fresh.length, 20) : Math.max(returnCount * 2, 40);
-    const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
+    const enrichmentCandidates = searchQuery
+      ? fresh.slice(0, enrichmentLimit)
+      : selectDiverseCards([...fresh].sort(sortHotCards), enrichmentLimit, 1);
+    const enriched = await enrichFeedItemsWithEngagement(token, enrichmentCandidates);
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
-    const finalCards = engaged.slice(0, returnCount).map(canonicalFeedItem);
+    const selectedCards = searchQuery
+      ? engaged.slice(0, returnCount)
+      : selectDiverseCards(engaged, returnCount, 2);
+    const finalCards = selectedCards.map(canonicalFeedItem);
     return res.json({ items: interleaveDeck(finalCards, previousCard) });
   } catch (err) {
     console.error("[feed]", err.message);

@@ -73,6 +73,41 @@ export function getDeckSubject(card) {
   return typeof subject === "string" ? normalizeSubjectText(subject) : "";
 }
 
+export function selectDiverseCards(cards, count, maxPerSubject = 2) {
+  const limit = Math.min(cards.length, Math.max(0, Math.floor(Number(count) || 0)));
+  if (!limit) return [];
+
+  const buckets = new Map();
+  cards.forEach((card, index) => {
+    const subject = getDeckSubject(card);
+    const key = subject ? `subject:${subject}` : `unknown:${index}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(index);
+  });
+
+  const selectedIndices = [];
+  const selectedSet = new Set();
+  const cap = Math.max(1, Math.floor(Number(maxPerSubject) || 1));
+  for (let round = 0; round < cap && selectedIndices.length < limit; round += 1) {
+    for (const indices of buckets.values()) {
+      const index = indices[round];
+      if (index === undefined) continue;
+      selectedIndices.push(index);
+      selectedSet.add(index);
+      if (selectedIndices.length === limit) break;
+    }
+  }
+
+  // If the candidate pool has too few different subjects to meet the cap,
+  // fill the remaining slots with the highest-ranked unused cards.
+  for (let index = 0; index < cards.length && selectedIndices.length < limit; index += 1) {
+    if (selectedSet.has(index)) continue;
+    selectedIndices.push(index);
+  }
+
+  return selectedIndices.map((index) => cards[index]);
+}
+
 export function interleaveDeck(cards, previousCard = null) {
   const shuffled = shuffleArray([...cards]);
   const buckets = new Map();
