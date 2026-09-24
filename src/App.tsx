@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { supabase, isSupabaseReady } from "@/lib/supabaseClient";
-import { Heart, Settings, UserRound } from "lucide-react";
+import { ArrowLeft, Heart, Settings, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar }        from "@/components/Sidebar";
 import { SwipeDeck }      from "@/components/SwipeDeck";
@@ -1481,8 +1481,8 @@ export default function App() {
       {/* ── MAIN FEED ─────────────────────────────────────────────────────────── */}
       <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden">
 
-        <header className="h-16 px-4 md:px-5 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
-          <div className="flex items-center gap-3">
+        <header className="h-16 px-3 sm:px-4 md:px-5 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3">
             <img src="/logo.png" alt="The Card Match" className="w-10 h-10 rounded-xl shadow-md" />
             <div>
               <h1 className="text-sm font-black uppercase tracking-tighter leading-none text-foreground">
@@ -1490,26 +1490,30 @@ export default function App() {
               </h1>
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
                 {searchTerm ? (
-                  <span className="inline-flex items-center gap-1.5 max-w-[34vw] sm:max-w-none">
+                  <span className="inline-flex items-center max-w-[26vw] sm:max-w-none">
                     <span className="truncate">Trending Deck: {searchTerm}</span>
-                    <button
-                      type="button"
-                      onClick={resetSearchFromUrl}
-                      className="text-muted-foreground hover:text-foreground text-sm leading-none"
-                      aria-label="Clear player search"
-                      title="Back to your categories"
-                    >
-                      ×
-                    </button>
                   </span>
                 ) : "Live high-end cards"}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Preferences */}
+          <div className="flex items-center gap-1 sm:gap-2">
             {appMode === "feed" && (
+              <>
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={resetSearchFromUrl}
+                    aria-label="Back to My Deck"
+                    title="Back to My Deck"
+                    className="flex h-8 shrink-0 items-center gap-1 rounded-full border border-border bg-card px-2 text-[9px] font-black text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>My Deck</span>
+                  </button>
+                )}
+                {/* Preferences */}
               <div className="flex items-center rounded-full border border-border bg-card p-0.5">
                 <button
                   type="button"
@@ -1521,6 +1525,7 @@ export default function App() {
                   <Settings className="h-3.5 w-3.5" />
                 </button>
               </div>
+              </>
             )}
 
             <button
