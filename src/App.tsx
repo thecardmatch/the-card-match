@@ -102,6 +102,29 @@ function normalizePreferences(value: unknown): Preferences {
   };
 }
 
+function getPendingDeckPreferences(): Preferences {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem("cardmatch:pending_swipes") || "[]");
+    const selectedCategories = normalizeCollectionCategories(
+      Array.isArray(parsed)
+        ? parsed
+            .filter((swipe): swipe is Record<string, unknown> =>
+              Boolean(swipe && typeof swipe === "object" &&
+                (swipe.action === "LIKE" || swipe.action === "BUY")),
+            )
+            .map((swipe) => swipe.category)
+        : [],
+    );
+    return {
+      selectedCategories,
+      preferenceMode: selectedCategories.length ? "selected" : "trending",
+      onboardingComplete: true,
+    };
+  } catch {
+    return { selectedCategories: [], preferenceMode: "trending", onboardingComplete: true };
+  }
+}
+
 function swipeHistoryKey(userId: string): string {
   return `${SWIPE_HISTORY_KEY_PREFIX}:${userId}`;
 }
@@ -330,6 +353,7 @@ export default function App() {
   // bucket (empty on first visit).  They are reset to the correct user-scoped
   // data in initSession / SIGNED_IN.
   const currentUserIdRef       = useRef<string | null>(null);                  // tracks active account
+  const activeFeedPreferencesRef = useRef<Preferences | null>(null);
   const {
     ids:        _initPassedIds,
     timestamps: _initPassedTs,
@@ -340,6 +364,7 @@ export default function App() {
   const isLoadingMoreRef       = useRef(false);
   const currentOffsetRef       = useRef(0);
   const savePassedIdsTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onboardingCompletionStartedRef = useRef(false);
   const swipeHistoryRef        = useRef<SwipeRecord[]>([]);
   const profileWriteChainRef   = useRef<Promise<boolean>>(Promise.resolve(true));
   const swipeApiChainRef       = useRef<Promise<void>>(Promise.resolve());
@@ -361,17 +386,31 @@ export default function App() {
   }, [searchTerm]);
 
   // ── Feed loader ─────────────────────────────────────────────────────────────
-  async function loadFeed(append = false) {
+  async function loadFeed(
+    append = false,
+    options: { preferences?: Preferences; allowEmptyPreferences?: boolean } = {},
+  ) {
     // Guard: redirect to onboarding only when the user genuinely hasn't completed
     // it yet. Empty selectedCategories intentionally means curated trending feed.
+    const feedPreferences = options.preferences ??
+      (append ? activeFeedPreferencesRef.current : null) ??
+      prefsRef.current;
+    const allowEmptyPreferences = options.allowEmptyPreferences ||
+      (append && activeFeedPreferencesRef.current?.onboardingComplete === true);
     const doneOnboarding = !!localStorage.getItem(ONBOARDING_KEY);
-    const hasSelectedCategories = !!prefsRef.current?.selectedCategories?.length;
+    const hasSelectedCategories = !!feedPreferences?.selectedCategories?.length;
     const hasDeepLinkedSearch = Boolean(searchTermRef.current.trim());
-    if (!hasSelectedCategories && !doneOnboarding && !hasDeepLinkedSearch) {
+    if (
+      !hasSelectedCategories &&
+      !doneOnboarding &&
+      !hasDeepLinkedSearch &&
+      !allowEmptyPreferences
+    ) {
       setAppMode("onboarding");
       return;
     }
     if (isLoadingMoreRef.current) return;
+    if (!append) activeFeedPreferencesRef.current = feedPreferences ?? null;
     isLoadingMoreRef.current = true;
     setIsLoadingMore(true);
     if (!append) setAppMode("feed-loading");
@@ -390,7 +429,7 @@ export default function App() {
             seenIds.current,
             passedIds.current,
             new Set([...swipedIds, ...swipedIdsRef.current]),
-            prefsRef.current,
+            feedPreferences,
             pageOffset,
             searchTermRef.current,
           ), { signal: controller.signal });
@@ -445,6 +484,28 @@ export default function App() {
       setIsLoadingMore(false);
     }
   }
+
+  function getAuthDeckFallbackPreferences(): Preferences {
+    if (localStorage.getItem("cardmatch:pending_swipes")) {
+      return getPendingDeckPreferences();
+    }
+    return prefsRef.current ?? {
+      selectedCategories: [],
+      preferenceMode: "trending",
+      onboardingComplete: true,
+    };
+  }
+
+  // A late remote pass-history restore can remove every card from the current
+  // page. Automatically request a fresh page rather than leaving an empty deck
+  // in its loading state; a genuinely empty response sets feedError and stops
+  // this effect from retrying in a loop.
+  useEffect(() => {
+    if (appMode !== "feed" || cards.length > 0 || feedError || isLoadingMore) return;
+    void loadFeed(false);
+    // loadFeed intentionally reads refs and isLoadingMoreRef for request locking.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode, cards.length, feedError, isLoadingMore]);
 
   function resetSearchFromUrl() {
     const url = new URL(window.location.href);
@@ -717,8 +778,12 @@ export default function App() {
       }
     } catch { /* network error — proceed with local data */ }
 
-    // Ownership re-check before reconciling
-    if (currentUserIdRef.current === userId) reconcilePassedIds();
+    // Ownership re-check before reconciling and filtering any deck page that
+    // may have loaded while this remote query was in flight.
+    if (currentUserIdRef.current === userId) {
+      reconcilePassedIds();
+      setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+    }
   }
 
   // ── Passed-IDs: atomic RPC sync to Supabase ───────────────────────────────
@@ -866,6 +931,7 @@ export default function App() {
           .maybeSingle();
 
         if (currentUserIdRef.current !== userId) return "error";
+        if (signal?.aborted) return "error";
 
         // Any Supabase error (network, RLS, schema) → treat as unavailable, not absent.
         // Callers must NOT write fresh quiz data when the result is "error".
@@ -929,9 +995,96 @@ export default function App() {
       return "absent";
     }
 
+    function startAuthRestoreFallback(userId: string) {
+      const signal = { aborted: false };
+      const timeout = window.setTimeout(() => {
+        signal.aborted = true;
+        profileCheckResultRef.current = "error";
+        if (currentUserIdRef.current !== userId) return;
+        if (
+          !localStorage.getItem(ONBOARDING_KEY) ||
+          localStorage.getItem("cardmatch:pending_swipes")
+        ) {
+          loadFeed(false, {
+            preferences: getAuthDeckFallbackPreferences(),
+            allowEmptyPreferences: true,
+          });
+        }
+      }, 7000);
+      return { signal, cancel: () => window.clearTimeout(timeout) };
+    }
+
+    function processSignedInUser(userId: string) {
+      if (currentUserIdRef.current !== userId) return;
+      void migrateGuestProfile(userId);
+
+      // Flush any quiz swipes completed before authentication.
+      const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
+      if (pendingRaw) {
+        try {
+          const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
+
+          if (!localStorage.getItem(ONBOARDING_KEY)) {
+            // Check the account before writing a fresh quiz. Existing remote
+            // profiles win; an unavailable check only gets a temporary deck.
+            const restoreFallback = startAuthRestoreFallback(userId);
+            restoreProfileFromSupabase(userId, restoreFallback.signal).then((result) => {
+              if (restoreFallback.signal.aborted || currentUserIdRef.current !== userId) return;
+              if (result === "recovered") {
+                localStorage.removeItem("cardmatch:pending_swipes");
+                setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+              } else if (result === "absent") {
+                handleOnboardingComplete(pendingSwipes);
+                void hydrateRemotePassedIds(userId).then(() => {
+                  if (currentUserIdRef.current === userId) {
+                    setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+                  }
+                });
+              } else {
+                console.warn("[session] profile check failed — retaining pending_swipes for next sign-in");
+                loadFeed(false, {
+                  preferences: getPendingDeckPreferences(),
+                  allowEmptyPreferences: true,
+                });
+              }
+            }).finally(restoreFallback.cancel);
+            return;
+          }
+
+          // Onboarding was already completed locally; sync its pending swipes.
+          localStorage.removeItem("cardmatch:pending_swipes");
+          const savedPrefs = (() => {
+            try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
+          })();
+          void saveQuizToSupabase(userId, pendingSwipes, savedPrefs);
+          void hydrateRemotePassedIds(userId).then(() => {
+            if (currentUserIdRef.current === userId) {
+              setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+            }
+          });
+          return;
+        } catch { /* malformed — continue with profile recovery */ }
+      }
+
+      // Cross-device recovery for a sign-in that happened without a full reload.
+      const restoreFallback = startAuthRestoreFallback(userId);
+      restoreProfileFromSupabase(userId, restoreFallback.signal).then((result) => {
+        if (restoreFallback.signal.aborted || currentUserIdRef.current !== userId) return;
+        if (result === "recovered") {
+          setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+          return;
+        }
+        void hydrateRemotePassedIds(userId).then(() => {
+          if (currentUserIdRef.current === userId) {
+            setCards((prev) => prev.filter((card) => !passedIds.current.has(card.id)));
+          }
+        });
+      }).finally(restoreFallback.cancel);
+    }
+
     if (supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-        if (event === "SIGNED_IN" && session?.user) {
+        if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session?.user) {
           const { email, user_metadata } = session.user;
           const signedInUser = {
             email:   email || "",
@@ -941,9 +1094,9 @@ export default function App() {
           localStorage.setItem("cardmatch:user", JSON.stringify(signedInUser));
           setAccountUser(signedInUser);
 
-          // Scope switch: reset pass state to this user's account data.
-          // This prevents any anonymous or previous-user passes from being
-          // uploaded to the newly signed-in user's Supabase record.
+          // Make the restored identity visible immediately. initSession owns
+          // profile recovery for INITIAL_SESSION; the SIGNED_IN branch below
+          // handles sign-ins that happen while this page is already mounted.
           const userId = session.user.id;
           if (currentUserIdRef.current !== userId) {
             const { ids: loadedIds, timestamps: loadedTs } = loadPassedIds(userId);
@@ -953,83 +1106,13 @@ export default function App() {
             currentUserIdRef.current      = userId;
             swipeHistoryRef.current       = loadSwipeHistory(userId);
           }
-          void migrateGuestProfile(userId);
+        }
 
-          // Flush any quiz swipes completed before authentication.
-          const pendingRaw = localStorage.getItem("cardmatch:pending_swipes");
-          if (pendingRaw) {
-            try {
-              const pendingSwipes: SwipeRecord[] = JSON.parse(pendingRaw);
-
-              if (!localStorage.getItem(ONBOARDING_KEY)) {
-                // The user completed the onboarding quiz on this device and then
-                // signed in.  Before persisting their fresh quiz results, check
-                // whether this account already has a completed profile on Supabase
-                // (they may have done onboarding on another device previously).
-                // If a remote profile exists, restore it and discard the duplicate
-                // fresh-device quiz — we must never overwrite an established account.
-                restoreProfileFromSupabase(userId).then((result) => {
-                  if (currentUserIdRef.current !== userId) return;
-                  if (result === "recovered") {
-                    // Existing remote profile restored; feed is already loading.
-                    // Discard the fresh device quiz and filter the deck.
-                    localStorage.removeItem("cardmatch:pending_swipes");
-                    setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-                  } else if (result === "absent") {
-                    // Supabase confirmed no remote profile — genuinely new account.
-                    // Process the fresh quiz results normally.
-                    localStorage.removeItem("cardmatch:pending_swipes");
-                    handleOnboardingComplete(pendingSwipes);
-                    hydrateRemotePassedIds(userId).then(() => {
-                      if (currentUserIdRef.current === userId) {
-                        setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-                      }
-                    });
-                  } else {
-                    // result === "error": query failed — do NOT write the fresh quiz.
-                    // Leave pending_swipes in localStorage so the next sign-in can retry.
-                    console.warn("[session] profile check failed — retaining pending_swipes for next sign-in");
-                  }
-                });
-                return;
-              }
-
-              // ONBOARDING_KEY is already set — user was mid-session when auth fired.
-              // Just sync quiz swipes that weren't persisted to Supabase yet.
-              localStorage.removeItem("cardmatch:pending_swipes");
-              const savedPrefs = (() => {
-                try { return JSON.parse(localStorage.getItem(PREFS_KEY) || ""); } catch { return null; }
-              })();
-              saveQuizToSupabase(session.user.id, pendingSwipes, savedPrefs);
-              // Hydrate passed IDs in background.
-              hydrateRemotePassedIds(userId).then(() => {
-                if (currentUserIdRef.current === userId) {
-                  setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-                }
-              });
-              return;
-            } catch { /* malformed — ignore */ }
-          }
-
-          // Cross-device recovery: the user logged in on a new device where
-          // ONBOARDING_KEY is absent.  Restore their profile from Supabase and
-          // skip the quiz if they've done it before.
-          // Also handles any IDs they've never synced on this device.
-          restoreProfileFromSupabase(userId).then((result) => {
-            if (currentUserIdRef.current !== userId) return;
-            if (result === "recovered") {
-              // loadFeed() already called inside restoreProfileFromSupabase —
-              // just filter the current deck for any newly-known passed IDs.
-              setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-              return;
-            }
-            // "absent" or "error": no cross-device recovery — hydrate passed IDs and filter deck.
-            hydrateRemotePassedIds(userId).then(() => {
-              if (currentUserIdRef.current === userId) {
-                setCards((prev) => prev.filter((c) => !passedIds.current.has(c.id)));
-              }
-            });
-          });
+        if (event === "SIGNED_IN" && session?.user) {
+          // Defer Supabase reads/writes until after the auth callback releases
+          // its internal lock; auth callbacks must stay synchronous.
+          const userId = session.user.id;
+          window.setTimeout(() => processSignedInUser(userId), 0);
         }
 
         if (event === "SIGNED_OUT") {
@@ -1048,6 +1131,7 @@ export default function App() {
           pendingPassedIds.current    = new Set();
           currentUserIdRef.current    = null;
           swipeHistoryRef.current     = [];
+          onboardingCompletionStartedRef.current = false;
           localStorage.removeItem("cardmatch:user");
           setAccountUser(null);
         }
@@ -1083,9 +1167,17 @@ export default function App() {
         safetyTimer = setTimeout(() => {
           signal.aborted = true;
           profileCheckResultRef.current = "error";
-          console.warn("[session] profile check timed out — loading the selected feed");
+          console.warn("[session] profile check timed out — loading a local feed fallback");
           if (appMode === "feed-loading") {
             loadFeed(false);
+          } else if (
+            currentUserIdRef.current ||
+            localStorage.getItem("cardmatch:pending_swipes")
+          ) {
+            loadFeed(false, {
+              preferences: getAuthDeckFallbackPreferences(),
+              allowEmptyPreferences: true,
+            });
           } else {
             setAppMode((m) => m === "session-checking" ? "onboarding" : m);
           }
@@ -1094,9 +1186,16 @@ export default function App() {
 
       if (!supabase) {
         // No Supabase — resolve immediately.
-        // "feed-loading" → start feed; "session-checking" → fall back to onboarding.
+        // A pending completed quiz is enough to start a guest deck without
+        // losing the user's choices while authentication is unavailable.
         if (safetyTimer) clearTimeout(safetyTimer);
         if (appMode === "feed-loading") loadFeed(false);
+        else if (localStorage.getItem("cardmatch:pending_swipes")) {
+          loadFeed(false, {
+            preferences: getPendingDeckPreferences(),
+            allowEmptyPreferences: true,
+          });
+        }
         else setAppMode("onboarding");
         return;
       }
@@ -1107,6 +1206,14 @@ export default function App() {
 
         if (session?.user) {
           const userId = session.user.id;
+          const { email, user_metadata } = session.user;
+          const signedInUser = {
+            email:   email || "",
+            name:    user_metadata?.full_name ?? user_metadata?.name ?? "",
+            picture: user_metadata?.avatar_url ?? user_metadata?.picture ?? "",
+          };
+          localStorage.setItem("cardmatch:user", JSON.stringify(signedInUser));
+          setAccountUser(signedInUser);
 
           // Scope switch: reset pass state to this specific user's data.
           // Guards against any anonymous or previous-user IDs bleeding in.
@@ -1146,15 +1253,21 @@ export default function App() {
                 }
                 if (pendingResult === "absent") {
                   // Confirmed new account — process the fresh quiz.
-                  localStorage.removeItem("cardmatch:pending_swipes");
-                  await hydrateRemotePassedIds(userId);
-                  if (signal.aborted) { if (safetyTimer) clearTimeout(safetyTimer); return; }
-                  if (safetyTimer) clearTimeout(safetyTimer);
-                  handleOnboardingComplete(pendingSwipes);
+                  void hydrateRemotePassedIds(userId);
+                  void handleOnboardingComplete(pendingSwipes).finally(() => {
+                    if (safetyTimer) clearTimeout(safetyTimer);
+                  });
                   return;
                 }
-                // "error": retain pending_swipes for retry on next sign-in.
-                // Fall through to hydrateRemotePassedIds and then to feed.
+                // "error": retain pending_swipes and use those choices for this
+                // visit only. Never write an uncertain profile over Supabase.
+                void hydrateRemotePassedIds(userId);
+                if (safetyTimer) clearTimeout(safetyTimer);
+                loadFeed(false, {
+                  preferences: getPendingDeckPreferences(),
+                  allowEmptyPreferences: true,
+                });
+                return;
               } else {
                 // Onboarding already done — just sync quiz swipes to Supabase.
                 localStorage.removeItem("cardmatch:pending_swipes");
@@ -1163,11 +1276,8 @@ export default function App() {
                 })();
                 saveQuizToSupabase(userId, pendingSwipes, savedPrefs);
               }
+              void hydrateRemotePassedIds(userId);
             } catch { /* malformed pending_swipes — ignore */ }
-
-            // Applies to: "error" path (pending_swipes retained) + ONBOARDING_KEY path.
-            await hydrateRemotePassedIds(userId);
-            if (signal.aborted) return;
           } else {
             // ── No pending swipes — normal cross-device recovery ──────────
             // Restore explicit category preferences and handle cross-device
@@ -1183,26 +1293,56 @@ export default function App() {
 
             if (restoreResult === "recovered") { if (safetyTimer) clearTimeout(safetyTimer); return; }
 
-            // Hydrate remote passed_ids and reconcile local ones to Supabase.
-            await hydrateRemotePassedIds(userId);
-            if (signal.aborted) return;
+            if (restoreResult === "error" && appMode === "session-checking") {
+              // The identity is valid, but profile storage is unavailable.
+              // Start a curated deck instead of sending a returning user back
+              // through onboarding; this fallback is not persisted as a profile.
+              void hydrateRemotePassedIds(userId);
+              if (safetyTimer) clearTimeout(safetyTimer);
+              loadFeed(false, {
+                preferences: prefsRef.current ?? getPendingDeckPreferences(),
+                allowEmptyPreferences: true,
+              });
+              return;
+            }
+
+            // Do not hold the first deck page behind remote pass-history sync.
+            // hydrateRemotePassedIds filters any newly-known passes when it returns.
+            void hydrateRemotePassedIds(userId);
           }
         } else {
-          // No active session — if we're in session-checking mode, fall back to onboarding.
+          // A completed local quiz can still provide a guest deck if the auth
+          // callback did not restore a session in this browser.
           if (appMode === "session-checking") {
             if (safetyTimer) clearTimeout(safetyTimer);
-            setAppMode("onboarding");
+            if (localStorage.getItem("cardmatch:pending_swipes")) {
+              loadFeed(false, {
+                preferences: getPendingDeckPreferences(),
+                allowEmptyPreferences: true,
+              });
+            } else {
+              setAppMode("onboarding");
+            }
             return;
           }
         }
       } catch {
         if (signal.aborted) return;
         // Network error — fall through with localStorage data.
-        // Surface onboarding so the user isn't stuck on a spinner.
         profileCheckResultRef.current = "error";
         if (safetyTimer) clearTimeout(safetyTimer);
         if (appMode === "session-checking") {
-          setAppMode("onboarding");
+          if (
+            currentUserIdRef.current ||
+            localStorage.getItem("cardmatch:pending_swipes")
+          ) {
+            loadFeed(false, {
+              preferences: getAuthDeckFallbackPreferences(),
+              allowEmptyPreferences: true,
+            });
+          } else {
+            setAppMode("onboarding");
+          }
           return;
         }
       }
@@ -1233,31 +1373,51 @@ export default function App() {
   }, []);
 
   // ── Onboarding completion ───────────────────────────────────────────────────
+  async function getSessionWithin(timeoutMs = 5000) {
+    if (!supabase) return null;
+
+    let timer: number | null = null;
+    const timedOut = new Promise<null>((resolve) => {
+      timer = window.setTimeout(() => resolve(null), timeoutMs);
+    });
+    const sessionPromise = supabase.auth.getSession()
+      .then(({ data }) => data.session)
+      .catch(() => null);
+    const session = await Promise.race([sessionPromise, timedOut]);
+    if (timer !== null) window.clearTimeout(timer);
+    return session;
+  }
+
   async function handleOnboardingComplete(swipes: SwipeRecord[]) {
+    // SIGNED_IN and getSession/INITIAL_SESSION can observe the same pending quiz
+    // during an auth return. Only the first observer may start its save request.
+    if (onboardingCompletionStartedRef.current) return;
+    onboardingCompletionStartedRef.current = true;
+
     localStorage.setItem(ONBOARDING_KEY, "1");
     if (!currentUserIdRef.current) {
       localStorage.setItem(GUEST_PROFILE_PENDING_KEY, "1");
     }
     setAppMode("feed-loading");
+    let onboardingTimeout: number | null = null;
 
     try {
       // The local API uses this ID for its service-role upsert. Guests send
       // null and continue using local-only preferences.
       let userId = currentUserIdRef.current;
       let accessToken: string | null = null;
-      if (!userId && supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        userId = session?.user?.id ?? null;
-        accessToken = session?.access_token ?? null;
-      } else if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        accessToken = session?.access_token ?? null;
+      if (supabase) {
+        const session = await getSessionWithin();
+        if (!userId) userId = session?.user?.id ?? null;
+        if (session?.user?.id === userId) accessToken = session.access_token ?? null;
       }
       if (userId) {
         // Stage the quiz before any network call. Failed writes remain in the
         // user-scoped local queue and retry during the next profile flush.
         void saveQuizToSupabase(userId, swipes, prefsRef.current);
       }
+      const controller = new AbortController();
+      onboardingTimeout = window.setTimeout(() => controller.abort(), 25000);
       const res = await fetch(`${API_BASE}/api/onboarding/complete`, {
         method:  "POST",
         headers: {
@@ -1265,14 +1425,18 @@ export default function App() {
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         },
         body:    JSON.stringify({ onboardingSwipes: swipes, userId }),
+        signal: controller.signal,
       });
       const data = await res.json();
+      window.clearTimeout(onboardingTimeout);
+      onboardingTimeout = null;
       if (!res.ok) throw new Error(data?.error || `Onboarding save failed with HTTP ${res.status}`);
 
       if (data.preferences) {
         // 1. Persist preferences locally
         localStorage.setItem(PREFS_KEY, JSON.stringify(data.preferences));
         prefsRef.current = data.preferences;
+        activeFeedPreferencesRef.current = data.preferences;
         setPrefs(data.preferences);
 
         // 2. Persist explicit preferences to Supabase immediately so
@@ -1306,9 +1470,14 @@ export default function App() {
       setDeckResetKey((k) => k + 1);
       setAppMode("feed");
     } catch (err) {
+      if (onboardingTimeout !== null) window.clearTimeout(onboardingTimeout);
       console.warn("[onboarding/complete] failed:", err);
-      setFeedError(true);
-      setAppMode("feed");
+      // The public feed can still serve a useful deck when onboarding's profile
+      // request is slow. Keep the pending swipe list intact for a later sync.
+      loadFeed(false, {
+        preferences: getAuthDeckFallbackPreferences(),
+        allowEmptyPreferences: true,
+      });
     }
   }
 

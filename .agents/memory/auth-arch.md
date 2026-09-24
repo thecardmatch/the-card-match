@@ -24,14 +24,21 @@ Auth is handled entirely by the **Supabase JS client SDK** on the frontend. Ther
 ## Onboarding + OAuth redirect flow
 1. User completes the 20-card quiz → `AuthModal` appears
 2. User clicks Google → pending swipes saved to `cardmatch:pending_swipes` in localStorage → Supabase redirects to Google
-3. Google redirects back to `window.location.origin` → Supabase client auto-parses the URL tokens
-4. `supabase.auth.onAuthStateChange` fires with `SIGNED_IN` in `App.tsx`
-5. App stores user profile to `cardmatch:user` localStorage, retrieves pending swipes, calls `handleOnboardingComplete`
+3. Google redirects back to the configured app URL → Supabase client restores the session from the callback
+4. On a full reload, `INITIAL_SESSION` / `getSession()` drives recovery; `SIGNED_IN` handles in-place sign-ins
+5. App stores the user identity locally and reconciles pending swipes/profile data before showing the account state
 
 ## Magic link flow
 1. User enters email in `AuthModal` → `supabase.auth.signInWithOtp(...)` → success message shown
-2. User clicks link in email → lands at `window.location.origin` → Supabase client picks up the token
-3. `onAuthStateChange` fires with `SIGNED_IN` → same handler as above
+2. User clicks link in email → lands at the configured app URL → Supabase client picks up the token
+3. `INITIAL_SESSION` / `getSession()` handles a full reload; `SIGNED_IN` handles an in-place session change
+
+## Redirect-return recovery
+OAuth and magic-link returns remount the app, so recovery must handle `INITIAL_SESSION` and `getSession()` rather than depending on a fresh `SIGNED_IN` event. Keep quiz swipes until their profile save succeeds. If the authenticated profile check is unavailable, show a temporary deck based on the pending quiz or curated fallback; do not persist that fallback or overwrite an unverified remote profile.
+
+**Why:** A slow profile/pass-history read after a valid login can otherwise return the user to onboarding or leave the deck waiting even though the public feed can load.
+
+**How to apply:** Keep auth callbacks synchronous and defer Supabase reads/writes until after they return. Bound auth/profile and onboarding requests, load a public deck from local choices when safe, reconcile remote pass IDs in the background, and filter any cards already passed when that data arrives.
 
 ## Env vars (public, not secrets)
 - `VITE_SUPABASE_URL` — set in Replit shared env vars + `.env.production`
