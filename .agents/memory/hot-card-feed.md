@@ -26,3 +26,9 @@ Category decks search their supplied player, character, and card terms individua
 **Why:** Full category rosters need useful coverage without creating hundreds of Browse calls per feed request, and legacy labels must not split a user's combined category preference.
 
 **How to apply:** Keep the bounded OR-query behavior and the existing price, seller, high-end eligibility, junk, and physical-card filters when changing category discovery.
+
+Subject interleaving is constrained by its distribution: repeats are avoidable only when the largest subject group can be separated by the remaining cards. A simple “pick the next different subject” swap can still exhaust alternate groups too early.
+
+**Why:** Randomized stress tests found adjacent duplicates in otherwise feasible decks with a naive swap-next-distinct pass.
+
+**How to apply:** After shuffling, select the largest remaining subject group other than the previous one; treat cards with no known subject as distinct separators, and accept a repeat only when no alternative remains.

@@ -1071,11 +1071,30 @@ function forceHD(url) {
 }
 
 // Shared item mapper for feed endpoints
+function getFeedSubject(item) {
+  const directSubject = [item?.playerName, item?.searchSubject, item?.player]
+    .find((value) => typeof value === "string" && value.trim());
+  if (directSubject) return directSubject.trim();
+
+  const subjectAspect = (Array.isArray(item?.localizedAspects) ? item.localizedAspects : [])
+    .find((aspect) => [
+      "player", "player/athlete", "athlete", "character", "character name",
+      "pokemon", "pokemon name", "subject",
+    ].includes(String(aspect?.name || "").trim().toLowerCase()));
+  const aspectValue = Array.isArray(subjectAspect?.value)
+    ? subjectAspect.value[0]
+    : subjectAspect?.value;
+  if (typeof aspectValue === "string" && aspectValue.trim()) return aspectValue.trim();
+
+  return extractPlayer(item?.title || "") || "";
+}
+
 function mapFeedItem(item, catHints = []) {
   const engagementDataAvailable = hasEngagementCount(item);
   const watchCount = item.watchCount || 0;
   const bidCount   = item.bidCount   || 0;
   const viewCount  = item.viewCount  || 0;
+  const playerName = getFeedSubject(item);
   const mapped = {
     id:              item.itemId,
     name:            item.title || "Unknown Card",
@@ -1094,6 +1113,7 @@ function mapFeedItem(item, catHints = []) {
     engagementScore: viewCount + (watchCount * 2) + (bidCount * 3),
     condition:       item.condition || "",
     listingType:     (item.buyingOptions || []).includes("AUCTION") ? "Auction" : "Buy It Now",
+    playerName,
   };
   const tags = cardFeatures(mapped);
   const era = ["vintage", "modern", "current"].find((value) => tags.includes(value)) || "modern";
@@ -1301,31 +1321,32 @@ function shuffleArray(array) {
 }
 
 function getDeckSubject(card) {
-  const subject = card?.playerName ?? card?.searchSubject ?? card?.player;
+  const subject = [card?.playerName, card?.searchSubject, card?.player]
+    .find((value) => typeof value === "string" && value.trim());
   return typeof subject === "string" ? subject.trim().toLocaleLowerCase() : "";
 }
 
 function interleaveDeck(cards) {
   const shuffled = shuffleArray([...cards]);
+  const buckets = new Map();
+  shuffled.forEach((card, index) => {
+    const subject = getDeckSubject(card);
+    const key = subject ? `subject:${subject}` : `unknown:${index}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(card);
+  });
+
   const result = [];
+  let previousKey = null;
 
-  while (shuffled.length > 0) {
-    const current = shuffled.shift();
-    const currentSubject = getDeckSubject(current);
-    const lastSubject = getDeckSubject(result[result.length - 1]);
-
-    if (currentSubject && lastSubject === currentSubject && shuffled.length > 0) {
-      const distinctIndex = shuffled.findIndex((card) => {
-        const subject = getDeckSubject(card);
-        return subject && subject !== currentSubject;
-      });
-      if (distinctIndex !== -1) {
-        result.push(shuffled.splice(distinctIndex, 1)[0]);
-        shuffled.unshift(current);
-        continue;
-      }
-    }
-    result.push(current);
+  while (result.length < shuffled.length) {
+    const remaining = [...buckets.entries()].filter(([, bucket]) => bucket.length > 0);
+    const available = remaining.filter(([key]) => key !== previousKey);
+    const candidates = available.length ? available : remaining;
+    candidates.sort((a, b) => b[1].length - a[1].length);
+    const [key, bucket] = candidates[0];
+    result.push(bucket.pop());
+    previousKey = key;
   }
   return result;
 }
@@ -1435,7 +1456,8 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
-    return res.json({ items: engaged.slice(0, returnCount).map(canonicalFeedItem) });
+    const finalCards = engaged.slice(0, returnCount).map(canonicalFeedItem);
+    return res.json({ items: interleaveDeck(finalCards) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });
