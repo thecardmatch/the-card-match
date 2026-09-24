@@ -8,9 +8,8 @@ export const COLLECTION_CATEGORIES = [
   "Soccer",
   "F1",
   "WWE",
-  "MMA",
+  "MMA/Boxing",
   "Golf",
-  "Boxing",
   "Yu-Gi-Oh!",
   "One Piece",
   "Disney Lorcana",
@@ -28,15 +27,31 @@ const CATEGORY_TAGS: Record<CollectionCategory, string> = {
   Soccer: "soccer",
   F1: "f1",
   WWE: "wwe",
-  MMA: "mma",
+  "MMA/Boxing": "mma-boxing",
   Golf: "golf",
-  Boxing: "boxing",
   "Yu-Gi-Oh!": "yu-gi-oh",
   "One Piece": "one-piece",
   "Disney Lorcana": "disney-lorcana",
 };
 
+export function normalizeCollectionCategory(category: string): string {
+  const normalized = category.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (normalized === "mma" || normalized === "boxing" || normalized === "mma-boxing") {
+    return "MMA/Boxing";
+  }
+  return category.trim();
+}
+
+export function normalizeCollectionCategories(categories: readonly unknown[]): string[] {
+  return [...new Set(
+    categories
+      .filter((category): category is string => typeof category === "string" && category.trim().length > 0)
+      .map(normalizeCollectionCategory),
+  )];
+}
+
 export function categoryTag(category: string): string {
-  return CATEGORY_TAGS[category as CollectionCategory] ??
-    category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const normalizedCategory = normalizeCollectionCategory(category);
+  return CATEGORY_TAGS[normalizedCategory as CollectionCategory] ??
+    normalizedCategory.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

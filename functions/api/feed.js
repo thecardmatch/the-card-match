@@ -3,6 +3,7 @@ import {
   enrichFeedItemsWithEngagement, isSuppliesCategory, CATEGORY_FEED_CONFIG, CATEGORY_TAG_MAP,
 } from "../_shared/ebay.js";
 import { isJunk } from "../_shared/recommendationEngine.js";
+import { selectCategoryTermBatches } from "../_shared/categorySearchTerms.js";
 import {
   FALLBACK_CATEGORIES, canonicalFeedItem, hotPriceFilter,
   hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards, PLAYER_QUERY_TERMS,
@@ -61,19 +62,23 @@ export async function onRequestGet({ env, request }) {
         }));
       }
     } else {
+      const searchLimit = Math.max(20, Math.ceil(count / selected.length));
+      const termBatches = selectCategoryTermBatches(selected, offset, count, searchLimit);
       await Promise.all(selected.map(async (category) => {
         const cfg = CATEGORY_FEED_CONFIG[category];
-        if (!cfg) return;
-          const searches = [ebaySearch(
-            token,
-            cfg.catTerm,
-            "bestMatch",
-            hotPriceFilter(),
-            null,
-            cfg.categoryId,
-            Math.max(20, Math.ceil(count / selected.length)),
-            offset,
-          )];
+        const batch = termBatches[category];
+        if (!cfg || !batch?.terms.length) return;
+        const searches = [ebaySearch(
+          token,
+          "",
+          "bestMatch",
+          hotPriceFilter(),
+          null,
+          cfg.categoryId,
+          searchLimit,
+          batch.offset,
+          batch.terms,
+        )];
         for (const result of await Promise.allSettled(searches)) {
           if (result.status !== "fulfilled") continue;
           if (result.value?.rateLimited) {

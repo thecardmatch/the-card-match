@@ -15,13 +15,19 @@ import {
   isSuppliesCategory,
   CATEGORY_FEED_CONFIG,
 } from "../../_shared/ebay.js";
-import { FALLBACK_CATEGORIES, buildHotSearchQuery, canonicalFeedItem, hasHighEndSignal, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, sortHotCards } from "../../_shared/hotCards.js";
+import { selectCategoryTermBatches } from "../../_shared/categorySearchTerms.js";
+import { FALLBACK_CATEGORIES, canonicalFeedItem, hasHighEndSignal, hotPriceFilter, meetsHotCardFloor, passesHotEngagement, sortHotCards } from "../../_shared/hotCards.js";
 import { isJunk } from "../../_shared/recommendationEngine.js";
 
 export { _cors as onRequestOptions };
 
 function canonicalCategory(category) {
-  return { MTG: "Magic: The Gathering", Racing: "F1" }[String(category)] || String(category);
+  return {
+    MTG: "Magic: The Gathering",
+    Racing: "F1",
+    MMA: "MMA/Boxing",
+    Boxing: "MMA/Boxing",
+  }[String(category)] || String(category);
 }
 
 export async function onRequestPost(context) {
@@ -144,19 +150,23 @@ export async function onRequestPost(context) {
       : FALLBACK_CATEGORIES;
     const token    = await getEbayToken(env);
     const allItems = [];
+    const searchLimit = Math.max(20, Math.ceil(40 / fetchCategories.length));
+    const termBatches = selectCategoryTermBatches(fetchCategories, 0, 40, searchLimit);
     await Promise.all(
       fetchCategories.map(async (category) => {
         const cfg = CATEGORY_FEED_CONFIG[category];
-        if (!cfg) return;
+        const batch = termBatches[category];
+        if (!cfg || !batch?.terms.length) return;
         const searches = [ebaySearch(
           token,
-           cfg.catTerm,
+          "",
           "endingSoonest",
           hotPriceFilter(),
           null,
           cfg.categoryId,
-          Math.max(20, Math.ceil(40 / fetchCategories.length)),
-          0,
+          searchLimit,
+          batch.offset,
+          batch.terms,
         )];
 
         const settled = await Promise.allSettled(searches);

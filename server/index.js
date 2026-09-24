@@ -6,10 +6,11 @@ import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
 import {
-  FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildHotSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
+  FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
   hotPriceFilter, hotSellerFeedbackFilter,
   hasHighEndSignal, meetsHotCardFloor, passesHotEngagement, sortHotCards, PLAYER_QUERY_TERMS, HOT_EXCLUSIONS,
 } from "../functions/_shared/hotCards.js";
+import { selectCategoryTermBatches } from "../functions/_shared/categorySearchTerms.js";
 
 if (!globalThis.WebSocket) {
   globalThis.WebSocket = WebSocket;
@@ -587,15 +588,19 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
     }
   }
 
-  const targetedQueries = Array.isArray(queryTerms) && queryTerms.length
-    ? queryTerms.map((term) => [q?.trim(), String(term).trim(), HOT_EXCLUSIONS].filter(Boolean).join(" "))
+  const normalizedQueryTerms = Array.isArray(queryTerms)
+    ? queryTerms.map((term) => String(term).trim()).filter(Boolean)
+    : [];
+  const targetedQueries = normalizedQueryTerms.length
+    ? normalizedQueryTerms.map((term) => [q?.trim(), term, HOT_EXCLUSIONS].filter(Boolean).join(" "))
     : null;
-  const allPrimaryQueries = q?.trim()
-    ? (targetedQueries || buildStrictSearchQueries(q, categoryId))
-      .map((query) => `${query} ${BULK_EXCLUSION}`)
-    : [""];
-  const queryWindowSize = Array.isArray(queryTerms) && queryTerms.length
-    ? Math.min(queryTerms.length, allPrimaryQueries.length)
+  const allPrimaryQueries = targetedQueries
+    ? targetedQueries.map((query) => `${query} ${BULK_EXCLUSION}`)
+    : q?.trim()
+      ? buildStrictSearchQueries(q, categoryId).map((query) => `${query} ${BULK_EXCLUSION}`)
+      : [""];
+  const queryWindowSize = targetedQueries
+    ? Math.min(targetedQueries.length, allPrimaryQueries.length)
     : Math.min(3, allPrimaryQueries.length);
   const queryGroup = Math.floor(Math.max(0, offset) / Math.max(1, limit));
   const queryStart = allPrimaryQueries.length
@@ -609,7 +614,7 @@ async function ebaySearch(token, q, sortVal, filterStr, aspectFilter, categoryId
   const mergedIds = new Set();
   let firstResponse = null;
   let wasRateLimited = false;
-  const responses = Array.isArray(queryTerms) && queryTerms.length
+  const responses = targetedQueries
     ? await Promise.all(primaryQueries.map((primaryQuery) => requestSearch(primaryQuery)))
     : [];
   if (!responses.length) {
@@ -1024,21 +1029,20 @@ app.get("/api/onboarding", (_req, res) => {
 // catTerm is the base query; feed selection uses explicit categories plus fixed
 // high-end card quality signals. It does not learn from feed swipes.
 const CATEGORY_FEED_CONFIG = {
-  Football: { categoryId: "215", catTerm: "football trading card", minPrice: 20 },
-  Basketball: { categoryId: "214", catTerm: "basketball trading card", minPrice: 20 },
-  Baseball: { categoryId: "213", catTerm: "baseball trading card", minPrice: 20 },
-  Hockey: { categoryId: "216", catTerm: "hockey trading card", minPrice: 20 },
-  Pokemon: { categoryId: "183050", catTerm: "pokemon trading card", minPrice: 20 },
-  "Magic: The Gathering": { categoryId: "19107", catTerm: "magic the gathering trading card", minPrice: 20 },
-  Soccer: { categoryId: "183444", catTerm: "soccer trading card", minPrice: 20 },
-  F1: { categoryId: null, catTerm: "formula 1 f1 trading card", minPrice: 20 },
-  WWE: { categoryId: null, catTerm: "wwe wrestling trading card", minPrice: 20 },
-  MMA: { categoryId: null, catTerm: "mma ufc trading card", minPrice: 20 },
-  Golf: { categoryId: null, catTerm: "golf trading card", minPrice: 20 },
-  Boxing: { categoryId: null, catTerm: "boxing trading card", minPrice: 20 },
-  "Yu-Gi-Oh!": { categoryId: null, catTerm: "yu-gi-oh trading card", minPrice: 20 },
-  "One Piece": { categoryId: null, catTerm: "one piece trading card", minPrice: 20 },
-  "Disney Lorcana": { categoryId: null, catTerm: "disney lorcana trading card", minPrice: 20 },
+  Football: { categoryId: "215", minPrice: 20 },
+  Basketball: { categoryId: "214", minPrice: 20 },
+  Baseball: { categoryId: "213", minPrice: 20 },
+  Hockey: { categoryId: "216", minPrice: 20 },
+  Pokemon: { categoryId: "183050", minPrice: 20 },
+  "Magic: The Gathering": { categoryId: "19107", minPrice: 20 },
+  Soccer: { categoryId: "183444", minPrice: 20 },
+  F1: { categoryId: "261328", minPrice: 20 },
+  WWE: { categoryId: "261328", minPrice: 20 },
+  "MMA/Boxing": { categoryId: "261328", minPrice: 20 },
+  Golf: { categoryId: "261328", minPrice: 20 },
+  "Yu-Gi-Oh!": { categoryId: null, minPrice: 20 },
+  "One Piece": { categoryId: null, minPrice: 20 },
+  "Disney Lorcana": { categoryId: null, minPrice: 20 },
 };
 
 // ── LEGACY PLAYLIST CONFIG (kept for /api/playlist only — do NOT use for feed) ──
@@ -1104,7 +1108,12 @@ const CAT_TAG_TO_CONFIG_OB = {
   mtg:        "MTG",       racing:     "Racing",      popculture: "PopCulture",
 };
 const canonicalOnboardingCategory = (category) =>
-  ({ MTG: "Magic: The Gathering", Racing: "F1" }[String(category)] || String(category));
+  ({
+    MTG: "Magic: The Gathering",
+    Racing: "F1",
+    MMA: "MMA/Boxing",
+    Boxing: "MMA/Boxing",
+  }[String(category)] || String(category));
 
 app.post("/api/onboarding/complete", async (req, res) => {
       try {
@@ -1204,19 +1213,23 @@ app.post("/api/onboarding/complete", async (req, res) => {
         const fetchCategories = selectedCategories.length > 0 ? selectedCategories : FALLBACK_CATEGORIES;
         const token    = await getEbayToken();
         const allItems = [];
+        const searchLimit = Math.max(20, Math.ceil(40 / fetchCategories.length));
+        const termBatches = selectCategoryTermBatches(fetchCategories, 0, 40, searchLimit);
         await Promise.all(
           fetchCategories.map(async (category) => {
             const cfg = CATEGORY_FEED_CONFIG[category];
-            if (!cfg) return;
+            const batch = termBatches[category];
+            if (!cfg || !batch?.terms.length) return;
             const searches = [ebaySearch(
               token,
-              buildHotSearchQuery(cfg.catTerm),
+              "",
               "endingSoonest",
               hotPriceFilter(),
               null,
               cfg.categoryId,
-              Math.max(20, Math.ceil(40 / fetchCategories.length)),
-              0,
+              searchLimit,
+              batch.offset,
+              batch.terms,
             )];
             const settled = await Promise.allSettled(searches);
             for (const r of settled) {
@@ -1260,8 +1273,9 @@ const CAT_TAG_TO_CONFIG_FEED = {
   soccer:     "Soccer",
   pokemon:    "Pokemon",
   mtg: "Magic: The Gathering", "magic-the-gathering": "Magic: The Gathering",
-  f1: "F1", "formula-1": "F1", wwe: "WWE", mma: "MMA", golf: "Golf",
-  boxing: "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", yugioh: "Yu-Gi-Oh!",
+  f1: "F1", "formula-1": "F1", wwe: "WWE", mma: "MMA/Boxing",
+  "mma-boxing": "MMA/Boxing", boxing: "MMA/Boxing", golf: "Golf",
+  "yu-gi-oh": "Yu-Gi-Oh!", yugioh: "Yu-Gi-Oh!",
   "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
 };
 
@@ -1328,20 +1342,24 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
         }));
       }
     } else {
+      const searchLimit = Math.max(20, Math.ceil(returnCount / selectedCats.length));
+      const termBatches = selectCategoryTermBatches(selectedCats, ebayOffset, returnCount, searchLimit);
       await Promise.all(
         selectedCats.map(async (cat) => {
           const cfg = CATEGORY_FEED_CONFIG[cat];
-          if (!cfg) return;
-          const { catTerm, categoryId } = cfg;
+          const batch = termBatches[cat];
+          if (!cfg || !batch?.terms.length) return;
+          const { categoryId } = cfg;
           const searches = [ebaySearch(
             token,
-             catTerm,
-             "bestMatch",
-             hotPriceFilter(),
+            "",
+            "bestMatch",
+            hotPriceFilter(),
             null,
             categoryId,
-            Math.max(20, Math.ceil(returnCount / selectedCats.length)),
-            ebayOffset,
+            searchLimit,
+            batch.offset,
+            batch.terms,
           )];
           const settled = await Promise.allSettled(searches);
           for (const r of settled) {

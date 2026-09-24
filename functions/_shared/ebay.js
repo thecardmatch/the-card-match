@@ -145,15 +145,19 @@ export async function ebaySearch(
     }
   }
 
-  const targetedQueries = Array.isArray(queryTerms) && queryTerms.length
-    ? queryTerms.map((term) => [q?.trim(), String(term).trim(), HOT_EXCLUSIONS].filter(Boolean).join(" "))
+  const normalizedQueryTerms = Array.isArray(queryTerms)
+    ? queryTerms.map((term) => String(term).trim()).filter(Boolean)
+    : [];
+  const targetedQueries = normalizedQueryTerms.length
+    ? normalizedQueryTerms.map((term) => [q?.trim(), term, HOT_EXCLUSIONS].filter(Boolean).join(" "))
     : null;
-  const allPrimaryQueries = q?.trim()
-    ? (targetedQueries || buildStrictSearchQueries(q, categoryId))
-      .map((query) => `${query} ${BULK_EXCLUSION}`)
-    : [""];
-  const queryWindowSize = Array.isArray(queryTerms) && queryTerms.length
-    ? Math.min(queryTerms.length, allPrimaryQueries.length)
+  const allPrimaryQueries = targetedQueries
+    ? targetedQueries.map((query) => `${query} ${BULK_EXCLUSION}`)
+    : q?.trim()
+      ? buildStrictSearchQueries(q, categoryId).map((query) => `${query} ${BULK_EXCLUSION}`)
+      : [""];
+  const queryWindowSize = targetedQueries
+    ? Math.min(targetedQueries.length, allPrimaryQueries.length)
     : Math.min(3, allPrimaryQueries.length);
   const queryGroup = Math.floor(Math.max(0, offset) / Math.max(1, limit));
   const queryStart = allPrimaryQueries.length
@@ -167,7 +171,7 @@ export async function ebaySearch(
   const mergedIds = new Set();
   let firstResponse = null;
   let wasRateLimited = false;
-  const responses = Array.isArray(queryTerms) && queryTerms.length
+  const responses = targetedQueries
     ? await Promise.all(primaryQueries.map((primaryQuery) => requestSearch(primaryQuery)))
     : [];
   if (!responses.length) {
@@ -266,26 +270,26 @@ export const CATEGORY_TAG_MAP = {
   "baseball": "Baseball", "football": "Football", "basketball": "Basketball",
   "hockey": "Hockey", "pokemon": "Pokemon", "magic-the-gathering": "Magic: The Gathering",
   "mtg": "Magic: The Gathering", "soccer": "Soccer", "f1": "F1",
-  "formula-1": "F1", "wwe": "WWE", "mma": "MMA", "golf": "Golf",
-  "boxing": "Boxing", "yu-gi-oh": "Yu-Gi-Oh!", "yugioh": "Yu-Gi-Oh!",
+  "formula-1": "F1", "wwe": "WWE", "mma": "MMA/Boxing",
+  "mma-boxing": "MMA/Boxing", "boxing": "MMA/Boxing", "golf": "Golf",
+  "yu-gi-oh": "Yu-Gi-Oh!", "yugioh": "Yu-Gi-Oh!",
   "one-piece": "One Piece", "disney-lorcana": "Disney Lorcana",
 };
 export const CATEGORY_FEED_CONFIG = {
-  Football: { categoryId: "215", catTerm: "football trading card", minPrice: 20 },
-  Basketball: { categoryId: "214", catTerm: "basketball trading card", minPrice: 20 },
-  Baseball: { categoryId: "213", catTerm: "baseball trading card", minPrice: 20 },
-  Hockey: { categoryId: "216", catTerm: "hockey trading card", minPrice: 20 },
-  Pokemon: { categoryId: "183050", catTerm: "pokemon trading card", minPrice: 20 },
-  "Magic: The Gathering": { categoryId: "19107", catTerm: "magic the gathering trading card", minPrice: 20 },
-  Soccer: { categoryId: "183444", catTerm: "soccer trading card", minPrice: 20 },
-  F1: { categoryId: null, catTerm: "formula 1 f1 trading card", minPrice: 20 },
-  WWE: { categoryId: null, catTerm: "wwe wrestling trading card", minPrice: 20 },
-  MMA: { categoryId: null, catTerm: "mma ufc trading card", minPrice: 20 },
-  Golf: { categoryId: null, catTerm: "golf trading card", minPrice: 20 },
-  Boxing: { categoryId: null, catTerm: "boxing trading card", minPrice: 20 },
-  "Yu-Gi-Oh!": { categoryId: null, catTerm: "yu-gi-oh trading card", minPrice: 20 },
-  "One Piece": { categoryId: null, catTerm: "one piece trading card", minPrice: 20 },
-  "Disney Lorcana": { categoryId: null, catTerm: "disney lorcana trading card", minPrice: 20 },
+  Football: { categoryId: "215", minPrice: 20 },
+  Basketball: { categoryId: "214", minPrice: 20 },
+  Baseball: { categoryId: "213", minPrice: 20 },
+  Hockey: { categoryId: "216", minPrice: 20 },
+  Pokemon: { categoryId: "183050", minPrice: 20 },
+  "Magic: The Gathering": { categoryId: "19107", minPrice: 20 },
+  Soccer: { categoryId: "183444", minPrice: 20 },
+  F1: { categoryId: "261328", minPrice: 20 },
+  WWE: { categoryId: "261328", minPrice: 20 },
+  "MMA/Boxing": { categoryId: "261328", minPrice: 20 },
+  Golf: { categoryId: "261328", minPrice: 20 },
+  "Yu-Gi-Oh!": { categoryId: null, minPrice: 20 },
+  "One Piece": { categoryId: null, minPrice: 20 },
+  "Disney Lorcana": { categoryId: null, minPrice: 20 },
 };
 
 // ── Item helpers ──────────────────────────────────────────────────────────────

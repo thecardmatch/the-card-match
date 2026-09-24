@@ -20,3 +20,9 @@ The initial `SwipeDeck` is mounted underneath the feed-loading overlay. Its low-
 **Why:** A successful API response and rendered card titles do not prove the deck is usable when the fixed loading overlay still covers the viewport.
 
 **How to apply:** For cold-start deep links, verify the first deck request uses offset 0, cards are visible, and the full-screen loading overlay is absent.
+
+Category decks search their supplied player, character, and card terms individually and merge results server-side. Rotate bounded batches of eight terms, increasing only enough to give each selected category a term and capping at fourteen; advance eBay offsets after cycling through the term lists. Do not fall back to a broad category search for these batches. Canonicalize legacy MMA and Boxing selections to MMA/Boxing.
+
+**Why:** Full category rosters need useful coverage without creating hundreds of Browse calls per feed request, and legacy labels must not split a user's combined category preference.
+
+**How to apply:** Keep the bounded OR-query behavior and the existing price, seller, high-end eligibility, junk, and physical-card filters when changing category discovery.

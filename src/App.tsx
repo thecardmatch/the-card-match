@@ -7,7 +7,7 @@ import { SwipeDeck }      from "@/components/SwipeDeck";
 import { PreferencesModal } from "@/components/PreferencesModal";
 import { AccountModal } from "@/components/AccountModal";
 import type { TradingCard } from "@/data/pokemon";
-import { COLLECTION_CATEGORIES } from "@/data/collectionCategories";
+import { COLLECTION_CATEGORIES, normalizeCollectionCategories } from "@/data/collectionCategories";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
 const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
@@ -90,9 +90,11 @@ function normalizePreferences(value: unknown): Preferences {
   const parsed = (value && typeof value === "object" ? value : {}) as Partial<Preferences> & {
     topCategories?: string[];
   };
-  const selectedCategories = Array.isArray(parsed.selectedCategories)
-    ? parsed.selectedCategories
-    : (Array.isArray(parsed.topCategories) ? parsed.topCategories : []);
+  const selectedCategories = normalizeCollectionCategories(
+    Array.isArray(parsed.selectedCategories)
+      ? parsed.selectedCategories
+      : (Array.isArray(parsed.topCategories) ? parsed.topCategories : []),
+  );
   return {
     selectedCategories,
     preferenceMode: parsed.preferenceMode || (selectedCategories.length ? "selected" : "trending"),

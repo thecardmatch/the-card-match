@@ -1,6 +1,6 @@
 export type Category =
   | "Pokemon" | "Basketball" | "Baseball" | "Football" | "Hockey" | "Soccer"
-  | "Formula 1" | "F1" | "WWE" | "MMA" | "Golf" | "Boxing"
+  | "Formula 1" | "F1" | "WWE" | "MMA/Boxing" | "Golf"
   | "Magic: The Gathering" | "Yu-Gi-Oh!" | "One Piece" | "Disney Lorcana"
   | string;
 export type ConditionFilter = "Raw" | "Grade 7" | "Grade 8" | "Grade 9" | "Grade 10";

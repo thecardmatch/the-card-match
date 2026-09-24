@@ -134,6 +134,50 @@ test("separate high-end term results are merged with OR semantics", async () => 
   assert.ok(requestedQueries.every((query) => !/\bOR\b/.test(query)));
 });
 
+test("category names are searched as separate OR branches without a broad fallback", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedQueries = [];
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    requestedQueries.push({
+      query: parsed.searchParams.get("q") || "",
+      filter: parsed.searchParams.get("filter") || "",
+      categoryId: parsed.searchParams.get("category_ids") || "",
+    });
+    const termId = requestedQueries.at(-1).query.startsWith("Josh Allen") ? "josh" : "cook";
+    return new Response(JSON.stringify({
+      itemSummaries: [{ itemId: "shared" }, { itemId: termId }],
+    }), { status: 200 });
+  };
+
+  try {
+    const result = await ebaySearch(
+      "test-token",
+      "",
+      "bestMatch",
+      "price:[25.00..],priceCurrency:USD",
+      null,
+      "215",
+      20,
+      0,
+      ["Josh Allen", "James Cook"],
+    );
+    assert.deepEqual(result.itemSummaries.map((item) => item.itemId), ["shared", "josh", "cook"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestedQueries.length, 2);
+  assert.match(requestedQueries[0].query, /^Josh Allen /);
+  assert.match(requestedQueries[1].query, /^James Cook /);
+  assert.ok(requestedQueries.every(({ query }) => !/\bOR\b/.test(query)));
+  assert.ok(requestedQueries.every(({ query }) => !query.includes("James Cook") || query.startsWith("James Cook")));
+  assert.ok(requestedQueries.every(({ query }) => !query.includes("Josh Allen") || query.startsWith("Josh Allen")));
+  assert.ok(requestedQueries.every(({ filter }) =>
+    filter.includes("price:[25.00..]") && filter.includes("sellerFeedbackScore:[500..]")));
+  assert.ok(requestedQueries.every(({ categoryId }) => categoryId === "215"));
+});
+
 test("targeted player searches use the compact modifier set", async () => {
   const originalFetch = globalThis.fetch;
   const requestedQueries = [];
