@@ -8,14 +8,16 @@ type Props = {
   cards: TradingCard[];
   onLike: (card: TradingCard) => void;
   onPass?: (card: TradingCard) => void;
-  onBuy: (card: TradingCard) => void;
+  onBuy: (card: TradingCard) => boolean;
+  onBuyFallback: (card: TradingCard) => void;
   onNeedMore: () => void;
   isLoadingMore: boolean;
   resetKey: number;
 };
 
-export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingMore, resetKey }: Props) {
+export function SwipeDeck({ cards, onLike, onPass, onBuy, onBuyFallback, onNeedMore, isLoadingMore, resetKey }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [buyFallbackCardId, setBuyFallbackCardId] = useState<string | null>(null);
 
   useEffect(() => setCurrentIndex(0), [resetKey]);
 
@@ -28,10 +30,22 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
 
   const handleSwipe = (direction: "left" | "right" | "up") => {
     const card = cards[currentIndex];
-    if (!card) return;
+    if (!card) return false;
     if (direction === "right") onLike(card);
     if (direction === "left")  onPass?.(card);
-    if (direction === "up")    onBuy(card);
+    if (direction === "up" && !onBuy(card)) {
+      setBuyFallbackCardId(card.id);
+      return false;
+    }
+    setBuyFallbackCardId(null);
+    setCurrentIndex((prev) => prev + 1);
+    return true;
+  };
+
+  const handleBuyFallback = (card: TradingCard) => {
+    if (buyFallbackCardId !== card.id) return;
+    onBuyFallback(card);
+    setBuyFallbackCardId(null);
     setCurrentIndex((prev) => prev + 1);
   };
 
@@ -61,6 +75,9 @@ export function SwipeDeck({ cards, onLike, onPass, onBuy, onNeedMore, isLoadingM
                   zIndex={visible.length - stackOffset}
                   offset={stackOffset}
                   onSwipe={handleSwipe}
+                  showBuyFallback={buyFallbackCardId === card.id}
+                  onFallbackOpen={() => handleBuyFallback(card)}
+                  onDismissFallback={() => setBuyFallbackCardId(null)}
                 />
               );
             })}

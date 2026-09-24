@@ -1578,11 +1578,16 @@ export default function App() {
     recordFeedSwipe(card, "PASS");
   }
 
-  function handleBuy(card: TradingCard) {
-    const url = ensureEbayAffiliateUrl(card.itemWebUrl, card.title);
-    openEbayInNewTab(url);
+  function recordCardBuy(card: TradingCard) {
     markCardSwiped(card.id);
     recordFeedSwipe(card, "BUY");
+  }
+
+  function handleBuy(card: TradingCard): boolean {
+    const url = ensureEbayAffiliateUrl(card.itemWebUrl, card.title);
+    if (!openEbayInNewTab(url)) return false;
+    recordCardBuy(card);
+    return true;
   }
 
   function handleRemove(cardId: string) {
@@ -1660,7 +1665,7 @@ export default function App() {
 
         <header className="h-16 px-3 sm:px-4 md:px-5 border-b border-border flex items-center justify-between bg-background z-50 shrink-0">
           <div className="flex items-center gap-2 sm:gap-3">
-            <img src="/logo.png" alt="The Card Match" className="w-10 h-10 rounded-xl shadow-md" />
+            <img src="/logo-ui.webp" alt="The Card Match" className="w-10 h-10 rounded-xl shadow-md" />
             <div>
               <h1 className="text-sm font-black uppercase tracking-tighter leading-none text-foreground">
                 THE CARD MATCH
@@ -1758,6 +1763,7 @@ export default function App() {
                 onLike={handleLike}
                 onPass={handlePass}
                 onBuy={handleBuy}
+                onBuyFallback={recordCardBuy}
                 onNeedMore={handleNeedMore}
                 isLoadingMore={isLoadingMore}
                 resetKey={deckResetKey}

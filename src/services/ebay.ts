@@ -44,24 +44,19 @@ export function ensureEbayAffiliateUrl(url: string | null | undefined, fallbackN
   }
 }
 
-export function openEbayInNewTab(url: string): void {
-  const openedWindow = window.open(url, "_blank");
-  if (openedWindow) {
-    openedWindow.opener = null;
-    return;
+export function openEbayInNewTab(url: string): boolean {
+  try {
+    const openedWindow = window.open(url, "_blank");
+    if (!openedWindow) return false;
+    try {
+      openedWindow.opener = null;
+    } catch {
+      // Some browsers make the opener read-only after beginning navigation.
+    }
+    return true;
+  } catch {
+    return false;
   }
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.target = "_blank";
-  link.rel = "noopener noreferrer";
-  link.setAttribute("aria-hidden", "true");
-  link.tabIndex = -1;
-  link.style.position = "fixed";
-  link.style.left = "-9999px";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
 }
 
 export function buildEbayQuery(prefs: Preferences): string {

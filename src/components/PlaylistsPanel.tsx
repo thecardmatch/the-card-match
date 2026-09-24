@@ -158,7 +158,7 @@ export function PlaylistsPanel({ mode, onLoadPlaylist }: Props) {
       {/* ── Header ── */}
       <div className="px-5 pt-6 pb-5 shrink-0">
         <div className="flex items-center gap-3 mb-4">
-          <img src="/logo.png" alt="Logo" className="w-11 h-11 rounded-2xl shadow-lg" />
+          <img src="/logo-ui.webp" alt="Logo" className="w-11 h-11 rounded-2xl shadow-lg" />
           <div>
             <h1 className="text-lg font-black uppercase tracking-tight text-foreground leading-none">
               The Card Match

@@ -2,17 +2,21 @@ import { forwardRef, useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
 import type { TradingCard } from "@/data/pokemon";
 import { useCountdown } from "@/hooks/useCountdown";
+import { ensureEbayAffiliateUrl } from "@/services/ebay";
 
 type Props = {
   card: TradingCard;
   isTop: boolean;
   zIndex: number;
   offset: number;
-  onSwipe: (direction: "left" | "right" | "up") => void;
+  onSwipe: (direction: "left" | "right" | "up") => boolean | void;
+  showBuyFallback?: boolean;
+  onFallbackOpen?: () => void;
+  onDismissFallback?: () => void;
 };
 
 export const SwipeCard = forwardRef<HTMLDivElement, Props>(
-  ({ card, isTop, zIndex, offset, onSwipe }: Props, ref) => {
+  ({ card, isTop, zIndex, offset, onSwipe, showBuyFallback = false, onFallbackOpen, onDismissFallback }: Props, ref) => {
     const x = useMotionValue(0);
     const y = useMotionValue(0);
     const pointerStart = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -156,7 +160,7 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
         onDragEnd={handleDragEnd}
         transition={{ type: "spring", stiffness: 300, damping: 25 }}
       >
-        <div className="h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
+        <div className="relative h-full w-full rounded-[2rem] bg-card border border-card-border shadow-2xl flex flex-col overflow-hidden">
 
           {/* Optimized Image Stage Viewport */}
           <div
@@ -236,6 +240,37 @@ export const SwipeCard = forwardRef<HTMLDivElement, Props>(
               )}
             </div>
           </div>
+
+          {showBuyFallback && (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 p-6"
+              role="dialog"
+              aria-label="Open this listing on eBay"
+            >
+              <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-5 text-center shadow-2xl">
+                <h3 className="text-base font-black text-card-foreground">Tap to open eBay</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Your browser blocked the new tab from the swipe. Use this link to open the listing.
+                </p>
+                <a
+                  href={ensureEbayAffiliateUrl(card.itemWebUrl, card.title)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={onFallbackOpen}
+                  className="mt-4 flex min-h-12 items-center justify-center rounded-xl bg-primary px-4 py-3 text-sm font-bold text-primary-foreground"
+                >
+                  Open listing on eBay
+                </a>
+                <button
+                  type="button"
+                  onClick={onDismissFallback}
+                  className="mt-3 min-h-10 px-4 text-sm font-semibold text-muted-foreground"
+                >
+                  Keep browsing
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </motion.div>
     );
