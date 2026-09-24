@@ -14,3 +14,9 @@ Targeted player searches must complete within a bounded request path: run the mo
 **Why:** Five serial Browse calls plus broad enrichment made deep-linked visitors wait indefinitely even though the search itself was valid.
 
 **How to apply:** Treat targeted search latency as a product requirement. The browser should also timeout into the existing retry state rather than leaving a full-screen loading spinner forever.
+
+The initial `SwipeDeck` is mounted underneath the feed-loading overlay. Its low-card prefetch must wait until the first page has supplied cards; otherwise an append request can win the shared loading guard, populate cards behind the overlay, and leave the app stuck in feed-loading.
+
+**Why:** A successful API response and rendered card titles do not prove the deck is usable when the fixed loading overlay still covers the viewport.
+
+**How to apply:** For cold-start deep links, verify the first deck request uses offset 0, cards are visible, and the full-screen loading overlay is absent.
