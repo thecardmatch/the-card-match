@@ -24,6 +24,13 @@ The Cloudflare Pages project `the-card-match` is connected to GitHub's `main` br
 
 **How to apply:** For production-targeted fixes, verify the current asset on thecardmatch.com and verify a new Pages deployment after the branch update; state clearly when a workspace change still needs publishing.
 
+## Stalled Pages builds
+If a Git-triggered Pages build remains `active` but its deployment logs stop after repository cloning, treat it as stalled before dependency installation rather than as an application compile failure. Retrying creates a separate deployment and may leave it queued behind the stalled attempt. If that happens, first confirm the stalled deployment has not been published and identify the current successful deployment. Ask the user before deleting only the unpublished stalled attempt; this removes that attempt's deployment record and logs but can unblock its queued retry.
+
+**Why:** An API retry alone did not free the active build slot; deleting the verified non-live attempt allowed the retry to build and publish.
+
+**How to apply:** Check deployment stages, history logs, and the current live asset before retrying or deleting. Never delete the latest successful/aliased deployment; after recovery, confirm Pages reports success and the custom domain serves the new bundle.
+
 ## Key CF vs Node.js differences
 - `Buffer.from(x).toString('base64')` → `btoa(x)`
 - `process.env.X` → `context.env.X` (passed as param to helpers)
