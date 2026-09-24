@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyEngagementDetails, ebaySearch } from "./ebay.js";
+import {
+  applyEngagementDetails,
+  buildAffiliateSearchUrl,
+  buildAffiliateUrl,
+  ebaySearch,
+  EPN_CAMP_ID,
+} from "./ebay.js";
 
 const unavailable = {
   id: "v1|1|0",
@@ -39,6 +45,25 @@ test("unavailable engagement preserves the Best Match fallback state", () => {
   }]);
   assert.equal(item.engagementDataAvailable, false);
   assert.equal(item.engagementScore, 0);
+});
+
+test("affiliate listing URLs always use the configured campaign ID", () => {
+  const directUrl = buildAffiliateUrl({
+    itemWebUrl: "https://www.ebay.com/itm/123?campid=incorrect&other=value",
+  });
+  const affiliateUrl = buildAffiliateUrl({
+    itemAffiliateWebUrl: "https://www.ebay.com/itm/456?campid=incorrect",
+  });
+
+  assert.equal(new URL(directUrl).searchParams.get("campid"), EPN_CAMP_ID);
+  assert.equal(new URL(affiliateUrl).searchParams.get("campid"), EPN_CAMP_ID);
+  assert.equal(new URL(directUrl).searchParams.has("other"), false);
+});
+
+test("affiliate search URLs preserve the search term and include the campaign ID", () => {
+  const url = new URL(buildAffiliateSearchUrl("Pikachu & Charizard"));
+  assert.equal(url.searchParams.get("_nkw"), "Pikachu & Charizard");
+  assert.equal(url.searchParams.get("campid"), EPN_CAMP_ID);
 });
 
 test("physical-card exclusions remain negative eBay phrases", async () => {

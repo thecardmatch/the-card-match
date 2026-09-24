@@ -2,7 +2,11 @@
  * GET /api/onboarding
  * Returns the 20 static onboarding cards for the Card DNA Quiz.
  */
-import { jsonResponse, onRequestOptions as _cors } from "../../_shared/ebay.js";
+import {
+  buildAffiliateSearchUrl,
+  jsonResponse,
+  onRequestOptions as _cors,
+} from "../../_shared/ebay.js";
 
 export { _cors as onRequestOptions };
 
@@ -41,7 +45,7 @@ export async function onRequestGet() {
     currentBid:      c.current_bid ?? 0,
     currency:        "USD",
     grade:           c.grade || "Raw",
-    ebayUrl:         `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(c.name)}`,
+    ebayUrl:         buildAffiliateSearchUrl(c.name),
     endTime:         null,
     listingType:     c.listing_type === "Auction" ? "Auction" : "Buy It Now",
     watchCount:      0,

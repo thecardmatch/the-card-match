@@ -1,3 +1,5 @@
+import { buildAffiliateUrl } from "../../_shared/ebay.js";
+
 export async function onRequest(context) {
   const { env, request } = context;
   const { searchParams } = new URL(request.url);
@@ -90,7 +92,11 @@ export async function onRequest(context) {
         image: item.image?.imageUrl?.replace(/s-l\d+\./, "s-l1600.") || "",
         currentBid: item.currentBidPrice ? parseFloat(item.currentBidPrice.value) : parseFloat(item.price?.value || 0),
         endTime: item.itemEndDate,
-        ebayUrl: `https://www.ebay.com/itm/${itemId}?mkcid=1&mkrid=711-53200-19255-0&siteid=0&campid=5339150952&customid=thecardmatch&toolid=10001&mkevt=1`
+        ebayUrl: buildAffiliateUrl({
+          itemId,
+          itemWebUrl: item.itemWebUrl,
+          itemAffiliateWebUrl: item.itemAffiliateWebUrl,
+        })
       };
     });
 

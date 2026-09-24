@@ -23,7 +23,25 @@ export async function searchCards(prefs: Preferences, offset: number): Promise<T
 }
 
 export function getAffiliateUrl(name: string): string {
-  return `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(name)}`;
+  const url = new URL("https://www.ebay.com/sch/i.html");
+  url.searchParams.set("_nkw", name);
+  url.searchParams.set("campid", "5339150952");
+  return url.toString();
+}
+
+export function ensureEbayAffiliateUrl(url: string | null | undefined, fallbackName: string): string {
+  if (!url) return getAffiliateUrl(fallbackName);
+
+  try {
+    const ebayUrl = new URL(url);
+    if (ebayUrl.hostname !== "ebay.com" && !ebayUrl.hostname.endsWith(".ebay.com")) {
+      return getAffiliateUrl(fallbackName);
+    }
+    ebayUrl.searchParams.set("campid", "5339150952");
+    return ebayUrl.toString();
+  } catch {
+    return getAffiliateUrl(fallbackName);
+  }
 }
 
 export function buildEbayQuery(prefs: Preferences): string {

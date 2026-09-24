@@ -8,6 +8,7 @@ import { PreferencesModal } from "@/components/PreferencesModal";
 import { AccountModal } from "@/components/AccountModal";
 import { normalizeTradingCard, type TradingCard } from "@/data/pokemon";
 import { COLLECTION_CATEGORIES, normalizeCollectionCategories } from "@/data/collectionCategories";
+import { ensureEbayAffiliateUrl } from "@/services/ebay";
 // Production is served alongside the API/Pages Functions, so always use
 // same-origin requests there. A dev-only override is allowed for local setups.
 const API_BASE = import.meta.env.PROD ? "" : (import.meta.env.VITE_API_URL || "");
@@ -1580,11 +1581,8 @@ export default function App() {
   function handleBuy(card: TradingCard) {
     markCardSwiped(card.id);
     recordFeedSwipe(card, "BUY");
-    const url = card.itemWebUrl;
-    if (!url) return;
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    if (isMobile) { window.location.href = url; }
-    else { const tab = window.open(url, "_blank", "noopener,noreferrer"); if (!tab) window.location.href = url; }
+    const url = ensureEbayAffiliateUrl(card.itemWebUrl, card.title);
+    window.open(url, "_blank", "noopener,noreferrer");
   }
 
   function handleRemove(cardId: string) {

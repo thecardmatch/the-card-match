@@ -6,3 +6,4 @@
 - [User quiz profile uniqueness](user-quiz-results-constraint.md) — Existing Supabase projects may lack the user_id uniqueness required by conflict-safe profile RPCs.
 - [Hot-card feed strategy](hot-card-feed.md) — Feed selection is category-only with a $25 floor and engagement ordering; swipe history must not change weights.
 - [Git sync workflow](git-sync-workflow.md) — Keep Replit's local history aligned with GitHub main; Pages deploys automatically after the user syncs.
+- [eBay outbound links](ebay-outbound-links.md) — Keep the fixed affiliate campaign ID on eBay URLs and open destinations without replacing the app tab.

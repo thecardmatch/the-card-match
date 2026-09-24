@@ -323,24 +323,33 @@ export function detectGrade(title) {
   return "Raw";
 }
 
+const EPN_PARAMS = {
+  campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
+  mkrid: "711-53200-19255-0", customid: "thecardmatch",
+};
+
+export function buildAffiliateSearchUrl(query) {
+  const url = new URL("https://www.ebay.com/sch/i.html");
+  url.searchParams.set("_nkw", query);
+  Object.entries(EPN_PARAMS).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
+}
+
 export function buildAffiliateUrl(item) {
-  if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
-  const AFF = {
-    campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
-    mkrid: "711-53200-19255-0", customid: "thecardmatch",
-  };
-  const rawUrl = item.itemWebUrl || "";
+  const rawUrl = item.itemAffiliateWebUrl || item.itemWebUrl || "";
   if (rawUrl) {
     try {
       const u = new URL(rawUrl);
-      const clean = new URL(`${u.origin}${u.pathname}`);
-      Object.entries(AFF).forEach(([k, v]) => clean.searchParams.set(k, v));
-      return clean.toString();
+      const affiliateUrl = item.itemAffiliateWebUrl
+        ? u
+        : new URL(`${u.origin}${u.pathname}`);
+      Object.entries(EPN_PARAMS).forEach(([key, value]) => affiliateUrl.searchParams.set(key, value));
+      return affiliateUrl.toString();
     } catch { /* fall through */ }
   }
   if (item.itemId) {
     const d = new URL(`https://www.ebay.com/itm/${item.itemId}`);
-    Object.entries(AFF).forEach(([k, v]) => d.searchParams.set(k, v));
+    Object.entries(EPN_PARAMS).forEach(([key, value]) => d.searchParams.set(key, value));
     return d.toString();
   }
   return "";

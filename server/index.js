@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "fs";
 import { createClient } from "@supabase/supabase-js";
 import WebSocket from "ws";
 import { cardFeatures, isJunk } from "./recommendationEngine.js";
-import { extractPlayer } from "../functions/_shared/ebay.js";
+import { buildAffiliateSearchUrl, extractPlayer } from "../functions/_shared/ebay.js";
 import { interleaveDeck, selectDiverseCards } from "../functions/_shared/deckOrdering.js";
 import {
   FALLBACK_CATEGORIES, buildFallbackSearchQuery, buildStrictSearchQueries, canonicalFeedItem,
@@ -395,16 +395,17 @@ function detectGrade(title) {
 
 // ─── eBay Affiliate Link Builder Engine ──────────────────────────────────────
 function buildAffiliateUrl(item) {
-  if (item.itemAffiliateWebUrl) return item.itemAffiliateWebUrl;
   const AFF = { campid: EPN_CAMP_ID, toolid: "10001", mkevt: "1", mkcid: "1",
                 mkrid: "711-53200-19255-0", customid: "thecardmatch" };
-  const rawUrl = item.itemWebUrl || "";
+  const rawUrl = item.itemAffiliateWebUrl || item.itemWebUrl || "";
   if (rawUrl) {
     try {
       const u = new URL(rawUrl);
-      const clean = new URL(`${u.origin}${u.pathname}`);
-      Object.entries(AFF).forEach(([k, v]) => clean.searchParams.set(k, v));
-      return clean.toString();
+      const affiliateUrl = item.itemAffiliateWebUrl
+        ? u
+        : new URL(`${u.origin}${u.pathname}`);
+      Object.entries(AFF).forEach(([k, v]) => affiliateUrl.searchParams.set(k, v));
+      return affiliateUrl.toString();
     } catch { /* fall through */ }
   }
   if (item.itemId) {
@@ -1010,7 +1011,7 @@ app.get("/api/onboarding", (_req, res) => {
       currentBid:      c.current_bid ?? 0,
       currency:        "USD",
       grade:           c.grade || "Raw",
-      ebayUrl:         `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(c.name)}`,
+       ebayUrl:         buildAffiliateSearchUrl(c.name),
       endTime:         null,
       listingType:     c.listing_type === "Auction" ? "Auction" : "Buy It Now",
       watchCount:      0,

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Heart, ExternalLink, X, Trash2, ArrowUpDown, Check, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TradingCard } from "@/data/pokemon";
-import { getAffiliateUrl } from "@/services/ebay";
+import { ensureEbayAffiliateUrl } from "@/services/ebay";
 import { InstallPrompt } from "./InstallPrompt";
 import { useCountdown } from "@/hooks/useCountdown";
 
@@ -27,7 +27,7 @@ type Props = {
 
 function WatchlistItem({ card, onRemove }: { card: TradingCard; onRemove: (id: string) => void }) {
   const countdown = useCountdown(card.endTime);
-  const ebayLink = card.itemWebUrl || getAffiliateUrl(card.title);
+  const ebayLink = ensureEbayAffiliateUrl(card.itemWebUrl, card.title);
 
   return (
     <div className="flex items-center gap-2 p-2 rounded-xl bg-sidebar-accent/40">
