@@ -1317,9 +1317,13 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
   try {
     const {
       seen = "", seenIds = "", swipedIds = "", count = "20",
-       categories = "", offset = "0",
+       categories = "", offset = "0", previousTitle = "", previousSubject = "",
     } = req.query;
     const searchQuery = String(req.query.q || req.query.player || "").trim();
+    const previousCard = {
+      title: String(previousTitle).slice(0, 240),
+      player: String(previousSubject).slice(0, 120),
+    };
 
     const seenSet = new Set([
       ...parseFeedIds(seen),
@@ -1419,7 +1423,7 @@ app.get(["/api/feed", "/api/deck"], async (req, res) => {
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     console.log(`[feed] hot pool: ${fresh.length} fresh → engaged ${engaged.length} → returning ${Math.min(engaged.length, returnCount)}`);
     const finalCards = engaged.slice(0, returnCount).map(canonicalFeedItem);
-    return res.json({ items: interleaveDeck(finalCards) });
+    return res.json({ items: interleaveDeck(finalCards, previousCard) });
   } catch (err) {
     console.error("[feed]", err.message);
     return res.status(500).json({ items: [], error: err.message });

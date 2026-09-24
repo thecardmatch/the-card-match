@@ -1,3 +1,53 @@
+import { CATEGORY_SEARCH_TERMS } from "./categorySearchTerms.js";
+
+const IGNORED_SUBJECT_TERMS = new Set([
+  "1/1",
+  "alpha",
+  "antiquities",
+  "arabian nights",
+  "beta",
+  "d23",
+  "enchanted",
+  "expeditions",
+  "first chapter",
+  "first edition",
+  "iconic",
+  "judge promo",
+  "legends",
+  "masterpiece",
+  "promo",
+  "reserved list",
+  "serialized",
+  "special guest",
+  "the dark",
+  "unlimited",
+]);
+
+function normalizeSubjectText(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const knownSubjects = Object.values(CATEGORY_SEARCH_TERMS)
+  .flat()
+  .map((term) => ({
+    term: normalizeSubjectText(term),
+    original: term,
+  }))
+  .filter(({ term }) => term && !IGNORED_SUBJECT_TERMS.has(term))
+  .sort((a, b) => b.term.length - a.term.length);
+
+function getKnownTitleSubject(card) {
+  const title = normalizeSubjectText(card?.title || card?.name);
+  if (!title) return "";
+  const paddedTitle = ` ${title} `;
+  return knownSubjects.find(({ term }) => paddedTitle.includes(` ${term} `))?.term || "";
+}
+
 export function shuffleArray(array) {
   for (let index = array.length - 1; index > 0; index--) {
     const swapIndex = Math.floor(Math.random() * (index + 1));
@@ -6,13 +56,24 @@ export function shuffleArray(array) {
   return array;
 }
 
-function getDeckSubject(card) {
-  const subject = [card?.playerName, card?.searchSubject, card?.player]
+export function getDeckSubject(card) {
+  // Search-term matching takes priority because legacy title parsing can
+  // mistake a brand such as "Panini Prizm" for the player.
+  const titleSubject = getKnownTitleSubject(card);
+  if (titleSubject) return titleSubject;
+
+  const subject = [
+    card?.playerName,
+    card?.searchSubject,
+    card?.characterName,
+    card?.pokemonName,
+    card?.player,
+  ]
     .find((value) => typeof value === "string" && value.trim());
-  return typeof subject === "string" ? subject.trim().toLowerCase() : "";
+  return typeof subject === "string" ? normalizeSubjectText(subject) : "";
 }
 
-export function interleaveDeck(cards) {
+export function interleaveDeck(cards, previousCard = null) {
   const shuffled = shuffleArray([...cards]);
   const buckets = new Map();
 
@@ -25,7 +86,8 @@ export function interleaveDeck(cards) {
   });
 
   const result = [];
-  let previousKey = null;
+  const previousSubject = getDeckSubject(previousCard);
+  let previousKey = previousSubject ? `subject:${previousSubject}` : null;
 
   while (result.length < shuffled.length) {
     const remaining = [...buckets.entries()].filter(([, bucket]) => bucket.length > 0);

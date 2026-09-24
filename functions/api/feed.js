@@ -35,6 +35,10 @@ export async function onRequestGet({ env, request }) {
   const count = Math.min(Math.max(parseInt(params.get("count") || "20") || 20, 1), 40);
   const offset = Math.max(0, parseInt(params.get("offset") || "0", 10) || 0);
   const searchQuery = (params.get("q") || params.get("player") || "").trim();
+  const previousCard = {
+    title: (params.get("previousTitle") || "").slice(0, 240),
+    player: (params.get("previousSubject") || "").slice(0, 120),
+  };
   const requested = (params.get("categories") || "").split(",").map(normalizeCategory).filter(Boolean);
   const selected = [...new Set(requested.length ? requested : FALLBACK_CATEGORIES)];
   try {
@@ -115,7 +119,7 @@ export async function onRequestGet({ env, request }) {
     const enriched = await enrichFeedItemsWithEngagement(token, fresh.slice(0, enrichmentLimit));
     const engaged = enriched.filter(passesHotEngagement).sort(sortHotCards);
     const finalCards = engaged.slice(0, count).map(canonicalFeedItem);
-    return jsonResponse({ items: interleaveDeck(finalCards) });
+    return jsonResponse({ items: interleaveDeck(finalCards, previousCard) });
   } catch (error) {
     console.error("[feed]", error.message);
     return jsonResponse({ items: [], error: error.message }, 500);

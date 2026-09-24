@@ -31,4 +31,4 @@ Subject interleaving is constrained by its distribution: repeats are avoidable o
 
 **Why:** Randomized stress tests found adjacent duplicates in otherwise feasible decks with a naive swap-next-distinct pass.
 
-**How to apply:** After shuffling, select the largest remaining subject group other than the previous one; treat cards with no known subject as distinct separators, and accept a repeat only when no alternative remains.
+**How to apply:** After shuffling, select the largest remaining subject group other than the previous one; match known category search terms against titles before trusting fallback name extraction, use unknown-subject cards as distinct separators, and carry the previous page's last card into the next page's ordering. Accept a repeat only when no alternative remains.

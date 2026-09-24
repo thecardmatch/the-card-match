@@ -1,14 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { interleaveDeck, shuffleArray } from "./deckOrdering.js";
+import { getDeckSubject, interleaveDeck, shuffleArray } from "./deckOrdering.js";
 
 function hasAdjacentDuplicateSubject(cards) {
-  const subjectOf = (card) =>
-    String(card.playerName || card.searchSubject || card.player || "").trim().toLowerCase();
   return cards.some((card, index) => {
     if (index === 0) return false;
-    const subject = subjectOf(card);
-    return subject && subject === subjectOf(cards[index - 1]);
+    const subject = getDeckSubject(card);
+    return subject && subject === getDeckSubject(cards[index - 1]);
   });
 }
 
@@ -64,4 +62,43 @@ test("interleaveDeck keeps unknown-subject cards distinct and preserves impossib
   ]);
   assert.equal(impossible.length, 7);
   assert.equal(new Set(impossible.map((card) => card.id)).size, 7);
+});
+
+test("interleaveDeck recognizes subjects from titles instead of grouping by card brand", () => {
+  const cards = [
+    ...Array.from({ length: 7 }, (_, index) => ({
+      id: `pikachu-${index}`,
+      title: `2024 Pokemon Pikachu ex Illustration Rare PSA 10 ${index}`,
+      player: "Pokemon PSA",
+    })),
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `allen-${index}`,
+      title: `2024 Panini Prizm Josh Allen Downtown PSA 10 ${index}`,
+      player: "Panini Prizm",
+    })),
+    ...Array.from({ length: 5 }, (_, index) => ({
+      id: `cook-${index}`,
+      title: `2024 Panini Select James Cook Rookie Auto ${index}`,
+      player: "Panini Select",
+    })),
+  ];
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = interleaveDeck(cards);
+    assert.equal(result.length, cards.length);
+    assert.equal(new Set(result.map((card) => card.id)).size, cards.length);
+    assert.equal(hasAdjacentDuplicateSubject(result), false);
+  }
+});
+
+test("interleaveDeck avoids repeating the previous page's last subject when possible", () => {
+  const previousCard = { title: "2024 Pokemon Pikachu ex PSA 10" };
+  const result = interleaveDeck([
+    { id: "pikachu-1", title: "2024 Pokemon Pikachu ex PSA 10" },
+    { id: "pikachu-2", title: "2023 Pokemon Pikachu VMAX PSA 10" },
+    { id: "charizard-1", title: "2024 Pokemon Charizard ex PSA 10" },
+    { id: "umbreon-1", title: "2024 Pokemon Umbreon VMAX PSA 10" },
+  ], previousCard);
+
+  assert.notEqual(getDeckSubject(result[0]), getDeckSubject(previousCard));
 });

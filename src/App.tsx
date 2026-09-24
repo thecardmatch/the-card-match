@@ -295,6 +295,7 @@ function buildFeedUrl(
   preferences: Preferences | null,
   offset:      number,
   searchQuery: string,
+  previousCard: TradingCard | null,
 ): string {
   // Passed IDs have must-exclude priority: keep all of them (up to 200),
   // then fill remaining slots with recent seen-only IDs.
@@ -309,6 +310,12 @@ function buildFeedUrl(
     `&count=20` +
     `&offset=${Math.max(0, offset)}`
   );
+  if (previousCard) {
+    url += `&previousTitle=${encodeURIComponent(previousCard.title)}`;
+    if (previousCard.player) {
+      url += `&previousSubject=${encodeURIComponent(previousCard.player)}`;
+    }
+  }
   const activeSearchQuery = searchQuery.trim();
   if (activeSearchQuery) {
     url += `&q=${encodeURIComponent(activeSearchQuery)}`;
@@ -432,6 +439,7 @@ export default function App() {
             feedPreferences,
             pageOffset,
             searchTermRef.current,
+            append ? cards[cards.length - 1] ?? null : null,
           ), { signal: controller.signal });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
